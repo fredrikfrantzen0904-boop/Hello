@@ -78,13 +78,13 @@ dispositions:
   DI-22: {disposition: record, action: "D-018 extended: sessions request parameters through the coordinator; no freshness numbers are invented in Session 00"}
   DI-23: {disposition: record, action: "limitation documented in SystemClock and ARCHITECTURE; measured clock resolution is a deliverable of the S01 feed benchmark; open item U-08"}
   DI-24: {disposition: fix, action: "prefix-invariance comparison defined; a journal belongs to one run; RunContext; RunManifest contract"}
-  DI-25: {disposition: record, action: "storage encoding freedom stated; third-party allow-list per package and feature-dictionary format left to S01/S02 proposals (CR-003)"}
+  DI-25: {disposition: record, action: "storage encoding freedom stated; third-party allow-list per package proposed by each session with its first review package (dependency graph, third_party); feature-dictionary location and format are extension CX-20 (CR-008); the raw source timestamp with its offset and the broker's symbol name are kept by session 01 in its tick store, not in the Tick contract (CX-19)"}
   # ---------------------------------------------------------------- prediction / decision / learning lens
   PD-01: {disposition: fix, action: "Candidate.risk_unit_price defines 1 R; PlanScorer protocol and PlanEstimate for plan-level estimates"}
   PD-02: {disposition: fix, action: "opportunity_id (stable); alternative_group_id derived from it; alternative_group_id on RiskDecision and ENTRY orders; ledger enforces one executed alternative"}
   PD-03: {disposition: fix, action: "candidate_id includes opportunity (with horizon) and scoring model"}
   PD-04: {disposition: fix, action: "model_status on Candidate and TradePlan; ModelRegistry lookup by status; the PAPER/ACTIVE rule is open item U-17"}
-  PD-05: {disposition: record, action: "CR-003: Decision contract (S05) required before wave 3; only S04 emits Candidate records (section 1)"}
+  PD-05: {disposition: record, action: "CX-08 (CR-003): the Decision record is the first deliverable of session 05 and is consumed by sessions 09, 10 and 11, which write no code against it before it is integrated; it must hold one ranking pass with candidate-level rejections (must_define); only S04 emits Candidate records (section 1)"}
   PD-06: {disposition: record, action: "CR-003: Outcome / label contract required before S04 trains and S09 starts"}
   PD-07: {disposition: fix, action: "training_information_end_ns, embargo_ns, split_spec_sha256 on ModelVersion; Candidate.memory_cutoff_time_ns (prior-only invariant) and support_count; is_out_of_sample helper"}
   PD-08: {disposition: fix, action: "derived_from / replaces / rollback_of fields; validate_registry_history"}

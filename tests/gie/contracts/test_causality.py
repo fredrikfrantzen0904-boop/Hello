@@ -42,7 +42,7 @@ from tests.gie import samples
 T0 = samples.T0
 MS = NS_PER_MS
 SEC = NS_PER_SECOND
-OTHER_RUN_ID = identity.run_id("REPLAY", "1" * 64, "other")
+OTHER_RUN_ID = identity.run_id("REPLAY", "1" * 64)
 
 RULE_RUN = "same run"
 RULE_CREATED = "not created before"
@@ -303,9 +303,93 @@ def test_an_entry_order_that_outlives_its_approval_is_refused() -> None:
     # Section 3.3 names check_derivation for the whole chain
     # "entry order <= risk approval <= plan <= candidate <= every evidence it uses".
     decision = samples.risk_decision()
+    check_derivation(samples.order_event(valid_until_ns=decision.valid_until_ns), decision)
     order = samples.order_event(valid_until_ns=decision.valid_until_ns + 1)
-    with pytest.raises(ContractValidationError):
-        check_derivation(order, decision)  # type: ignore[arg-type]
+    error = _refused(order, decision)  # type: ignore[arg-type]
+    assert RULE_OUTLIVE in str(error.details["rule"])
+    assert error.details["input"] == "RiskDecision"
+
+
+# ============================================================ an order event as the derived record
+@pytest.mark.requirement("S00-ASG-23", "S10-ACC-02")
+def test_the_sample_entry_order_is_a_valid_derivation_of_its_plan_and_approval() -> None:
+    # Rework 2: check_derivation applies the applicable rules to an OrderEvent child; its creation
+    # instant is event_time_ns and it has no watermark of its own.
+    plan, decision = samples.trade_plan(), samples.risk_decision()
+    order = samples.order_event()
+    check_derivation(order, decision)
+    check_derivation(order, plan, decision)
+    # Created exactly when the approval became available: accepted.
+    check_derivation(
+        samples.order_event(
+            event_time_ns=decision.decision_time_ns, receive_time_ns=decision.decision_time_ns
+        ),
+        decision,
+    )
+
+
+@pytest.mark.requirement("S00-ASG-23", "S10-ACC-02", "COM-07")
+@pytest.mark.parametrize(
+    ("rule", "order", "source"),
+    [
+        pytest.param(
+            RULE_RUN,
+            samples.order_event,
+            lambda: samples.risk_decision(run_id=OTHER_RUN_ID),
+            id="other-run",
+        ),
+        pytest.param(
+            RULE_CREATED,
+            lambda: samples.order_event(event_time_ns=T0 - 1, receive_time_ns=T0 - 1),
+            samples.risk_decision,
+            id="sent-before-the-approval",
+        ),
+        pytest.param(
+            RULE_OUTLIVE,
+            lambda: samples.order_event(valid_until_ns=T0 + 30 * SEC + 1),
+            samples.risk_decision,
+            id="outlives-the-approval",
+        ),
+        pytest.param(
+            RULE_ORIGIN,
+            lambda: samples.order_event(data_origin=DataOrigin.HISTORICAL),
+            samples.risk_decision,
+            id="better-origin-than-the-approval",
+        ),
+    ],
+)
+def test_an_order_event_child_is_refused_by_each_applicable_rule(
+    rule: str, order: Callable[[], Any], source: Callable[[], Record]
+) -> None:
+    error = _refused(order(), source())
+    assert rule in str(error.details["rule"])
+    assert error.details["contract"] == "OrderEvent"
+
+
+@pytest.mark.requirement("S00-ASG-23", "S10-ACC-02")
+def test_the_watermark_rule_does_not_apply_to_an_order_event_child() -> None:
+    # A tick received at the creation instant: a produced record whose watermark lies before it is
+    # refused, an order event (no watermark of its own) created at that instant is not.
+    order = samples.order_event()
+    quote = samples.tick(receive_time_ns=order.event_time_ns, event_time_ns=T0)
+    check_derivation(order, quote)
+    error = _refused(_evidence_at(order.event_time_ns, order.event_time_ns - 1), quote)
+    assert RULE_WATERMARK in str(error.details["rule"])
+
+
+@pytest.mark.requirement("S00-ASG-23")
+@pytest.mark.parametrize(
+    "child",
+    [samples.tick, samples.clock_reading, samples.model_version, samples.run_manifest],
+    ids=["tick", "clock-reading", "model-version", "run-manifest"],
+)
+def test_only_a_produced_record_or_an_order_event_can_be_a_derived_record(
+    child: Callable[[], Record],
+) -> None:
+    with pytest.raises(ContractValidationError) as excinfo:
+        check_derivation(child(), samples.tick())  # type: ignore[arg-type]
+    assert "produced record or an order event" in str(excinfo.value.details["rule"])
+    assert excinfo.value.details["contract"] == type(child()).__name__
 
 
 # ============================================================ rule: origin not better than the inputs

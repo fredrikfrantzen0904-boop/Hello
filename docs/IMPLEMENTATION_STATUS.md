@@ -76,7 +76,7 @@ None.
 |---|---|---|---|---|
 | B-001 | blocker | OPEN | The existing system `D:\ftmo_eurusd` is not reachable from this session | S00-ASG-01, S00-ASG-02, S00-ASG-03, S00-ASG-04, S00-ASG-05, S00-ASG-06, S00-ASG-07, S00-ACC-05, S00-ACC-06, S00-DEL-04, G02-08, G02-09 |
 | CR-002 | change request | OPEN | Repository layout differs from the proposed paths | COM-03, S00-DEP-02, S12-DEP-02 |
-| CR-003 | change request | OPEN | Additional shared contracts are needed before later sessions can start | COM-06, S01-ASG-04, S01-ASG-05, S01-ASG-12, S07-ASG-15, S08-ASG-01, S08-ASG-02, S08-ACC-08, S02-DEP-01, S08-DEP-01, S09-DEP-01, S11-DEP-01 |
+| CR-003 | change request | OPEN | Additional shared contracts are needed by later sessions | COM-06, S01-ASG-04, S01-ASG-05, S01-ASG-12, S07-ASG-15, S08-ASG-01, S08-ASG-02, S08-ACC-08, S02-DEP-01, S08-DEP-01, S09-DEP-01, S11-DEP-01 |
 | CR-004 | change request | OPEN | Interpretations built into the contracts need confirmation | G04-10, G04-11, G05-03, M-AUTH-13 |
 | CR-005 | change request | OPEN | One shared policy for what may be done with a flagged tick | S01-ASG-06, S01-ASG-08, G03-12, G08-06, S06-ACC-03 |
 | CR-006 | change request | OPEN | Additions to the shared contracts beyond the nine named by the brief | S00-ASG-11, S00-ASG-12, S00-ASG-13, S00-ASG-14, S00-ASG-15, S00-ASG-16, S00-ASG-17, S00-ASG-18, S00-ASG-19, S00-ASG-25, COM-06 |

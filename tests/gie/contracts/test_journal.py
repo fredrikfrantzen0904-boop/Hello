@@ -7,6 +7,10 @@ Expected behaviour is taken from the specification, not from the implementation:
   record must pass before it is appended; "a refused record leaves the journal unchanged"; the
   durable ``FileJournal`` and the explicit repair of a torn last line), section 9.2 (sequence rules
   enforced through the ``LifecycleLedger`` by every journal) and section 5 (error semantics);
+* ``reviews/session_00/rework_2_change_notice.md`` section 3 (order of the checks, provenance
+  against the manifest, time rules with and without a clock, durable before visible, the failed
+  state, ``commit()``, the writer lock, ``open_for_restart``, ``JournalReader``) and section 14
+  (``samples.run_story()``);
 * the module and class docstrings of ``gie/contracts/journal.py`` and the ``RecordSink`` /
   ``RecordSource`` docstrings of ``gie/contracts/interfaces.py``;
 * owner specification G08 (persistent state, restart reconciliation, fail closed) and brief 10
@@ -21,31 +25,41 @@ files are written only below pytest's ``tmp_path``.
 from __future__ import annotations
 
 import dataclasses
+import os
 from collections.abc import Callable
 from decimal import Decimal as D
 from pathlib import Path
-from typing import Any
+from typing import IO, Any
 
 import pytest
 
+import gie.contracts.journal as journal_module
 from gie.contracts import identity
 from gie.contracts._spec import Record
 from gie.contracts.candidate import Candidate
-from gie.contracts.clock import ClockMode
+from gie.contracts.clock import ClockMode, ClockReading, ReplayClock, SystemClock
 from gie.contracts.codec import fingerprint, from_json, from_wire, to_json, to_wire
-from gie.contracts.common import NamedValue, RunMode
+from gie.contracts.common import DataOrigin, NamedValue, RunMode
 from gie.contracts.evidence import Evidence, PriceLevel
-from gie.contracts.journal import FileJournal, JournalEntry, MemoryJournal, repair_torn_tail
+from gie.contracts.journal import (
+    FileJournal,
+    JournalEntry,
+    JournalReader,
+    MemoryJournal,
+    repair_torn_tail,
+)
 from gie.contracts.model_version import ContractRef, ModelStatus, ModelVersion
 from gie.contracts.order_event import OrderEvent, OrderEventType, OrderState
 from gie.contracts.ordering import ordering_key, ordering_time_ns, stream_name
 from gie.contracts.position import Position
 from gie.contracts.risk_decision import RiskDecision
-from gie.contracts.run import RunManifest, RunRole
+from gie.contracts.run import RunManifest, RunModel, RunRole
 from gie.contracts.tick import Tick
 from gie.contracts.trade_plan import TradePlan
 from gie.core.canonical import canonical_dumps, strict_loads
+from gie.core.clock import PaperClock
 from gie.core.errors import (
+    ConfigError,
     ContractError,
     ContractValidationError,
     FutureDataError,
@@ -63,11 +77,10 @@ from tests.gie import samples
 T0 = samples.T0
 MS = NS_PER_MS
 SEC = NS_PER_SECOND
-OTHER_RUN_ID = identity.run_id("REPLAY", "1" * 64, "other")
-PAPER_RUN_ID = identity.run_id("PAPER", samples.CONFIG_SHA, "fixture-paper")
+OTHER_RUN_ID = identity.run_id("REPLAY", "1" * 64)
+PAPER_RUN_ID = samples.variants()["RunManifest"]["paper_primary"].run_id
 ENTRY_ORDER_ID = samples.order_event().client_order_id
 POSITION_ID = samples.position().position_id
-STOP_STREAM = "reflex.protection"
 
 
 # =========================================================================== builders (all synthetic)
@@ -94,43 +107,46 @@ def _other_evidence(seq: int, kind: str = "breakout", *, at: int = T0, **overrid
     return samples.evidence(**fields)
 
 
-def _restream(records: list[OrderEvent], producer: str) -> list[OrderEvent]:
-    """The same order events as the stream of another producer (seq 0, 1, 2, ...)."""
-    return [dataclasses.replace(record, producer=producer, seq=seq) for seq, record in enumerate(records)]
-
-
-def _stops() -> list[OrderEvent]:
-    return _restream(samples.protective_stop_lifecycle(), STOP_STREAM)
-
-
-def _decision_chain() -> list[Record]:
-    """Tick -> evidence -> candidate -> plan -> approval -> entry order, all at the sample instant."""
-    return [
-        samples.tick(),
-        samples.evidence(),
-        samples.candidate(),
-        samples.trade_plan(),
-        samples.risk_decision(),
-        *samples.order_lifecycle(),
-    ]
-
-
 def _run_records() -> list[Record]:
-    """A complete synthetic run in a valid publication order (24 records, manifest first)."""
-    positions = samples.position_lifecycle()
-    return [
-        samples.run_manifest(),
-        samples.clock_reading(),
-        *samples.model_lifecycle(),
-        *_decision_chain(),
-        _tick_at(1, T0 + 5 * SEC - MS),
-        positions[0],
-        *_stops(),
-        _tick_at(2, T0 + 60 * SEC - MS),
-        positions[1],
-        _tick_at(3, T0 + 300 * SEC - MS),
-        positions[2],
-    ]
+    """A complete synthetic run in a valid publication order (32 records, manifest first).
+
+    ``samples.run_story()`` (28 records) with the registry history of the sample model after the
+    manifest and a clock reading after the first tick.
+    """
+    story = samples.run_story()
+    return [story[0], *samples.model_lifecycle(), story[1], samples.clock_reading(), *story[2:]]
+
+
+RUN_LENGTH = 32
+#: Positions in ``_run_records`` (checked by ``test_the_positions_used_in_this_file``).
+ACTIVE_MODEL_LINE = 3
+FIRST_TICK_LINE = 4
+CLOCK_LINE = 5
+EVIDENCE_LINE = 6
+CANDIDATE_LINE = 7
+PLAN_LINE = 8
+DECISION_LINE = 9
+ENTRY_SUBMIT_LINE = 10
+FIRST_POSITION_LINE = 16
+VALUED_LINE = 22
+REDUCED_LINE = 26
+STOP_REQUEST_LINE = 27
+STOP_REPLACED_LINE = 28
+LAST_LINE = RUN_LENGTH - 1
+
+
+def _record(line: int) -> Record:
+    return _run_records()[line]
+
+
+def _prefix(line: int) -> list[Record]:
+    """The records of ``_run_records`` before *line*, without the manifest."""
+    return _run_records()[1:line]
+
+
+def _journal_before(line: int, *more: Record) -> MemoryJournal:
+    """A journal holding the run up to (excluding) *line*, then *more*."""
+    return _journal(*_prefix(line), *more)
 
 
 def _journal(*records: Record) -> MemoryJournal:
@@ -159,6 +175,7 @@ def _state(journal: MemoryJournal) -> tuple[Any, ...]:
         journal.manifest,
         journal.run_id,
         journal.tick_gaps,
+        journal.input_watermark_ns,
         ledger.open_orders(),
         ledger.order(ENTRY_ORDER_ID),
         ledger.position(POSITION_ID),
@@ -168,20 +185,26 @@ def _state(journal: MemoryJournal) -> tuple[Any, ...]:
 
 
 def _late_fill_report() -> OrderEvent:
-    """Another FILLED report for the sample entry order, which is already in its final state."""
+    """Another FILLED report for the sample entry order, which is already in its final state.
+
+    It comes in a stream of its own (seq 0) and before the order's expiry, so that the stream and
+    the order event itself are valid and only the lifecycle rule refuses it.
+    """
     filled = samples.order_lifecycle()[3]
+    late = T0 + 20 * SEC
     return dataclasses.replace(
         filled,
-        seq=4,
+        producer="execution.late",
+        seq=0,
         order_seq=4,
         order_event_id=identity.order_event_id(filled.client_order_id, 4),
-        event_time_ns=T0 + 400 * SEC,
-        receive_time_ns=T0 + 400 * SEC,
+        event_time_ns=late,
+        receive_time_ns=late,
     )
 
 
 def _future_evidence(seq: int = 1) -> Evidence:
-    """Evidence whose watermark lies after every tick of ``_run_records``."""
+    """Evidence whose watermark lies after every tick and clock reading of ``_run_records``."""
     return _other_evidence(seq, at=T0 + 400 * SEC, as_of_time_ns=T0 + 400 * SEC)
 
 
@@ -268,12 +291,25 @@ def test_a_journal_belongs_to_exactly_one_run() -> None:
     ids=lambda build: build.__name__,
 )
 def test_a_record_of_another_run_is_refused(build: Callable[..., Record]) -> None:
+    # Type and run are checked first: the foreign record is refused for its run, whatever else the
+    # journal would say about it (here: no input, no plan, no approval yet).
     journal = _journal()
     with pytest.raises(ContractValidationError) as excinfo:
         journal.publish(build(run_id=OTHER_RUN_ID))
     assert excinfo.value.details["run_id"] == OTHER_RUN_ID
     assert len(journal) == 1
-    assert journal.publish(build()) == 1
+    # The record of the run itself is accepted at its place in the run.
+    genuine = build()
+    line = next(
+        number
+        for number, record in enumerate(_run_records())
+        if stream_name(record) == stream_name(genuine) and type(record) is type(genuine)
+    )
+    journal = _journal_before(line)
+    record = _record(line)
+    with pytest.raises(ContractValidationError):
+        journal.publish(build(run_id=OTHER_RUN_ID))
+    assert journal.publish(record) == line
 
 
 @pytest.mark.requirement("S00-ASG-25", "M-AUTH-07")
@@ -341,9 +377,11 @@ def test_an_equal_record_built_again_is_the_same_record() -> None:
         pytest.param(
             samples.clock_reading, lambda: samples.clock_reading(monotonic_ns=1), id="clock-other-monotonic"
         ),
-        pytest.param(samples.evidence, lambda: _other_evidence(0), id="evidence-of-another-event"),
         pytest.param(
-            samples.risk_decision,
+            lambda: _record(EVIDENCE_LINE), lambda: _other_evidence(0), id="evidence-of-another-event"
+        ),
+        pytest.param(
+            lambda: _record(DECISION_LINE),
             lambda: samples.risk_decision(samples.trade_plan(variant=1)),
             id="approval-of-another-plan",
         ),
@@ -352,7 +390,8 @@ def test_an_equal_record_built_again_is_the_same_record() -> None:
 def test_different_content_at_a_journaled_stream_position_is_a_conflict(
     first: Callable[[], Record], second: Callable[[], Record]
 ) -> None:
-    journal = _journal(first())
+    line = next(n for n, record in enumerate(_run_records()) if record == first())
+    journal = _journal_before(line, first())
     before = _state(journal)
     assert stream_name(first()) == stream_name(second())
     assert fingerprint(first()) != fingerprint(second())
@@ -361,36 +400,32 @@ def test_different_content_at_a_journaled_stream_position_is_a_conflict(
     assert excinfo.value.code == "GIE.SEQ.CONFLICT"
     assert excinfo.value.details["stream"] == stream_name(first())
     assert _state(journal) == before
-    assert journal.publish(first()) == 1
+    assert journal.publish(first()) == len(journal) - 1
 
 
 @pytest.mark.requirement("S00-ASG-25")
 @pytest.mark.parametrize(
-    ("first", "second"),
+    ("line", "change"),
     [
-        pytest.param(
-            samples.evidence, lambda: samples.evidence(bullish_score=0.8), id="evidence-other-score"
-        ),
-        pytest.param(
-            samples.position, lambda: samples.position(mark_price=D("2650.70")), id="position-other-mark"
-        ),
-        pytest.param(
-            samples.order_event, lambda: samples.order_event(volume_lots=D("0.40")), id="order-other-volume"
-        ),
+        pytest.param(EVIDENCE_LINE, {"bullish_score": 0.8}, id="evidence-other-score"),
+        pytest.param(FIRST_POSITION_LINE, {"mark_price": D("2649.60")}, id="position-other-mark"),
+        pytest.param(ENTRY_SUBMIT_LINE, {"volume_lots": D("0.40")}, id="order-other-volume"),
     ],
 )
 def test_changed_content_of_a_journaled_lifecycle_record_is_a_conflict_too(
-    first: Callable[[], Record], second: Callable[[], Record]
+    line: int, change: dict[str, Any]
 ) -> None:
     # RecordSink: "different content at the same position raises SequenceConflictError".  The
     # stream sequence is checked before the lifecycle chain (journal check 2 before check 3), so a
     # second version of the record at an already journaled position is a conflict, whatever the
     # lifecycle rules would say about it.
-    journal = _journal(first())
+    first = _record(line)
+    second = dataclasses.replace(first, **change)
+    journal = _journal_before(line, first)
     before = _state(journal)
-    assert stream_name(first()) == stream_name(second())
+    assert stream_name(first) == stream_name(second)
     with pytest.raises(SequenceConflictError):
-        journal.publish(second())
+        journal.publish(second)
     assert _state(journal) == before
 
 
@@ -470,7 +505,11 @@ def test_an_older_tick_position_that_was_never_journaled_is_refused() -> None:
     ("first", "late"),
     [
         pytest.param(lambda: _tick_at(0, T0), lambda: _tick_at(1, T0 - 1), id="tick-receive-time"),
-        pytest.param(samples.evidence, lambda: _other_evidence(1, at=T0 - MS), id="evidence-decision-time"),
+        pytest.param(
+            lambda: _record(EVIDENCE_LINE),
+            lambda: _other_evidence(1, at=T0 - MS),
+            id="evidence-decision-time",
+        ),
         pytest.param(
             samples.clock_reading,
             lambda: samples.clock_reading(seq=1, wall_time_ns=T0 - 1),
@@ -478,7 +517,7 @@ def test_an_older_tick_position_that_was_never_journaled_is_refused() -> None:
         ),
         pytest.param(
             # Two different orders in one stream: the second request is older than the first.
-            lambda: samples.order_lifecycle()[0],
+            lambda: _record(ENTRY_SUBMIT_LINE),
             lambda: dataclasses.replace(
                 samples.protective_stop_lifecycle()[0], seq=1, event_time_ns=T0, receive_time_ns=T0
             ),
@@ -489,7 +528,8 @@ def test_an_older_tick_position_that_was_never_journaled_is_refused() -> None:
 def test_a_decreasing_ordering_time_within_a_stream_is_refused(
     first: Callable[[], Record], late: Callable[[], Record]
 ) -> None:
-    journal = _journal(first())
+    line = next((n for n, record in enumerate(_run_records()) if record == first()), 1)
+    journal = _journal_before(line, first())
     before = _state(journal)
     assert ordering_time_ns(late()) < ordering_time_ns(first())
     with pytest.raises(OutOfOrderError) as excinfo:
@@ -534,7 +574,7 @@ def test_streams_are_sequenced_independently() -> None:
     ("setup", "record"),
     [
         pytest.param(
-            lambda: [samples.order_lifecycle()[0]],
+            lambda: [*_prefix(ENTRY_SUBMIT_LINE), samples.order_lifecycle()[0]],
             lambda: samples.order_lifecycle()[2],
             id="gap-and-skipped-order-step",
         ),
@@ -562,10 +602,12 @@ REFUSALS: list[Any] = [
     pytest.param(lambda: _other_evidence(1, mode=RunMode.PAPER), ContractValidationError, id="another-mode"),
     pytest.param(lambda: samples.run_manifest(label="other"), SequenceConflictError, id="another-manifest"),
     pytest.param(
-        lambda: _tick_at(3, T0 + 300 * SEC - MS, bid=D("2650.11")), SequenceConflictError, id="conflict"
+        lambda: dataclasses.replace(_record(VALUED_LINE - 1), bid=D("2650.11")),
+        SequenceConflictError,
+        id="conflict",
     ),
     pytest.param(lambda: _other_evidence(5, at=T0 + 100 * SEC), SequenceGapError, id="gap"),
-    pytest.param(lambda: _tick_at(4, T0), OutOfOrderError, id="decreasing-ordering-time"),
+    pytest.param(lambda: _tick_at(6, T0), OutOfOrderError, id="decreasing-ordering-time"),
     pytest.param(_late_fill_report, IllegalTransitionError, id="event-after-terminal-order-state"),
     pytest.param(_future_evidence, FutureDataError, id="look-ahead"),
     pytest.param(
@@ -586,7 +628,7 @@ def test_a_refused_record_leaves_length_streams_and_ledger_unchanged(
     assert type(excinfo.value) is error
     assert _state(journal) == before
     # Nothing was half-recorded: the next valid records take the next positions.
-    assert journal.publish(_tick_at(4, T0 + 400 * SEC)) == len(_run_records())
+    assert journal.publish(_tick_at(6, T0 + 400 * SEC)) == len(_run_records())
     assert journal.publish(_future_evidence()) == len(_run_records()) + 1
 
 
@@ -662,12 +704,15 @@ def test_valid_lifecycle_chains_are_journaled_and_tracked_by_the_ledger() -> Non
     entry = ledger.order(ENTRY_ORDER_ID)
     assert entry is not None
     assert entry.order_state is OrderState.FILLED
-    stop = _stops()[3]
+    stop = _record(LAST_LINE - 1)  # the protective stop, filled at the end of the run
+    assert isinstance(stop, OrderEvent)
     assert ledger.order(stop.client_order_id) == stop
-    assert ledger.open_orders() == (stop,)
+    assert stop.order_state is OrderState.FILLED
+    assert ledger.open_orders() == ()
     position = ledger.position(POSITION_ID)
     assert position is not None
-    assert (position.revision, position.stop_price) == (2, D("2649.90"))
+    assert position == _record(LAST_LINE)
+    assert (position.revision, position.stop_price, position.volume_lots) == (4, D("2649.90"), D("0"))
     model = ledger.model(samples.MODEL_ID)
     assert model is not None
     assert model.status is ModelStatus.ACTIVE
@@ -682,41 +727,44 @@ def test_sample_order_and_stop_chains_form_one_publishable_stream() -> None:
     events = [*samples.order_lifecycle(), *samples.protective_stop_lifecycle()]
     assert {stream_name(event) for event in events} == {"order_event/execution.sim"}
     assert [event.seq for event in events] == list(range(8))
-    journal = _journal()
-    assert [journal.publish(event) for event in events] == list(range(1, 9))
+    # The entry order rests on a plan and its approval (rework 2: the ledger is referential).
+    journal = _journal_before(ENTRY_SUBMIT_LINE)
+    first = len(journal)
+    assert [journal.publish(event) for event in events] == list(range(first, first + 8))
 
 
 @pytest.mark.requirement("S00-ASG-25")
 def test_widening_a_protective_stop_by_replacement_is_refused() -> None:
-    stops = _stops()
-    journal = _journal(*samples.order_lifecycle(), stops[0], stops[1])
+    request, replaced = _record(STOP_REQUEST_LINE), _record(STOP_REPLACED_LINE)
+    assert isinstance(request, OrderEvent)
+    assert isinstance(replaced, OrderEvent)
+    journal = _journal_before(STOP_REQUEST_LINE)
     before = _state(journal)
-    widened_request = dataclasses.replace(stops[2], requested_trigger_price=D("2647.00"))
+    widened_request = dataclasses.replace(request, requested_trigger_price=D("2647.00"))
     with pytest.raises(IllegalTransitionError) as excinfo:
         journal.publish(widened_request)
     assert excinfo.value.code == "GIE.STATE.ILLEGAL_TRANSITION"
-    assert excinfo.value.details["client_order_id"] == stops[0].client_order_id
+    assert excinfo.value.details["client_order_id"] == request.client_order_id
     assert _state(journal) == before
     # The tightening request is accepted, but a report that applies a wider stop than requested is not.
-    assert journal.publish(stops[2]) == 7
+    assert journal.publish(request) == STOP_REQUEST_LINE
     with pytest.raises(IllegalTransitionError):
-        journal.publish(dataclasses.replace(stops[3], trigger_price=D("2647.00")))
-    assert journal.publish(stops[3]) == 8
-    assert journal.ledger.order(stops[0].client_order_id) == stops[3]
+        journal.publish(dataclasses.replace(replaced, trigger_price=D("2647.00")))
+    assert journal.publish(replaced) == STOP_REPLACED_LINE
+    assert journal.ledger.order(request.client_order_id) == replaced
 
 
 @pytest.mark.requirement("S00-ASG-25")
 def test_a_position_snapshot_with_a_widened_stop_is_refused() -> None:
-    positions = samples.position_lifecycle()
-    journal = _journal(positions[0], positions[1])
+    reduced = _record(REDUCED_LINE)
+    assert isinstance(reduced, Position)
+    journal = _journal_before(REDUCED_LINE + 1)
     before = _state(journal)
-    later = T0 + 120 * SEC
     widened = dataclasses.replace(
-        positions[1],
-        revision=2,
-        seq=2,
-        decision_time_ns=later,
-        as_of_time_ns=later - MS,
+        reduced,
+        revision=4,
+        seq=4,
+        decision_time_ns=reduced.decision_time_ns + 1,
         stop_price=D("2648.50"),  # wider than 2649.90, still tighter than the initial 2647.80
     )
     with pytest.raises(IllegalTransitionError) as excinfo:
@@ -724,14 +772,14 @@ def test_a_position_snapshot_with_a_widened_stop_is_refused() -> None:
     assert excinfo.value.details["position_id"] == POSITION_ID
     assert _state(journal) == before
     kept = dataclasses.replace(widened, stop_price=D("2649.90"))
-    assert journal.publish(kept) == 3
+    assert journal.publish(kept) == REDUCED_LINE + 1
 
 
 @pytest.mark.requirement("S00-ASG-25")
 def test_an_order_event_after_a_terminal_state_is_refused() -> None:
     submit = samples.order_event()
     rejected = samples.variants()["OrderEvent"]["entry_rejected"]
-    journal = _journal(submit, rejected)
+    journal = _journal_before(ENTRY_SUBMIT_LINE, submit, rejected)
     before = _state(journal)
     accepted_late = samples.order_event(
         seq=2,
@@ -775,6 +823,7 @@ def _registry(
         fields.update(
             evaluation_report_uri=active.evaluation_report_uri,
             evaluation_report_sha256=active.evaluation_report_sha256,
+            evaluation_data_origin=active.evaluation_data_origin,
             promotion_criteria_sha256=active.promotion_criteria_sha256,
             shadow_run_ids=active.shadow_run_ids,
             approved_by=samples.FIXTURE_APPROVER,
@@ -837,45 +886,81 @@ def test_a_reactivation_with_a_used_approval_is_refused_by_the_journal() -> None
 
 
 # =========================================================================== look-ahead guard
+WATERMARK = T0 + 10 * SEC
+
+
+@pytest.mark.requirement("S10-ACC-02", "S00-ASG-23")
+@pytest.mark.parametrize(
+    "line",
+    [EVIDENCE_LINE, CANDIDATE_LINE, PLAN_LINE, DECISION_LINE, FIRST_POSITION_LINE],
+    ids=["evidence", "candidate", "trade-plan", "risk-decision", "position"],
+)
+def test_a_derived_record_beyond_the_input_watermark_is_look_ahead(line: int) -> None:
+    prefix = _prefix(line)
+    ticks = sum(isinstance(record, Tick) for record in prefix)
+    journal = _journal(*prefix, _tick_at(ticks, WATERMARK))
+    assert journal.input_watermark_ns == WATERMARK
+    before = _state(journal)
+
+    def at(instant: int) -> Record:
+        return dataclasses.replace(_record(line), decision_time_ns=instant, as_of_time_ns=instant)
+
+    with pytest.raises(FutureDataError) as excinfo:
+        journal.publish(at(WATERMARK + 1))
+    assert excinfo.value.code == "GIE.TIME.FUTURE"
+    assert excinfo.value.details["as_of_time_ns"] == WATERMARK + 1
+    assert excinfo.value.details["input_watermark_ns"] == WATERMARK
+    assert _state(journal) == before
+    # At the watermark itself the data has been delivered: accepted.
+    assert journal.publish(at(WATERMARK)) == len(prefix) + 2
+
+
 @pytest.mark.requirement("S10-ACC-02", "S00-ASG-23")
 @pytest.mark.parametrize(
     "build",
-    [
-        lambda at: _other_evidence(0, at=at, as_of_time_ns=at),
-        lambda at: samples.candidate(decision_time_ns=at, as_of_time_ns=at),
-        lambda at: samples.trade_plan(decision_time_ns=at, as_of_time_ns=at),
-        lambda at: samples.risk_decision(decision_time_ns=at, as_of_time_ns=at),
-        lambda at: samples.position(decision_time_ns=at, as_of_time_ns=at),
-    ],
-    ids=["evidence", "candidate", "trade-plan", "risk-decision", "position"],
+    [samples.evidence, lambda: _other_evidence(0, at=T0 - 5 * SEC, as_of_time_ns=T0 - 5 * SEC)],
+    ids=["sample-evidence", "evidence-long-before-any-tick"],
 )
-def test_a_derived_record_beyond_the_newest_journaled_tick_is_look_ahead(
-    build: Callable[[int], Record],
-) -> None:
-    watermark = T0 + 10 * SEC
-    journal = _journal(_tick_at(0, watermark))
+def test_a_derived_record_before_any_input_is_refused(build: Callable[[], Record]) -> None:
+    # Rework 2: "a derived record ... is refused before any input".
+    journal = _journal(samples.model_version())  # a registry entry is not an input of the run
+    assert journal.input_watermark_ns is None
     before = _state(journal)
     with pytest.raises(FutureDataError) as excinfo:
-        journal.publish(build(watermark + 1))
-    assert excinfo.value.code == "GIE.TIME.FUTURE"
-    assert excinfo.value.details["as_of_time_ns"] == watermark + 1
-    assert excinfo.value.details["tick_watermark_ns"] == watermark
+        journal.publish(build())
+    assert excinfo.value.details["input_watermark_ns"] is None
     assert _state(journal) == before
-    # At the watermark itself the data has been delivered: accepted.
-    assert journal.publish(build(watermark)) == 2
+
+
+@pytest.mark.requirement("S10-ACC-02", "S00-ASG-23")
+def test_a_clock_reading_advances_the_input_watermark() -> None:
+    # Rework 2: the watermark is advanced by Tick and by ClockReading.
+    journal = _journal()
+    journal.publish(samples.clock_reading())  # wall time T0
+    assert journal.input_watermark_ns == T0
+    with pytest.raises(FutureDataError):
+        journal.publish(_other_evidence(0, at=T0 + 1, as_of_time_ns=T0 + 1))
+    assert journal.publish(_other_evidence(0, at=T0, as_of_time_ns=T0)) == 2
+    # A later reading moves it on; a tick older than the reading does not move it back.
+    journal.publish(samples.clock_reading(seq=1, wall_time_ns=T0 + 5 * SEC))
+    assert journal.input_watermark_ns == T0 + 5 * SEC
+    journal.publish(_tick_at(0, T0 + SEC))
+    assert journal.input_watermark_ns == T0 + 5 * SEC
+    assert journal.publish(_other_evidence(1, "rejection", at=T0 + 5 * SEC, as_of_time_ns=T0 + 5 * SEC)) == 5
 
 
 @pytest.mark.requirement("S10-ACC-02", "S00-ASG-23")
 def test_the_record_is_accepted_once_the_tick_it_depends_on_was_journaled() -> None:
-    journal = _journal(samples.tick())
-    position = samples.position()  # watermark T0 + 5 s - 1 ms, the sample tick was received at T0 - 1 ms
+    valued = _record(VALUED_LINE)  # watermark T0 + 5 s - 1 ms
+    assert isinstance(valued, Position)
+    journal = _journal_before(VALUED_LINE - 1)  # without the tick at T0 + 5 s - 1 ms
     with pytest.raises(FutureDataError):
-        journal.publish(position)
-    assert journal.publish(_tick_at(1, position.as_of_time_ns - 1)) == 2
+        journal.publish(valued)
+    assert journal.publish(_tick_at(3, valued.as_of_time_ns - 1)) == VALUED_LINE - 1
     with pytest.raises(FutureDataError):
-        journal.publish(position)
-    assert journal.publish(_tick_at(2, position.as_of_time_ns)) == 3
-    assert journal.publish(position) == 4
+        journal.publish(valued)
+    assert journal.publish(_tick_at(4, valued.as_of_time_ns)) == VALUED_LINE
+    assert journal.publish(valued) == VALUED_LINE + 1
 
 
 @pytest.mark.requirement("S10-ACC-02", "S00-ASG-23")
@@ -890,10 +975,25 @@ def test_the_watermark_is_the_receive_time_never_the_source_event_time() -> None
     assert journal.publish(_other_evidence(0, at=tick.event_time_ns, as_of_time_ns=tick.receive_time_ns)) == 2
 
 
-@pytest.mark.requirement("S10-ACC-02")
-def test_the_watermark_is_the_newest_tick_of_any_stream_and_never_moves_back() -> None:
+@pytest.mark.requirement("S10-ACC-02", "S00-ASG-25")
+def test_tick_receive_times_never_decrease_across_streams() -> None:
+    # Rework 2: input order - a tick of another stream may not be older than the newest tick.
     silver = samples.tick(symbol="XAGUSD", bid=D("31.115"), ask=D("31.14"), **_times(T0 + 10 * SEC))
-    journal = _journal(silver, _tick_at(0, T0))  # the gold tick is older than the silver tick
+    journal = _journal(silver)
+    before = _state(journal)
+    with pytest.raises(OutOfOrderError) as excinfo:
+        journal.publish(_tick_at(0, T0 + 10 * SEC - 1))  # the gold tick is older than the silver tick
+    assert excinfo.value.code == "GIE.SEQ.OUT_OF_ORDER"
+    assert excinfo.value.details["last_time_ns"] == T0 + 10 * SEC
+    assert _state(journal) == before
+    assert journal.publish(_tick_at(0, T0 + 10 * SEC)) == 2  # the same instant is not older
+    assert journal.input_watermark_ns == T0 + 10 * SEC
+
+
+@pytest.mark.requirement("S10-ACC-02")
+def test_the_watermark_is_the_newest_tick_of_any_stream() -> None:
+    silver = samples.tick(symbol="XAGUSD", bid=D("31.115"), ask=D("31.14"), **_times(T0 + 10 * SEC))
+    journal = _journal(_tick_at(0, T0), silver)
     assert journal.publish(_other_evidence(0, at=T0 + 10 * SEC, as_of_time_ns=T0 + 10 * SEC)) == 3
     with pytest.raises(FutureDataError):
         journal.publish(_other_evidence(1, at=T0 + 10 * SEC + 1, as_of_time_ns=T0 + 10 * SEC + 1))
@@ -905,12 +1005,18 @@ def _times(receive_time_ns: int) -> dict[str, int]:
 
 @pytest.mark.requirement("S10-ACC-02")
 def test_records_that_are_not_derived_from_market_data_are_not_look_ahead() -> None:
-    journal = _journal(samples.tick())
-    # Broker reports, clock readings and registry entries carry no market-data watermark.
-    for record in (*samples.order_lifecycle(), samples.clock_reading(wall_time_ns=T0 + 900 * SEC)):
-        assert ordering_time_ns(record) > samples.tick().receive_time_ns
+    journal = _journal_before(ENTRY_SUBMIT_LINE)
+    watermark = journal.input_watermark_ns
+    assert watermark == T0  # the clock reading of the run
+    # Broker reports and registry entries carry no market-data watermark.
+    later_model = samples.model_version(
+        seq=3, semver="0.9.0", artifact_sha256="99" * 32, status_time_ns=T0 + 900 * SEC
+    )
+    for record in (*samples.order_lifecycle(), later_model):
+        assert ordering_time_ns(record) > watermark
         journal.publish(record)
-    assert len(journal) == 7
+    assert len(journal) == ENTRY_SUBMIT_LINE + 5
+    assert journal.input_watermark_ns == watermark  # and they do not move the watermark
 
 
 # =========================================================================== reading
@@ -919,7 +1025,7 @@ def test_read_returns_the_entries_in_journal_order() -> None:
     records = _run_records()
     journal = _full_journal()
     entries = list(journal.read())
-    assert len(entries) == len(journal) == len(records) == 24
+    assert len(entries) == len(journal) == len(records) == RUN_LENGTH
     for number, (entry, record) in enumerate(zip(entries, records, strict=True)):
         assert type(entry) is JournalEntry
         assert entry.journal_seq == number
@@ -930,16 +1036,16 @@ def test_read_returns_the_entries_in_journal_order() -> None:
 
 
 @pytest.mark.requirement("S00-ASG-25")
-@pytest.mark.parametrize("start", [0, 1, 7, 23, 24, 25, 10_000])
+@pytest.mark.parametrize("start", [0, 1, 7, RUN_LENGTH - 1, RUN_LENGTH, RUN_LENGTH + 1, 10_000])
 def test_read_from_a_journal_position(start: int) -> None:
     journal = _full_journal()
     entries = list(journal.read(start))
-    assert [entry.journal_seq for entry in entries] == list(range(start, 24))
+    assert [entry.journal_seq for entry in entries] == list(range(start, RUN_LENGTH))
     assert entries == list(journal.read())[start:]
 
 
 @pytest.mark.requirement("S00-ASG-25")
-@pytest.mark.parametrize("start", [-1, -24, True, False, 1.0, "1", None])
+@pytest.mark.parametrize("start", [-1, -RUN_LENGTH, True, False, 1.0, "1", None])
 def test_read_refuses_an_invalid_position(start: object) -> None:
     journal = _full_journal()
     with pytest.raises(ContractValidationError):
@@ -955,7 +1061,6 @@ def test_streams_lists_every_stream_once_in_sorted_order() -> None:
         "evidence/strategy_intelligence.sweep_reversal",
         "model_version/learning.registry",
         "order_event/execution.sim",
-        f"order_event/{STOP_STREAM}",
         "position/execution.sim",
         "risk_decision/risk.gate",
         "run_manifest/app.run",
@@ -969,7 +1074,7 @@ def test_streams_lists_every_stream_once_in_sorted_order() -> None:
 def test_journal_entry_wire_form_and_canonical_lines() -> None:
     journal = _full_journal()
     lines = journal.canonical_lines()
-    assert len(lines) == 24
+    assert len(lines) == RUN_LENGTH
     for entry, line in zip(journal.read(), lines, strict=True):
         wire = entry.to_wire()
         assert set(wire) == {"journal_seq", "stream", "fingerprint", "record"}
@@ -988,7 +1093,7 @@ def test_journal_entry_wire_form_and_canonical_lines() -> None:
 def test_the_same_records_published_into_two_journals_give_identical_canonical_lines() -> None:
     first, second = _full_journal(), _full_journal()
     assert first.canonical_lines() == second.canonical_lines()
-    assert len(first.canonical_lines()) == 24
+    assert len(first.canonical_lines()) == RUN_LENGTH
     assert [entry.fingerprint for entry in first.read()] == [entry.fingerprint for entry in second.read()]
     # Re-sent duplicates during one of the runs do not change the journal either.
     third = MemoryJournal()
@@ -1047,17 +1152,57 @@ def test_a_same_instant_decision_chain_keeps_its_causal_publication_order() -> N
 
 @pytest.mark.requirement("S00-ASG-25", "S10-ACC-01")
 def test_journal_order_is_publication_order_also_across_instants() -> None:
-    # Published in causal order, the positions follow the publication, not the timestamps: the
-    # manifest (created on the system clock, a day later than the replayed data) stays record 0.
+    # Published in causal order, the positions follow the publication, not the timestamps: a
+    # registry entry (system-clock time, not run time) published after the last tick of the run
+    # keeps its publication position although its timestamp lies before the replayed data.
     journal = _full_journal()
+    late_entry = samples.model_version(
+        seq=3, semver="0.9.0", artifact_sha256="99" * 32, status_time_ns=T0 - 300 * SEC
+    )
+    assert ordering_time_ns(late_entry) < ordering_time_ns(_record(FIRST_TICK_LINE))
+    assert journal.publish(late_entry) == RUN_LENGTH
     records = [entry.record for entry in journal.read()]
     assert isinstance(records[0], RunManifest)
-    assert ordering_time_ns(records[0]) > max(ordering_time_ns(record) for record in records[1:])
-    assert [entry.journal_seq for entry in journal.read()] == list(range(24))
-    order_of_types = [type(record).__name__ for record in records[5:10]]
-    assert order_of_types == ["Tick", "Evidence", "Candidate", "TradePlan", "RiskDecision"]
-    assert isinstance(records[9], RiskDecision)
-    assert isinstance(records[15], Position)
+    assert records[-1] == late_entry
+    assert [entry.journal_seq for entry in journal.read()] == list(range(RUN_LENGTH + 1))
+    order_of_types = [type(record).__name__ for record in records[FIRST_TICK_LINE : DECISION_LINE + 1]]
+    assert order_of_types == ["Tick", "ClockReading", "Evidence", "Candidate", "TradePlan", "RiskDecision"]
+    assert isinstance(records[FIRST_POSITION_LINE], Position)
+    assert sorted(records, key=ordering_key) != records
+
+
+@pytest.mark.requirement("S00-ASG-25", "COM-07")
+def test_the_positions_used_in_this_file() -> None:
+    records = _run_records()
+    assert len(records) == RUN_LENGTH
+    expected = {
+        ACTIVE_MODEL_LINE: ModelVersion,
+        FIRST_TICK_LINE: Tick,
+        CLOCK_LINE: ClockReading,
+        EVIDENCE_LINE: Evidence,
+        CANDIDATE_LINE: Candidate,
+        PLAN_LINE: TradePlan,
+        DECISION_LINE: RiskDecision,
+        ENTRY_SUBMIT_LINE: OrderEvent,
+        FIRST_POSITION_LINE: Position,
+        VALUED_LINE - 1: Tick,
+        VALUED_LINE: Position,
+        REDUCED_LINE: Position,
+        STOP_REQUEST_LINE: OrderEvent,
+        STOP_REPLACED_LINE: OrderEvent,
+        LAST_LINE: Position,
+    }
+    assert {line: type(records[line]) for line in expected} == expected
+    active = records[ACTIVE_MODEL_LINE]
+    assert isinstance(active, ModelVersion)
+    assert active.status is ModelStatus.ACTIVE
+    request = records[STOP_REQUEST_LINE]
+    assert isinstance(request, OrderEvent)
+    assert request.event_type is OrderEventType.REPLACE_REQUESTED
+    assert all(
+        getattr(record, "data_origin", DataOrigin.SYNTHETIC_FIXTURE) is DataOrigin.SYNTHETIC_FIXTURE
+        for record in records
+    )
 
 
 # =========================================================================== FileJournal
@@ -1150,7 +1295,7 @@ def test_reopening_reproduces_the_entries_and_continues_the_sequence(tmp_path: P
             assert reopened.publish(record) == number
         assert _state(reopened) == _state(_full_journal())
     assert path.read_bytes().startswith(written)
-    assert len(_lines(path)) == 24
+    assert len(_lines(path)) == RUN_LENGTH
     assert path.read_bytes() == "".join(line + "\n" for line in _full_journal().canonical_lines()).encode()
 
 
@@ -1175,11 +1320,11 @@ def test_a_restarted_journal_enforces_the_rules_of_the_whole_run(tmp_path: Path)
     with FileJournal(path) as restarted:
         assert restarted.tick_gaps == gaps_before == 0
         with pytest.raises(SequenceConflictError):
-            restarted.publish(_tick_at(3, T0 + 300 * SEC - MS, bid=D("2650.11")))
+            restarted.publish(dataclasses.replace(_record(VALUED_LINE - 1), bid=D("2650.11")))
         with pytest.raises(SequenceGapError):
             restarted.publish(_other_evidence(3, at=T0 + 100 * SEC))
         with pytest.raises(OutOfOrderError):
-            restarted.publish(_tick_at(4, T0))
+            restarted.publish(_tick_at(6, T0))
         with pytest.raises(IllegalTransitionError):
             restarted.publish(_late_fill_report())
         with pytest.raises(FutureDataError):
@@ -1188,10 +1333,10 @@ def test_a_restarted_journal_enforces_the_rules_of_the_whole_run(tmp_path: Path)
             restarted.publish(_other_evidence(1, run_id=OTHER_RUN_ID))
         with pytest.raises(SequenceConflictError):
             restarted.publish(samples.run_manifest(label="other"))
-        assert restarted.publish(_tick_at(9, T0 + 400 * SEC)) == 24
+        assert restarted.publish(_tick_at(9, T0 + 400 * SEC)) == RUN_LENGTH  # 6, 7 and 8 lost
         assert restarted.tick_gaps == 1
     with FileJournal(path) as again:
-        assert len(again) == 25
+        assert len(again) == RUN_LENGTH + 1
         assert again.tick_gaps == 1
 
 
@@ -1312,18 +1457,22 @@ def _replace_line(number: int, make: Callable[[bytes], bytes]) -> Callable[[list
     return modify
 
 
-#: Line numbers in the file of ``_run_records``: 5 = first tick, 6 = evidence, 9 = risk decision.
+#: Line numbers in the file of ``_run_records`` (see ``test_the_positions_used_in_this_file``).
 MODIFICATIONS: list[Any] = [
-    pytest.param(_edit_line(5, _set_in_record("bid", "2650.11")), id="changed-price"),
-    pytest.param(_edit_line(9, _set_in_record("volume_lots", "5")), id="changed-approved-volume"),
-    pytest.param(_edit_line(6, _set_in_record("valid_until_ns", T0 + 3000 * SEC)), id="changed-expiry"),
+    pytest.param(_edit_line(FIRST_TICK_LINE, _set_in_record("bid", "2650.11")), id="changed-price"),
+    pytest.param(_edit_line(DECISION_LINE, _set_in_record("volume_lots", "5")), id="changed-approved-volume"),
+    pytest.param(
+        _edit_line(EVIDENCE_LINE, _set_in_record("valid_until_ns", T0 + 3000 * SEC)), id="changed-expiry"
+    ),
     pytest.param(_edit_line(0, _set_in_record("seed", 8)), id="changed-manifest"),
-    pytest.param(_edit_line(4, _set_in_record("approved_by", None)), id="removed-model-approval"),
-    pytest.param(_swap(5, 6), id="swapped-neighbouring-lines"),
+    pytest.param(
+        _edit_line(ACTIVE_MODEL_LINE, _set_in_record("approved_by", None)), id="removed-model-approval"
+    ),
+    pytest.param(_swap(EVIDENCE_LINE, CANDIDATE_LINE), id="swapped-neighbouring-lines"),
     pytest.param(_swap(1, 20), id="swapped-distant-lines"),
     pytest.param(_swap(0, 1), id="manifest-not-first"),
     pytest.param(_edit_line(7, _set("journal_seq", 8)), id="wrong-journal-seq"),
-    pytest.param(_edit_line(23, _set("journal_seq", 99)), id="wrong-last-journal-seq"),
+    pytest.param(_edit_line(LAST_LINE, _set("journal_seq", 99)), id="wrong-last-journal-seq"),
     pytest.param(_edit_line(7, _set("journal_seq", "7")), id="journal-seq-as-text"),
     pytest.param(_edit_line(7, _set("fingerprint", "0" * 64)), id="wrong-fingerprint"),
     pytest.param(_edit_line(0, _set("fingerprint", "f" * 64)), id="wrong-manifest-fingerprint"),
@@ -1464,3 +1613,658 @@ def test_a_publication_refused_by_a_closed_journal_leaves_it_unchanged(tmp_path:
     with pytest.raises(JournalCorruptError):
         journal.publish(samples.tick())
     assert len(_lines(path)) == 1
+
+
+# =========================================================================== rework 2: order of the checks
+@pytest.mark.requirement("S00-ASG-25", "M-AUTH-07")
+def test_the_run_is_checked_before_the_stream_position() -> None:
+    # Evidence of another run at an already journaled position: refused for its run, not as a conflict.
+    journal = _journal_before(EVIDENCE_LINE + 1)
+    before = _state(journal)
+    with pytest.raises(ContractValidationError) as excinfo:
+        journal.publish(_other_evidence(0, run_id=OTHER_RUN_ID))
+    assert excinfo.value.details["run_id"] == OTHER_RUN_ID
+    assert _state(journal) == before
+
+
+@pytest.mark.requirement("S00-ASG-25", "COM-07")
+def test_the_stream_position_is_checked_before_the_provenance() -> None:
+    journal = _journal_before(EVIDENCE_LINE + 1)
+    before = _state(journal)
+    # A gap that also claims a better origin than the run: reported as the gap.
+    with pytest.raises(SequenceGapError):
+        journal.publish(_other_evidence(5, data_origin=DataOrigin.HISTORICAL))
+    # A duplicate is a duplicate, whatever else would be said about the record.
+    assert journal.publish(_record(EVIDENCE_LINE)) == EVIDENCE_LINE
+    assert _state(journal) == before
+
+
+@pytest.mark.requirement("S00-ASG-25", "S10-ACC-02", "COM-07")
+def test_the_provenance_is_checked_before_the_time() -> None:
+    journal = _journal_before(EVIDENCE_LINE + 1)
+    better_and_too_late = _other_evidence(
+        1, at=T0 + 900 * SEC, as_of_time_ns=T0 + 900 * SEC, data_origin=DataOrigin.HISTORICAL
+    )
+    with pytest.raises(ContractValidationError) as excinfo:
+        journal.publish(better_and_too_late)
+    assert type(excinfo.value) is ContractValidationError
+    assert "data origin" in str(excinfo.value.details["rule"])
+
+
+@pytest.mark.requirement("S00-ASG-25", "S10-ACC-02")
+def test_the_time_is_checked_before_the_run_ledger() -> None:
+    # A candidate without its evidence (a ledger refusal) and beyond the watermark: look-ahead first.
+    journal = _journal_before(EVIDENCE_LINE)
+    with pytest.raises(FutureDataError):
+        journal.publish(samples.candidate(decision_time_ns=T0 + SEC, as_of_time_ns=T0 + SEC))
+    # Inside the watermark, the same candidate is refused by the ledger (the last check).
+    with pytest.raises(IllegalTransitionError) as excinfo:
+        journal.publish(_record(CANDIDATE_LINE))
+    assert "evidence" in excinfo.value.message
+    assert len(journal) == EVIDENCE_LINE
+
+
+# =========================================================================== rework 2: provenance
+def _manifest_journal(**manifest: Any) -> tuple[MemoryJournal, str]:
+    record = samples.run_manifest(**manifest)
+    journal = MemoryJournal()
+    journal.publish(record)
+    return journal, record.run_id
+
+
+@pytest.mark.requirement("COM-07", "M-AUTH-07")
+@pytest.mark.parametrize("origin", [DataOrigin.HISTORICAL, DataOrigin.BROKER_FEED])
+def test_no_record_claims_a_better_data_origin_than_its_run(origin: DataOrigin) -> None:
+    journal = _journal_before(EVIDENCE_LINE)
+    before = _state(journal)
+    with pytest.raises(ContractValidationError) as excinfo:
+        journal.publish(samples.evidence(data_origin=origin))
+    assert "better data origin" in str(excinfo.value.details["rule"])
+    assert excinfo.value.details["contract"] == "Evidence"
+    assert _state(journal) == before
+    assert journal.publish(samples.evidence()) == EVIDENCE_LINE  # the fixture origin of the run
+
+
+@pytest.mark.requirement("COM-07", "M-AUTH-07")
+@pytest.mark.parametrize(
+    ("run_origin", "tick_origin", "accepted"),
+    [
+        (DataOrigin.HISTORICAL, DataOrigin.SYNTHETIC_FIXTURE, False),
+        (DataOrigin.BROKER_FEED, DataOrigin.HISTORICAL, False),
+        (DataOrigin.HISTORICAL, DataOrigin.HISTORICAL, True),
+        (DataOrigin.HISTORICAL, DataOrigin.BROKER_FEED, True),
+        (DataOrigin.SYNTHETIC_FIXTURE, DataOrigin.SYNTHETIC_FIXTURE, True),
+    ],
+)
+def test_the_run_claims_no_better_origin_than_a_tick_it_uses(
+    run_origin: DataOrigin, tick_origin: DataOrigin, accepted: bool
+) -> None:
+    # SYNTHETIC FIXTURE: the origin labels are set only to exercise the rule.
+    journal, _ = _manifest_journal(data_origin=run_origin)
+    tick = samples.tick(origin=tick_origin)
+    if accepted:
+        assert journal.publish(tick) == 1
+        return
+    with pytest.raises(ContractValidationError) as excinfo:
+        journal.publish(tick)
+    assert "better data origin than a tick" in str(excinfo.value.details["rule"])
+    assert len(journal) == 1
+
+
+@pytest.mark.requirement("COM-07", "M-AUTH-07")
+def test_a_tick_of_an_undeclared_source_is_refused() -> None:
+    journal = _journal()
+    with pytest.raises(ContractValidationError) as excinfo:
+        journal.publish(samples.tick(source="other_feed"))
+    assert "data source the run manifest declares" in str(excinfo.value.details["rule"])
+    assert len(journal) == 1
+    declared, _ = _manifest_journal(data_sources=("fixture", "other_feed"))
+    assert declared.publish(samples.tick(source="other_feed")) == 1
+
+
+@pytest.mark.requirement("S10-ACC-02", "M-AUTH-07")
+@pytest.mark.parametrize(
+    ("receive_time_ns", "accepted"),
+    [
+        (T0 - 3600 * SEC - 1, False),
+        (T0 - 3600 * SEC, True),
+        (T0 + 3600 * SEC - 1, True),
+        (T0 + 3600 * SEC, False),
+        (T0 + 86_400 * SEC, False),
+    ],
+    ids=["before-start", "at-start", "last-instant", "at-end-exclusive", "a-day-later"],
+)
+def test_a_tick_lies_inside_the_replay_period(receive_time_ns: int, accepted: bool) -> None:
+    journal = _journal()
+    tick = _tick_at(0, receive_time_ns)
+    if accepted:
+        assert journal.publish(tick) == 1
+        return
+    with pytest.raises(ContractValidationError) as excinfo:
+        journal.publish(tick)
+    assert "inside the period" in str(excinfo.value.details["rule"])
+    assert len(journal) == 1
+
+
+@pytest.mark.requirement("S10-ACC-02", "M-AUTH-07")
+def test_a_paper_run_has_no_replay_period_for_its_ticks() -> None:
+    journal = MemoryJournal()
+    journal.publish(samples.variants()["RunManifest"]["paper_primary"])
+    assert journal.publish(_tick_at(0, T0 + 86_400 * SEC)) == 1
+
+
+SECOND_MODEL_ID = identity.model_version_id("fixture_other", "0.1.0", "ef" * 32)
+
+
+@pytest.mark.requirement("G07-12", "M-AUTH-07")
+@pytest.mark.parametrize(
+    ("line", "build"),
+    [(CANDIDATE_LINE, samples.candidate), (PLAN_LINE, samples.trade_plan)],
+    ids=["candidate", "trade-plan"],
+)
+def test_a_scoring_model_the_run_does_not_pin_is_refused(line: int, build: Callable[..., Record]) -> None:
+    assert build() == _record(line)
+    journal = _journal_before(line)
+    before = _state(journal)
+    with pytest.raises(ContractValidationError) as excinfo:
+        journal.publish(build(model_version_id=SECOND_MODEL_ID))
+    assert "pins" in str(excinfo.value.details["rule"])
+    assert excinfo.value.details["model_version_id"] == SECOND_MODEL_ID
+    assert _state(journal) == before
+    # The status must be the pinned one (RESEARCH for the sample model).
+    with pytest.raises(ContractValidationError) as excinfo:
+        journal.publish(build(model_status=ModelStatus.SHADOW))
+    assert "status the run manifest pins" in str(excinfo.value.details["rule"])
+    assert _state(journal) == before
+    assert journal.publish(build()) == line
+
+
+@pytest.mark.requirement("G07-12")
+def test_a_model_pinned_with_its_own_status_is_accepted() -> None:
+    # The sample run pins the shadow model as SHADOW.
+    journal = _journal_before(CANDIDATE_LINE)
+    shadow_scored = samples.variants()["Candidate"]["scored_by_shadow_model"]
+    assert journal.publish(shadow_scored) == CANDIDATE_LINE
+
+
+@pytest.mark.requirement("G07-12", "S10-ACC-02")
+def test_a_model_is_used_only_inside_its_pinned_period() -> None:
+    def pinned(**period: int) -> RunModel:
+        return RunModel(
+            model_version_id=samples.MODEL_ID,
+            status=ModelStatus.RESEARCH,
+            validated=False,
+            valid_from_ns=period.get("start"),
+            valid_until_ns=period.get("end"),
+        )
+
+    candidate_as_of = samples.candidate().as_of_time_ns
+    cases = [
+        (pinned(start=candidate_as_of), True),
+        (pinned(start=candidate_as_of + 1), False),
+        (pinned(end=candidate_as_of + 1), True),
+        (pinned(end=candidate_as_of), False),
+    ]
+    for entry, accepted in cases:
+        journal, run_id = _manifest_journal(models=(entry,))
+        journal.publish(samples.tick())
+        journal.publish(samples.evidence(run_id=run_id))
+        candidate = samples.candidate(run_id=run_id)
+        if accepted:
+            assert journal.publish(candidate) == 3, entry
+            continue
+        with pytest.raises(ContractValidationError) as excinfo:
+            journal.publish(candidate)
+        assert "valid for the record's watermark" in str(excinfo.value.details["rule"]), entry
+
+
+@pytest.mark.requirement("G07-10", "M-AUTH-07")
+def test_sizing_quality_comes_only_from_a_model_pinned_as_validated() -> None:
+    journal = _journal_before(DECISION_LINE)
+    claimed = samples.risk_decision(quality_validated=True, quality_model_version_id=samples.MODEL_ID)
+    with pytest.raises(ContractValidationError) as excinfo:
+        journal.publish(claimed)
+    assert "validated" in str(excinfo.value.details["rule"])
+    assert len(journal) == DECISION_LINE
+
+
+# =========================================================================== rework 2: time with a clock
+def _published_with_clock(records: list[Record], clock: ReplayClock, journal: MemoryJournal) -> None:
+    """The run loop: each input is processed at its own instant (registry and manifest excepted)."""
+    for record in records:
+        if not isinstance(record, RunManifest | ModelVersion):
+            clock.advance_to(ordering_time_ns(record))
+        journal.publish(record)
+
+
+@pytest.mark.requirement("S00-ASG-19", "S10-ACC-01", "S10-ACC-02")
+def test_the_whole_run_is_accepted_when_every_record_is_published_in_its_step() -> None:
+    clock = ReplayClock(T0 - 3600 * SEC)
+    journal = MemoryJournal(clock=clock)
+    _published_with_clock(_run_records(), clock, journal)
+    assert len(journal) == RUN_LENGTH
+    assert journal.canonical_lines() == _full_journal().canonical_lines()  # same bytes as without
+
+
+@pytest.mark.requirement("S00-ASG-19", "S10-ACC-02")
+@pytest.mark.parametrize(
+    ("step_offset", "error"),
+    [(-1, FutureDataError), (1, OutOfOrderError)],
+    ids=["record-stamped-after-the-step", "record-stamped-before-the-step"],
+)
+def test_with_a_clock_the_ordering_time_equals_the_step_instant(
+    step_offset: int, error: type[GieError]
+) -> None:
+    evidence = _record(EVIDENCE_LINE)
+    instant = ordering_time_ns(evidence)
+
+    def loop_until_the_evidence() -> tuple[ReplayClock, MemoryJournal]:
+        clock = ReplayClock(T0 - 3600 * SEC)
+        journal = MemoryJournal(clock=clock)
+        _published_with_clock(_run_records()[:CLOCK_LINE], clock, journal)  # up to the first tick
+        assert clock.now_ns() < instant
+        return clock, journal
+
+    clock, journal = loop_until_the_evidence()
+    before = _state(journal)
+    clock.advance_to(instant + step_offset)
+    with pytest.raises(error) as excinfo:
+        journal.publish(evidence)
+    assert excinfo.value.details["time_ns"] == instant
+    assert excinfo.value.details["now_ns"] == instant + step_offset
+    assert _state(journal) == before
+    # In its own step the record is accepted.
+    clock, journal = loop_until_the_evidence()
+    clock.advance_to(instant)
+    assert journal.publish(evidence) == CLOCK_LINE
+
+
+@pytest.mark.requirement("S00-ASG-19")
+def test_manifest_and_registry_entries_are_not_held_to_the_step_instant() -> None:
+    clock = ReplayClock(T0 + 3600 * SEC)  # long after the data start and the registry times
+    journal = MemoryJournal(clock=clock)
+    assert journal.publish(samples.run_manifest()) == 0
+    for number, model in enumerate(samples.model_lifecycle(), start=1):
+        assert journal.publish(model) == number
+    with pytest.raises(OutOfOrderError):
+        journal.publish(samples.tick())  # a tick is run time
+
+
+@pytest.mark.requirement("S00-ASG-19", "S10-ACC-02")
+def test_a_paper_journal_holds_records_to_the_paper_step() -> None:
+    walls = iter([T0 - 5, *([T0 + 10 * SEC] * 10)])
+    paper = PaperClock(SystemClock(wall_source=lambda: next(walls), monotonic_source=lambda: 1))
+    journal = MemoryJournal(clock=paper)
+    journal.publish(samples.variants()["RunManifest"]["paper_primary"])
+    reading = samples.clock_reading(run_id=PAPER_RUN_ID, mode=RunMode.PAPER, clock_mode=ClockMode.SYSTEM)
+    with pytest.raises(FutureDataError):
+        journal.publish(reading)  # stamped T0, the step is still at T0 - 5
+    paper.begin_step(T0)
+    assert journal.publish(reading) == 1
+    assert journal.input_watermark_ns == T0
+
+
+@pytest.mark.requirement("S00-ASG-19")
+@pytest.mark.parametrize("clock", [object(), "REPLAY", T0], ids=["object", "text", "int"])
+def test_a_journal_refuses_something_that_is_not_a_clock(clock: object) -> None:
+    with pytest.raises(ConfigError):
+        MemoryJournal(clock=clock)  # type: ignore[arg-type]
+
+
+@pytest.mark.requirement("G08-05", "S00-ASG-19")
+def test_reopening_with_a_clock_replays_the_history_without_the_clock_rule(tmp_path: Path) -> None:
+    path = tmp_path / "run.journal"
+    _write_run(path)
+    clock = ReplayClock(T0 + 400 * SEC)
+    with FileJournal(path, clock=clock) as restarted:
+        assert len(restarted) == RUN_LENGTH
+        with pytest.raises(FutureDataError):
+            restarted.publish(_tick_at(6, T0 + 401 * SEC))
+        assert restarted.publish(_tick_at(6, T0 + 400 * SEC)) == RUN_LENGTH
+
+
+# =========================================================================== rework 2: durability
+class _InjectedFile:
+    """Wraps the real append handle; can be armed to fail (SYNTHETIC failure injection)."""
+
+    def __init__(self, handle: IO[bytes], journal_length: Callable[[], int]) -> None:
+        self._handle = handle
+        self._journal_length = journal_length
+        self.fail_after_bytes: int | None = None
+        self.lengths_at_write: list[int] = []
+
+    def write(self, data: bytes) -> int:
+        self.lengths_at_write.append(self._journal_length())
+        if self.fail_after_bytes is not None:
+            self._handle.write(data[: self.fail_after_bytes])
+            self._handle.flush()
+            raise OSError("SYNTHETIC injected write failure")
+        return self._handle.write(data)
+
+    def flush(self) -> None:
+        self._handle.flush()
+
+    def fileno(self) -> int:
+        return self._handle.fileno()
+
+    def close(self) -> None:
+        self._handle.close()
+
+
+def _injected_journal(path: Path, **kwargs: Any) -> tuple[FileJournal, _InjectedFile]:
+    holder: dict[str, Any] = {}
+
+    def opener(target: Path) -> IO[bytes]:
+        holder["file"] = _InjectedFile(target.open("ab"), lambda: len(holder["journal"]))
+        return holder["file"]  # type: ignore[no-any-return]
+
+    journal = FileJournal(path, opener=opener, **kwargs)
+    holder["journal"] = journal
+    return journal, holder["file"]
+
+
+@pytest.mark.requirement("G08-04", "S00-ASG-25")
+def test_a_record_is_written_and_synchronised_before_it_becomes_visible(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "run.journal"
+    journal, handle = _injected_journal(path)
+    synced: list[int] = []
+    real_fsync = os.fsync
+
+    def fsync(fd: int) -> None:
+        synced.append(len(journal))
+        real_fsync(fd)
+
+    monkeypatch.setattr(journal_module.os, "fsync", fsync)
+    with journal:
+        for record in _run_records()[:5]:
+            journal.publish(record)
+    # While each line was written and synchronised, the journal did not show the record yet.
+    assert handle.lengths_at_write == [0, 1, 2, 3, 4]
+    assert synced == [0, 1, 2, 3, 4]
+
+
+@pytest.mark.requirement("G08-04", "G08-05", "S00-ASG-25")
+def test_after_a_write_error_the_journal_is_failed_and_refuses_every_later_publish(tmp_path: Path) -> None:
+    path = tmp_path / "run.journal"
+    journal, handle = _injected_journal(path)
+    for record in _run_records()[:EVIDENCE_LINE]:
+        journal.publish(record)
+    before = _state(journal)
+    durable = path.read_bytes()
+    handle.fail_after_bytes = 40
+    with pytest.raises(JournalCorruptError) as excinfo:
+        journal.publish(_record(EVIDENCE_LINE))
+    assert excinfo.value.code == "GIE.JOURNAL.CORRUPT"
+    assert _state(journal) == before  # nothing was published
+    torn = path.read_bytes()
+    assert torn.startswith(durable)
+    assert len(torn) == len(durable) + 40
+    handle.fail_after_bytes = None  # even with a working file the journal stays failed
+    for record in (_record(EVIDENCE_LINE), _tick_at(1, T0)):
+        with pytest.raises(JournalCorruptError):
+            journal.publish(record)
+    assert _state(journal) == before
+    assert path.read_bytes() == torn
+    # A duplicate of a record that is already durable is still answered (nothing is written).
+    assert journal.publish(_record(FIRST_TICK_LINE)) == FIRST_TICK_LINE
+    journal.close()
+    # The torn line is refused on a plain open and removed by open_for_restart.
+    _refused_on_open(path)
+    with FileJournal.open_for_restart(path) as restarted:
+        assert restarted.repaired_bytes == 40
+        assert _state(restarted) == before
+        assert restarted.publish(_record(EVIDENCE_LINE)) == EVIDENCE_LINE
+    assert path.read_bytes().startswith(durable)
+
+
+@pytest.mark.requirement("G08-04", "G08-05")
+def test_a_failed_synchronisation_fails_the_journal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    path = tmp_path / "run.journal"
+    with FileJournal(path) as journal:
+        journal.publish(samples.run_manifest())
+        before = _state(journal)
+
+        def broken_fsync(fd: int) -> None:
+            raise OSError("SYNTHETIC injected fsync failure")
+
+        monkeypatch.setattr(journal_module.os, "fsync", broken_fsync)
+        with pytest.raises(JournalCorruptError):
+            journal.publish(samples.model_version())
+        assert _state(journal) == before
+        monkeypatch.undo()
+        with pytest.raises(JournalCorruptError):
+            journal.publish(samples.model_version())
+        assert _state(journal) == before
+
+
+@pytest.mark.requirement("G08-04")
+def test_commit_synchronises_once_per_step_for_a_journal_without_fsync(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[int] = []
+    real_fsync = os.fsync
+
+    def fsync(fd: int) -> None:
+        calls.append(fd)
+        real_fsync(fd)
+
+    monkeypatch.setattr(journal_module.os, "fsync", fsync)
+    path = tmp_path / "run.journal"
+    with FileJournal(path, fsync=False) as journal:
+        for record in _run_records()[:5]:
+            journal.publish(record)
+        assert calls == []
+        assert path.read_bytes().count(b"\n") == 5  # written (flushed) before publish returned
+        journal.commit()
+        assert len(calls) == 1
+        journal.commit()  # nothing new: nothing to synchronise
+        assert len(calls) == 1
+        journal.publish(_record(5))
+        journal.publish(_record(5))  # a duplicate writes nothing
+        journal.commit()
+        assert len(calls) == 2
+    calls.clear()
+    with FileJournal(tmp_path / "synced.journal") as synced:
+        synced.publish(samples.run_manifest())
+        assert len(calls) == 1
+        synced.commit()  # fsync=True: already synchronised
+        assert len(calls) == 1
+    memory = MemoryJournal()
+    memory.publish(samples.run_manifest())
+    assert memory.commit() is None
+    assert len(memory) == 1
+
+
+@pytest.mark.requirement("G08-04", "G08-05")
+def test_a_failed_commit_fails_the_journal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    path = tmp_path / "run.journal"
+    with FileJournal(path, fsync=False) as journal:
+        journal.publish(samples.run_manifest())
+
+        def broken_fsync(fd: int) -> None:
+            raise OSError("SYNTHETIC injected fsync failure")
+
+        monkeypatch.setattr(journal_module.os, "fsync", broken_fsync)
+        with pytest.raises(JournalCorruptError):
+            journal.commit()
+        monkeypatch.undo()
+        with pytest.raises(JournalCorruptError):
+            journal.publish(samples.model_version())
+        assert len(journal) == 1
+
+
+# =========================================================================== rework 2: one writer
+@pytest.mark.requirement("G08-04", "G08-05")
+def test_a_second_writer_is_refused_while_the_first_holds_the_lock(tmp_path: Path) -> None:
+    path = tmp_path / "run.journal"
+    first = FileJournal(path)
+    try:
+        first.publish(samples.run_manifest())
+        assert Path(f"{path}.lock").exists()
+        written = path.read_bytes()
+        for open_again in (FileJournal, FileJournal.open_for_restart):
+            with pytest.raises(ConfigError) as excinfo:
+                open_again(path)
+            assert excinfo.value.code == "GIE.CONFIG.INVALID"
+        assert path.read_bytes() == written
+        assert first.publish(samples.model_version()) == 1  # the first writer is unaffected
+    finally:
+        first.close()
+    with FileJournal(path) as second:  # released on close
+        assert len(second) == 2
+
+
+# =========================================================================== rework 2: open_for_restart
+@pytest.mark.requirement("G08-04", "G08-05")
+def test_open_for_restart_removes_only_a_torn_last_line(tmp_path: Path) -> None:
+    path = tmp_path / "run.journal"
+    records = _write_run(path)
+    intact = path.read_bytes()
+    with FileJournal.open_for_restart(path) as clean:
+        assert clean.repaired_bytes == 0
+        assert len(clean) == len(records)
+    assert path.read_bytes() == intact
+    path.write_bytes(intact[:-25])
+    with FileJournal.open_for_restart(path) as repaired:
+        assert repaired.repaired_bytes == len(_lines_of(intact)[-1]) + 1 - 25
+        assert len(repaired) == len(records) - 1
+    missing = tmp_path / "new.journal"
+    with FileJournal.open_for_restart(missing) as fresh:
+        assert fresh.repaired_bytes == 0
+        assert len(fresh) == 0
+
+
+def _lines_of(data: bytes) -> list[bytes]:
+    return data[:-1].split(b"\n")
+
+
+@pytest.mark.requirement("G08-04", "G08-06")
+@pytest.mark.parametrize("modify", MODIFICATIONS[:6])
+def test_open_for_restart_still_refuses_every_other_damage(
+    tmp_path: Path, modify: Callable[[list[bytes]], list[bytes]]
+) -> None:
+    path = tmp_path / "run.journal"
+    _write_run(path)
+    _rewrite(path, modify(_lines(path)))
+    modified = path.read_bytes()
+    with pytest.raises(JournalCorruptError):
+        FileJournal.open_for_restart(path)
+    assert path.read_bytes() == modified
+
+
+# =========================================================================== rework 2: JournalReader
+@pytest.mark.requirement("G08-04", "S00-ASG-25")
+def test_the_reader_follows_a_journal_that_is_being_written(tmp_path: Path) -> None:
+    path = tmp_path / "run.journal"
+    reader = JournalReader(path)
+    assert reader.poll() == []
+    assert reader.run_id is None
+    assert reader.streams() == ()
+    with FileJournal(path) as writer:
+        records = _run_records()
+        for record in records[:5]:
+            writer.publish(record)
+        first = reader.poll()
+        assert [entry.journal_seq for entry in first] == [0, 1, 2, 3, 4]
+        assert first == list(writer.read())
+        assert reader.poll() == []
+        for record in records[5:8]:
+            writer.publish(record)
+        assert [entry.journal_seq for entry in reader.poll()] == [5, 6, 7]
+        assert len(reader) == 8
+        assert list(reader.read(3)) == list(writer.read(3))[:5]
+        assert reader.streams() == writer.streams()
+        assert reader.run_id == samples.RUN_ID
+        assert reader.path == path
+        assert not hasattr(reader, "publish")
+
+
+@pytest.mark.requirement("G08-04")
+def test_the_reader_tolerates_a_last_line_that_is_still_being_written(tmp_path: Path) -> None:
+    source = tmp_path / "source.journal"
+    _write_run(source, 8)
+    data = source.read_bytes()
+    lines = _lines_of(data)
+    complete = b"".join(line + b"\n" for line in lines[:7])
+    path = tmp_path / "copy.journal"  # a copy that no writer ever opened (no lock file)
+    path.write_bytes(complete + lines[7][:30])
+    reader = JournalReader(path)
+    assert [entry.journal_seq for entry in reader.poll()] == list(range(7))
+    assert reader.poll() == []  # the incomplete line is simply not there yet
+    assert len(list(reader.read())) == 7
+    with path.open("ab") as appender:
+        appender.write(lines[7][30:] + b"\n")
+    fresh = reader.poll()
+    assert [entry.journal_seq for entry in fresh] == [7]
+    assert fresh[0].record == _record(7)
+    # The reader never writes: the bytes are what was written, and it took no writer lock.
+    assert path.read_bytes() == data
+    assert not Path(f"{path}.lock").exists()
+    with FileJournal(path) as writer:  # a writer can still open the file
+        assert len(writer) == 8
+
+
+@pytest.mark.requirement("G08-04", "G08-06")
+@pytest.mark.parametrize(
+    "modify",
+    [MODIFICATIONS[0], pytest.param(lambda lines: lines[1:], id="manifest-not-first")],
+)
+def test_the_reader_verifies_every_complete_line(
+    tmp_path: Path, modify: Callable[[list[bytes]], list[bytes]]
+) -> None:
+    path = tmp_path / "run.journal"
+    _write_run(path)
+    _rewrite(path, modify(_lines(path)))
+    modified = path.read_bytes()
+    with pytest.raises(JournalCorruptError):
+        JournalReader(path).poll()
+    assert path.read_bytes() == modified
+
+
+# =========================================================================== rework 2: samples.run_story
+@pytest.mark.requirement("S00-ASG-25", "COM-07")
+def test_the_sample_run_story_is_accepted_in_order() -> None:
+    story = samples.run_story()
+    assert len(story) == 28
+    journal = MemoryJournal()
+    assert [journal.publish(record) for record in story] == list(range(28))
+    assert journal.run_id == samples.RUN_ID
+    assert journal.tick_gaps == 0
+    closed = journal.ledger.position(POSITION_ID)
+    assert closed is not None
+    assert closed == story[-1]
+    assert journal.ledger.open_orders() == ()
+    clock = ReplayClock(T0 - 3600 * SEC)
+    timed = MemoryJournal(clock=clock)
+    _published_with_clock(story, clock, timed)
+    assert timed.canonical_lines() == journal.canonical_lines()
+
+
+@pytest.mark.requirement("S00-ASG-25", "S10-ACC-02")
+@pytest.mark.parametrize(
+    ("omitted", "refused", "error"),
+    [
+        pytest.param(1, 2, FutureDataError, id="first-tick-then-evidence"),
+        pytest.param(2, 3, IllegalTransitionError, id="evidence-then-candidate"),
+        pytest.param(3, 4, IllegalTransitionError, id="candidate-then-plan"),
+        pytest.param(4, 5, IllegalTransitionError, id="plan-then-approval"),
+        pytest.param(5, 6, IllegalTransitionError, id="approval-then-entry-order"),
+        pytest.param(8, 12, FutureDataError, id="second-tick-then-position"),
+    ],
+)
+def test_the_run_story_is_refused_when_a_record_others_depend_on_is_left_out(
+    omitted: int, refused: int, error: type[GieError]
+) -> None:
+    story = samples.run_story()
+    journal = MemoryJournal()
+    for number, record in enumerate(story[:refused]):
+        if number != omitted:
+            journal.publish(record)
+    before = _state(journal)
+    with pytest.raises(error) as excinfo:
+        journal.publish(story[refused])
+    assert type(excinfo.value) is error
+    assert _state(journal) == before
+    assert len(journal) == refused - 1

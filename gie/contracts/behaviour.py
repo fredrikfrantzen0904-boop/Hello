@@ -62,7 +62,9 @@ IDENTITY_RULES: dict[str, dict[str, str]] = {
     },
     "ModelVersion": {"model_version_id": "model_version_id(model_name, semver, artifact_sha256)"},
     "Clock": {"identity": "(producer, seq)"},
-    "RunManifest": {"run_id": "run_id(mode, config_sha256, label)"},
+    "RunManifest": {
+        "run_id": "run_id(mode, SHA-256 of the canonical form of every other field of the manifest)"
+    },
 }
 
 
@@ -117,7 +119,8 @@ def behaviour(record_type: type[Record]) -> dict[str, Any]:
         out["immutable_fields"] = list(POSITION_IMMUTABLE_FIELDS)
         out["immutable_fields_gie_owner"] = list(GIE_POSITION_IMMUTABLE_FIELDS)
         out["monotonic_gie_owner"] = [
-            "volume_lots never increases",
+            "initial_volume_lots and volume_lots grow only while the entry order fills: the open volume "
+            "grows by no more than initial_volume_lots grows; otherwise volume_lots never increases",
             "stop_price never moves away from the entry and is never removed while open",
             "peak_net_pnl_amount never decreases",
             "trough_net_pnl_amount never increases",
@@ -136,5 +139,8 @@ def behaviour(record_type: type[Record]) -> dict[str, Any]:
         out["transitions"] = _transitions(CANDIDATE_STATUS_TRANSITIONS)
     elif name == "Evidence":
         out["final_states"] = ["EXPIRED", "INVALIDATED"]
-        out["monotonic"] = ["identity levels and market_event_id never change between revisions"]
+        out["monotonic"] = [
+            "identity levels and market_event_id never change between revisions",
+            "stage never goes back between revisions",
+        ]
     return copy.deepcopy(out)

@@ -44,11 +44,11 @@ from gie.contracts.schema_gen import (
     load_lock,
     render,
     routing_vocabulary_problems,
-    write,
 )
 from gie.core.errors import GieError
 from tests.gie import samples
 from tools import render_contract_docs
+from tools.write_schemas import write
 
 pytestmark = [pytest.mark.acceptance("S00-ACC-02"), pytest.mark.requirement("S00-ACC-02", "S00-DEL-02")]
 
@@ -70,9 +70,11 @@ CONTRACT_NAMES = [
 ]
 VERSION = "1.0.0"
 
-#: SHARED_CONTRACTS.md section 6.1: contract -> (stream name, ordering time, rank).
+#: SHARED_CONTRACTS.md section 6.1: contract -> (stream name, ordering time, rank).  Change notice 2:
+#: ``created_time_ns`` is null in a replay, so a manifest is ordered by ``data_start_ns`` in a replay
+#: and by ``created_time_ns`` in a paper run (FIELDS.md, RunManifest).
 STREAM_TABLE = {
-    "RunManifest": ("run_manifest/<producer>", "created_time_ns", 0),
+    "RunManifest": ("run_manifest/<producer>", "data_start_ns | created_time_ns", 0),
     "Clock": ("clock/<producer>", "wall_time_ns", 5),
     "Tick": ("tick/<source>/<symbol>", "receive_time_ns", 10),
     "OrderEvent": ("order_event/<producer>", "receive_time_ns", 20),
@@ -441,8 +443,32 @@ def test_behaviour_publishes_stream_ordering_time_and_rank_of_section_6_1(name: 
         assert published["rank"]["name"]
         assert isinstance(published["identity"], dict)
         assert published["identity"]
-    assert ordering_time in _published(name)["required"]
-    assert _published(name)["properties"][ordering_time]["type"] == "integer"
+    alternatives = ordering_time.split(" | ")
+    schema = _published(name)
+    for field in alternatives:
+        fragment = schema["properties"][field]
+        if len(alternatives) == 1:
+            assert field in schema["required"]
+            assert fragment["type"] == "integer"
+        else:
+            # Each alternative may be null; RUN-2 makes exactly one of them present.
+            assert field not in schema["required"]
+            assert fragment["anyOf"][0]["type"] == "integer"
+            assert {"type": "null"} in fragment["anyOf"]
+
+
+@pytest.mark.requirement("S00-ASG-25")
+def test_a_manifest_is_ordered_by_its_data_start_in_a_replay_and_by_its_creation_in_a_paper_run() -> None:
+    from gie.contracts.ordering import ordering_time_ns
+
+    manifests = samples.variants()["RunManifest"]
+    replay, paper = manifests["replay_research"], manifests["paper_primary"]
+    assert replay.created_time_ns is None
+    assert replay.data_start_ns is not None
+    assert ordering_time_ns(replay) == replay.data_start_ns
+    assert paper.data_start_ns is None
+    assert paper.created_time_ns is not None
+    assert ordering_time_ns(paper) == paper.created_time_ns
 
 
 @pytest.mark.requirement("S00-ASG-25")
@@ -473,10 +499,23 @@ def test_behaviour_is_plain_json_data() -> None:
         assert json.loads(json.dumps(published)) == published
 
 
+#: Change notice 6: 'PENDING_CANCEL stays PENDING_CANCEL on a late ACCEPTED, REPLACED or
+#: REPLACE_REJECTED; (PENDING_CANCEL, REJECTED) -> REJECTED'.
+LATE_REPORTS_WHILE_CANCELLING = {
+    ("PENDING_CANCEL", "ACCEPTED"): frozenset({"PENDING_CANCEL"}),
+    ("PENDING_CANCEL", "REPLACED"): frozenset({"PENDING_CANCEL"}),
+    ("PENDING_CANCEL", "REPLACE_REJECTED"): frozenset({"PENDING_CANCEL"}),
+    ("PENDING_CANCEL", "REJECTED"): frozenset({"REJECTED"}),
+}
+
+
 def test_order_event_behaviour_carries_the_full_transition_table() -> None:
     rows = _published("OrderEvent")["x-gie-behaviour"]["transitions"]
-    assert len(rows) == len(ORDER_TRANSITIONS) == 36
+    # 36 transitions of rework 1 plus the four of change notice 6 (late reports during a cancellation).
+    assert len(rows) == len(ORDER_TRANSITIONS) == 40
     table = _rows_to_table(rows)
+    for key, after in LATE_REPORTS_WHILE_CANCELLING.items():
+        assert table[key] == after, key
     expected = {
         (_value(before), event.value): frozenset(state.value for state in after)
         for (before, event), after in ORDER_TRANSITIONS.items()
@@ -492,7 +531,9 @@ def test_order_event_transition_table_matches_the_field_reference() -> None:
         key = (None if before == "(none)" else before, event)
         assert key not in documented
         documented[key] = frozenset(state.strip() for state in after.split(","))
-    assert len(documented) == 36
+    assert len(documented) == 40
+    for key, after in LATE_REPORTS_WHILE_CANCELLING.items():
+        assert documented[key] == after, key
     assert _rows_to_table(_published("OrderEvent")["x-gie-behaviour"]["transitions"]) == documented
 
 
@@ -1005,3 +1046,141 @@ def test_field_reference_lists_every_field_and_invariant_of_the_schema(name: str
             assert re.search(rf"^\| `{field}` \| .* \| {required} \| ", section, flags=re.MULTILINE), field
     for item in schema["x-gie-invariants"]:
         assert f"- **{item['id']}** - {item['rule']}" in section
+
+
+# =========================================================================== rework 2 (change notice 12)
+def _objects(schema: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
+    return [("#", schema), *((f"#/$defs/{name}", node) for name, node in schema.get("$defs", {}).items())]
+
+
+@pytest.mark.parametrize("name", CONTRACT_NAMES)
+def test_every_schema_object_states_min_properties_equal_to_its_declared_properties(name: str) -> None:
+    """'Every schema object states minProperties = number of declared properties (every key is
+    written, optional ones as null).'"""
+    for schema in (_published(name), json_schema(all_contracts()[name])):
+        for where, node in _objects(schema):
+            assert node["type"] == "object", where
+            assert node["additionalProperties"] is False, where
+            assert type(node["minProperties"]) is int, where
+            assert node["minProperties"] == len(node["properties"]), where
+    assert _published(name)["minProperties"] == 2 + len(all_contracts()[name].FIELD_SPECS)
+
+
+def _without_optional_key(name: str) -> tuple[dict[str, Any], str]:
+    """A sample message of *name* with one optional key removed, and the removed path."""
+    wire = to_wire(samples.BUILDERS[name]())
+    optional = [spec.name for spec in all_contracts()[name].FIELD_SPECS if not spec.required]
+    assert optional, name
+    del wire[optional[-1]]
+    return wire, optional[-1]
+
+
+@pytest.mark.parametrize("name", [name for name in CONTRACT_NAMES if name != "Clock"])
+def test_a_message_without_an_optional_key_is_refused_by_decoder_and_schema(name: str) -> None:
+    from gie.contracts import from_wire
+    from gie.core.errors import ContractValidationError
+
+    complete = to_wire(samples.BUILDERS[name]())
+    validator = jsonschema.Draft202012Validator(_published(name))
+    assert validator.is_valid(complete)
+    assert from_wire(complete) == samples.BUILDERS[name]()
+    wire, missing = _without_optional_key(name)
+    errors = list(validator.iter_errors(wire))
+    assert [error.validator for error in errors] == ["minProperties"], [error.message for error in errors]
+    with pytest.raises(ContractValidationError) as caught:
+        from_wire(wire)
+    assert type(caught.value) is ContractValidationError
+    assert caught.value.details["path"] == missing
+    assert "explicit null" in caught.value.details["rule"]
+
+
+def test_a_nested_object_without_an_optional_key_is_refused_by_decoder_and_schema() -> None:
+    from gie.contracts import from_wire
+    from gie.core.errors import ContractValidationError
+
+    wire = to_wire(samples.trade_plan())
+    assert "scenario" in wire["targets"][0]
+    validator = jsonschema.Draft202012Validator(_published("TradePlan"))
+    assert validator.is_valid(wire)
+    del wire["targets"][0]["scenario"]
+    errors = list(validator.iter_errors(wire))
+    assert [error.validator for error in errors] == ["minProperties"]
+    assert list(errors[0].absolute_path) == ["targets", 0]
+    with pytest.raises(ContractValidationError) as caught:
+        from_wire(wire)
+    assert caught.value.details["path"] == "targets[0].scenario"
+
+
+def test_the_clock_contract_without_any_key_is_refused_by_the_schema() -> None:
+    """Clock has no optional field; a missing key is a missing required key (and below minProperties)."""
+    wire = to_wire(samples.BUILDERS["Clock"]())
+    first = all_contracts()["Clock"].FIELD_SPECS[0].name
+    del wire[first]
+    validators = {
+        error.validator for error in jsonschema.Draft202012Validator(_published("Clock")).iter_errors(wire)
+    }
+    assert validators == {"required", "minProperties"}
+
+
+@pytest.mark.parametrize("name", CONTRACT_NAMES)
+def test_behaviour_returns_a_fresh_copy_on_every_call(name: str) -> None:
+    record_type = all_contracts()[name]
+    pristine = copy.deepcopy(behaviour(record_type))
+    first = behaviour(record_type)
+    assert first == pristine
+    assert first is not behaviour(record_type)
+    # Damage every container of the copy that was handed out.
+    first["identity"]["zz_tampered"] = "not a rule"
+    first["rank"]["value"] = -1
+    for value in list(first.values()):
+        if isinstance(value, list):
+            value.append({"zz": "tampered"})
+            if value and isinstance(value[0], dict):
+                value[0]["zz"] = "tampered"
+    first["zz_new_key"] = True
+    assert behaviour(record_type) == pristine
+    assert json_schema(record_type)["x-gie-behaviour"] == pristine
+    assert _published(name)["x-gie-behaviour"] == pristine
+
+
+def test_a_line_end_conversion_is_reported_even_with_a_recomputed_lock_hash(schema_copy: Path) -> None:
+    """The lock hashes the bytes; the published file is LF on every platform."""
+    path = schema_copy / _filename("Tick")
+    original = path.read_bytes()
+    assert b"\r" not in original
+    path.write_bytes(original.replace(b"\n", b"\r\n"))
+    assert json.loads(path.read_bytes()) == json.loads(original), "the same JSON value ..."
+    problems = check(schema_copy)
+    assert f"{path.name}: released schema was modified (hash differs from LOCK.json)" in problems
+    assert all(problem.startswith(path.name) for problem in problems)
+    _edit_lock(schema_copy, lambda lock: lock["contracts"]["Tick"].__setitem__(VERSION, _sha256(path)))
+    problems = check(schema_copy)
+    assert len(problems) == 1, problems
+    assert problems[0].startswith(f"{path.name}: committed schema differs from the code")
+    # While the lock is PROPOSED, write() restores the LF bytes and the lock.
+    assert sorted(write(schema_copy)) == ["LOCK.json", path.name]
+    assert path.read_bytes() == original
+    assert check(schema_copy) == []
+
+
+def test_committed_schema_files_and_the_lock_use_lf_line_ends() -> None:
+    for path in sorted(SCHEMA_DIR.glob("*.json")):
+        data = path.read_bytes()
+        assert b"\r" not in data, path.name
+        assert data.endswith(b"}\n"), path.name
+
+
+def test_published_identity_rule_of_the_run_id_is_the_manifest_hash() -> None:
+    """Change notice 2 / 10: ``run_id`` is ``identity.run_id(mode, manifest_sha256)``, the hash of every
+    other field (FIELDS.md RUN-1) - no longer ``run_id(mode, config_sha256, label)``."""
+    rule = _published("RunManifest")["x-gie-behaviour"]["identity"]["run_id"]
+    assert rule.startswith("run_id(mode, "), rule
+    assert "config_sha256" not in rule, rule
+    assert "label" not in rule, rule
+
+
+def test_published_position_monotonic_rules_allow_growth_while_the_entry_fills() -> None:
+    """Change notice 7: 'initial_volume_lots may grow while the entry order fills, the open volume grows by
+    no more than that' - a published rule 'volume_lots never increases' contradicts it."""
+    rules = _published("Position")["x-gie-behaviour"]["monotonic_gie_owner"]
+    assert "volume_lots never increases" not in rules, rules

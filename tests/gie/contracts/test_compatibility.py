@@ -15,6 +15,8 @@ Expected behaviour is taken from ``specifications/SHARED_CONTRACTS.md`` (revisio
 from __future__ import annotations
 
 import copy
+import sys
+import types
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -35,6 +37,7 @@ from gie.contracts import (
 from gie.contracts._spec import (
     DecodeContext,
     EnumOf,
+    FieldSpec,
     ListOf,
     Opt,
     Str,
@@ -717,6 +720,19 @@ def _add(path: list[Any], value: Any) -> Mutation:
     return mutate
 
 
+def _remove_item(path: list[Any], item: Any) -> Mutation:
+    """Remove *item* (which must be present) from the list at *path*."""
+
+    def mutate(schema: dict[str, Any]) -> None:
+        node: Any = schema
+        for key in path:
+            node = node[key]
+        assert item in node, f"{item!r} is not listed at {path}"
+        node.remove(item)
+
+    return mutate
+
+
 def _drop(path: list[Any]) -> Mutation:
     def mutate(schema: dict[str, Any]) -> None:
         node: Any = schema
@@ -1029,7 +1045,7 @@ MAJOR_CASES = [
     ),
     pytest.param(
         "Position",
-        _drop([_B, "immutable_fields_gie_owner", 2]),
+        _remove_item([_B, "immutable_fields_gie_owner"], "initial_stop_price"),
         "x-gie-behaviour/immutable_fields_gie_owner",
         id="position-initial-stop-mutable",
     ),
@@ -1299,11 +1315,14 @@ def test_change_levels_are_ordered() -> None:
     [("1.0.1", "1.0.0"), ("1.1.0", "1.0.9"), ("2.0.0", "1.9.9"), ("1.10.0", "1.9.0"), ("10.0.0", "9.0.0")],
 )
 def test_declared_change_refuses_a_version_going_backwards(old: str, new: str) -> None:
-    # The docstring promises "an error"; the class is not specified (see the report), the text is.
-    with pytest.raises((ValueError, GieError), match="backwards"):
+    # Change notice 12: 'version errors are ContractVersionError'.
+    with pytest.raises(ContractVersionError, match="backwards") as caught:
         declared_change(old, new)
-    with pytest.raises((ValueError, GieError), match="backwards"):
+    assert type(caught.value) is ContractVersionError
+    assert caught.value.details == {"old_version": old, "new_version": new}
+    with pytest.raises(ContractVersionError, match="backwards") as caught:
         check_evolution(_schema("Tick"), old, _schema("Tick"), new)
+    assert type(caught.value) is ContractVersionError
 
 
 @pytest.mark.parametrize("bad", ["1.0", "v1.0.0", "01.0.0", "1.0.0\n", "", "1.0.9999999999", None, 1])
@@ -1413,3 +1432,249 @@ def test_a_subclass_does_not_pass_as_the_contract() -> None:
     with pytest.raises(UnknownContractError):
         to_wire(local)
     assert to_wire(genuine)["contract"] == "Tick"
+
+
+# =========================================================================== rework 2 (change notice 12)
+def _generated_with_new_field(monkeypatch: pytest.MonkeyPatch, spec: FieldSpec) -> dict[str, Any]:
+    """The schema the generator would publish for Tick if *spec* were declared on it (restored afterwards)."""
+    monkeypatch.setattr(Tick, "FIELD_SPECS", (*Tick.FIELD_SPECS, spec))
+    try:
+        return copy.deepcopy(json_schema(Tick))
+    finally:
+        monkeypatch.undo()
+
+
+def test_a_new_optional_field_with_x_gie_since_is_minor_in_a_generated_top_level_schema(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """'Compatibility: a new optional field is MINOR (also with x-gie-since)'.  The documented way to add
+    a field is fld(Opt(...), since=(1, 1)); the generator then publishes x-gie-since and the grown
+    minProperties next to the envelope properties of a top-level contract."""
+    old = _schema("Tick")
+    new = _generated_with_new_field(
+        monkeypatch, FieldSpec("zz_note", Opt(Str()), "Synthetic optional field of 1.1.", None, False, (1, 1))
+    )
+    assert json_schema(Tick) == old, "the contract itself is unchanged"
+    assert new["x-gie-since"]["zz_note"] == "1.1"
+    assert new["minProperties"] == old["minProperties"] + 1 == len(new["properties"])
+    level, reasons = classify_schema_change(old, new)
+    assert (level, reasons) == (Change.MINOR, ["#/properties/zz_note: new optional field"])
+    assert check_evolution(old, "1.0.0", new, "1.1.0") == []
+    assert len(check_evolution(old, "1.0.0", new, "1.0.1")) == 1
+
+
+def _with_since(schema: dict[str, Any], since: dict[str, str]) -> dict[str, Any]:
+    changed = copy.deepcopy(schema)
+    changed["x-gie-since"] = {name: since.get(name, "1.0") for name in changed["properties"]}
+    return changed
+
+
+@pytest.mark.parametrize(
+    ("mutate", "expected", "mentioned"),
+    [
+        pytest.param(
+            lambda schema: (
+                _add_optional(schema),
+                schema.__setitem__("minProperties", len(schema["properties"])),
+            ),
+            Change.MINOR,
+            "zz_added: new optional field",
+            id="optional-field-and-grown-minProperties",
+        ),
+        pytest.param(
+            lambda schema: schema.__setitem__("minProperties", schema["minProperties"] - 1),
+            Change.MAJOR,
+            "key-presence rule changed",
+            id="minProperties-lowered",
+        ),
+        pytest.param(
+            lambda schema: schema.pop("minProperties"),
+            Change.MAJOR,
+            "minProperties",
+            id="minProperties-removed",
+        ),
+        pytest.param(
+            lambda schema: schema["$defs"]["PriceLevel"].__setitem__("minProperties", 0),
+            Change.MAJOR,
+            "PriceLevel/minProperties",
+            id="nested-minProperties-lowered",
+        ),
+    ],
+)
+def test_min_properties_follows_the_field_set_and_any_other_change_is_major(
+    mutate: Mutation, expected: Change, mentioned: str
+) -> None:
+    name = "Evidence" if "nested" in mentioned or "PriceLevel" in mentioned else "Tick"
+    level, reasons = _classify(name, mutate)
+    assert level is expected, reasons
+    assert any(mentioned in reason for reason in reasons), reasons
+
+
+@pytest.mark.parametrize(
+    ("since", "expected"),
+    [
+        pytest.param({"bid": "1.1"}, Change.MAJOR, id="existing-field-moved-to-1.1"),
+        pytest.param({"bid": "0.9"}, Change.MAJOR, id="existing-field-moved-to-0.9"),
+    ],
+)
+def test_the_introduction_version_of_an_existing_field_never_changes(
+    since: dict[str, str], expected: Change
+) -> None:
+    old = _with_since(_schema("Tick"), {})
+    new = _with_since(_schema("Tick"), since)
+    level, reasons = classify_schema_change(old, new)
+    assert level is expected
+    assert reasons == [
+        f"#/x-gie-since/bid: introduction version of an existing field changed '1.0' -> '{since['bid']}'"
+    ]
+
+
+def test_a_new_required_field_with_x_gie_since_is_major() -> None:
+    old = _with_since(_schema("Tick"), {})
+    new = copy.deepcopy(old)
+    new["properties"]["zz_required"] = {"type": "string", "description": "Synthetic required field."}
+    new["required"].append("zz_required")
+    new["minProperties"] += 1
+    new["x-gie-since"]["zz_required"] = "1.1"
+    level, reasons = classify_schema_change(old, new)
+    assert level is Change.MAJOR
+    assert "#/properties/zz_required: new required field" in reasons
+
+
+ROUTING_FRAGMENTS = {
+    "mode": ["REPLAY", "PAPER"],
+    "venue": ["SIMULATED"],
+}
+
+
+@pytest.mark.requirement("G08-03", "G08-10")
+@pytest.mark.parametrize(
+    ("name", "field"), [("Tick", "mode"), ("ModelVersion", "mode"), ("Position", "venue")]
+)
+@pytest.mark.parametrize("nullable", [True, False], ids=["optional", "plain"])
+def test_a_new_routing_property_with_exactly_the_locked_vocabulary_is_minor(
+    name: str, field: str, nullable: bool
+) -> None:
+    fragment: dict[str, Any] = {"type": "string", "enum": list(ROUTING_FRAGMENTS[field])}
+    if nullable:
+        fragment = {"anyOf": [fragment, {"type": "null"}]}
+    fragment["description"] = "Synthetic new routing property."
+
+    def mutate(schema: dict[str, Any]) -> None:
+        assert field not in schema["properties"]
+        schema["properties"][field] = fragment
+        schema["minProperties"] += 1
+
+    level, reasons = _classify(name, mutate)
+    assert (level, reasons) == (Change.MINOR, [f"#/properties/{field}: new optional field"])
+
+
+@pytest.mark.requirement("G08-03", "G08-10")
+@pytest.mark.parametrize(
+    ("field", "fragment"),
+    [
+        pytest.param("mode", {"type": "string", "enum": ["PAPER", "REPLAY"]}, id="mode-reordered"),
+        pytest.param("mode", {"type": "string", "enum": ["REPLAY"]}, id="mode-subset"),
+        pytest.param("mode", {"type": "string"}, id="mode-open-string"),
+        pytest.param("mode", {"$ref": "#/$defs/PriceLevel"}, id="mode-reference"),
+        pytest.param("mode", {"const": "REPLAY"}, id="mode-const"),
+        pytest.param(
+            "mode",
+            {"anyOf": [{"enum": ["REPLAY"]}, {"enum": ["PAPER"]}, {"type": "null"}]},
+            id="mode-split-alternatives",
+        ),
+        pytest.param("venue", {"type": "string", "enum": ["SIMULATED", "SIMULATED"]}, id="venue-duplicate"),
+        pytest.param("venue", {"type": "string", "enum": []}, id="venue-empty"),
+    ],
+)
+def test_a_new_routing_property_without_exactly_the_locked_vocabulary_is_major(
+    field: str, fragment: dict[str, Any]
+) -> None:
+    def mutate(schema: dict[str, Any]) -> None:
+        schema["properties"][field] = {**fragment, "description": "Synthetic new routing property."}
+        schema["minProperties"] += 1
+
+    level, reasons = _classify("Tick", mutate)
+    assert level is Change.MAJOR, reasons
+    assert any("routing-lock vocabulary" in reason and field in reason for reason in reasons), reasons
+
+
+@pytest.mark.requirement("G08-03", "G08-10")
+@pytest.mark.parametrize("field", ["mode", "venue"])
+def test_a_new_definition_carrying_a_routing_property_needs_exactly_the_locked_vocabulary(field: str) -> None:
+    def mutate_with(values: list[str]) -> Mutation:
+        def mutate(schema: dict[str, Any]) -> None:
+            schema["$defs"]["ZzLeg"] = {
+                "type": "object",
+                "description": "Synthetic new definition.",
+                "properties": {field: {"type": "string", "enum": values, "description": "x"}},
+                "required": [field],
+                "minProperties": 1,
+                "additionalProperties": False,
+            }
+
+        return mutate
+
+    assert _classify("Evidence", mutate_with(list(ROUTING_FRAGMENTS[field])))[0] is not Change.MAJOR
+    level, reasons = _classify("Evidence", mutate_with([*ROUTING_FRAGMENTS[field], "LIVE"]))
+    assert level is Change.MAJOR
+    assert any("routing-lock vocabulary" in reason for reason in reasons), reasons
+
+
+@pytest.mark.requirement("G08-03", "G08-10")
+@pytest.mark.parametrize("name", MODE_CONTRACTS)
+def test_rewording_the_description_of_the_mode_field_is_only_a_patch(name: str) -> None:
+    def mutate(schema: dict[str, Any]) -> None:
+        schema["properties"]["mode"]["description"] += " (clarified)"
+
+    assert _classify(name, mutate) == (Change.PATCH, [])
+
+
+_SPOOF_SOURCE = """
+from dataclasses import dataclass
+from gie.contracts._spec import Record, Str, fld, record
+
+
+@record
+@dataclass(frozen=True, slots=True, kw_only=True)
+class Spoofed(Record):
+    \"\"\"SYNTHETIC record class created by code outside gie.contracts.\"\"\"
+
+    __module__ = {claimed!r}
+    note: str = fld(Str(), "Synthetic field.")
+"""
+
+
+@pytest.mark.requirement("COM-06")
+@pytest.mark.parametrize("creator", ["gie.execution.fake", "__main__", "gie.strategy.rogue", "testsx.fake"])
+@pytest.mark.parametrize("claimed", ["gie.contracts.tick", "tests.gie.samples", None])
+def test_a_record_class_created_outside_the_contracts_is_refused_even_with_a_spoofed_module(
+    creator: str, claimed: str | None
+) -> None:
+    """'A record class must be created by code of gie.contracts or tests (a spoofed __module__ is
+    refused).'"""
+    source = _SPOOF_SOURCE.format(claimed=claimed or creator)
+    if claimed is None:
+        source = source.replace(f"    __module__ = {creator!r}\n", "")
+    namespace: dict[str, Any] = {"__name__": creator}
+    with pytest.raises(TypeError, match=r"may only be defined in gie\.contracts") as caught:
+        exec(compile(source, f"<{creator}>", "exec"), namespace)
+    assert repr(creator) in str(caught.value)
+    assert "Spoofed" not in namespace
+
+
+@pytest.mark.requirement("COM-06")
+@pytest.mark.parametrize("creator", ["tests.gie.fake_module", "gie.contracts.fake_module"])
+def test_a_record_class_created_by_test_or_contract_code_is_accepted(
+    creator: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # dataclasses resolves the class's module through sys.modules: a temporary module stands in.
+    module = types.ModuleType(creator)
+    monkeypatch.setitem(sys.modules, creator, module)
+    exec(compile(_SPOOF_SOURCE.format(claimed=creator), f"<{creator}>", "exec"), module.__dict__)
+    spoofed = module.__dict__["Spoofed"]
+    assert spoofed.__module__ == creator
+    assert spoofed(note="synthetic").note == "synthetic"
+    assert spoofed.CONTRACT is None, "never registered: it is not a contract"
+    with pytest.raises(UnknownContractError):
+        to_wire(spoofed(note="synthetic"))

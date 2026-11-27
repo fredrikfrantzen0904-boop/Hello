@@ -1,10 +1,11 @@
-"""Tests for ``tools/check_architecture.py`` - rules AR000-AR007 of the dependency graph.
+"""Tests for ``tools/check_architecture.py`` - rules AR000-AR009 of the dependency graph.
 
 Requirements: S00-ASG-10 / S00-DEL-03 (dependency graph), S00-ASG-08 (repository layout),
 S00-ASG-09 (ownership), COM-06 (subsystems build on the shared contracts only), G03-05 (no
 third-party client can enter the foundation packages), S00-ASG-19 / S00-ASG-21 (time comes from the
 injected clock), S00-ASG-22 (identifiers are deterministic), M-AUTH-10 (sessions do not overwrite
-each other).
+each other), S00-ASG-23 / G03-12 / G06-04 (freshness against the clock of the run, no
+look-ahead tolerance), S11-ASG-16 (the dashboard is read-only).
 
 The expected behaviour is taken from the rule texts in the module documentation of the tool, the
 "Code rules" of ``CLAUDE.md`` and the comments of ``specifications/dependency_graph.yaml`` - not
@@ -952,6 +953,201 @@ def test_ar007_is_skipped_with_a_note_when_git_cannot_answer(tmp_path: Path, git
     assert "not the top level" in report.notes[0]
 
 
+# ============================================================================== AR008
+CALL_ARGS = "now_ns=2, reference_ns=1, max_age_ns=5"
+LOOK_AHEAD_SNIPPETS: list[tuple[str, set[int]]] = [
+    (f"from gie.core.freshness import is_fresh\n\nok = is_fresh({CALL_ARGS})\n", {1, 3}),
+    ("from gie.core import freshness\n\nage = freshness.age_ns(now_ns=2, reference_ns=1)\n", {3}),
+    (f"import gie.core.freshness\n\ngie.core.freshness.require_fresh({CALL_ARGS}, what='tick')\n", {3}),
+    ("import gie.core.freshness as fr\n\ncheck = fr.is_fresh\n", {3}),  # a reference without a call
+    (f"from gie.core.freshness import *\n\nok = is_fresh({CALL_ARGS})\n", {3}),
+    (f"from gie.core.freshness import require_fresh as guard\n\nguard({CALL_ARGS}, what='x')\n", {1, 3}),
+    ("from gie.core import freshness\n\ncheck = getattr(freshness, 'age_ns')\n", {3}),
+    ("from gie.core import freshness\n\nchecker = freshness\nok = checker.is_fresh\n", {4}),
+    ("from ..core.freshness import age_ns\n", {1}),  # relative import, resolved against gie.alpha
+    ("from ..core import freshness as fr\n\nfr.require_fresh\n", {3}),
+    # a future tolerance other than the literal 0, in any call
+    (
+        "from gie.core import freshness\n\n"
+        "freshness.is_fresh_now(clock, reference_ns=1, max_age_ns=5, future_tolerance_ns=1)\n",
+        {3},
+    ),
+    ("SKEW = 0\n\ncheck(clock, future_tolerance_ns=SKEW)\n", {3}),
+    ("check(clock, future_tolerance_ns=False)\n", {1}),
+    ("check(clock, future_tolerance_ns=0.0)\n", {1}),
+    ("check(clock, future_tolerance_ns=-0)\n", {1}),
+    ("check(clock, future_tolerance_ns=10**9)\n", {1}),
+]
+
+
+@pytest.mark.requirement("S00-ASG-23", "G03-12", "G06-04")
+@pytest.mark.parametrize(("snippet", "lines"), LOOK_AHEAD_SNIPPETS)
+def test_ar008_plain_freshness_helpers_and_future_tolerance_are_reported(
+    tmp_path: Path, snippet: str, lines: set[int]
+) -> None:
+    violations = check_engine(tmp_path, snippet)
+    assert found(violations) == {("AR008", ENGINE, line) for line in lines}
+    assert all("clock of the run" in violation.message for violation in violations)
+
+
+CLOCKED_FRESHNESS_SNIPPETS: list[str] = [
+    (
+        "from gie.core.freshness import is_expired_now, is_fresh_now, require_fresh_now\n"
+        "from gie.core.freshness import require_not_expired_now\n\n\n"
+        "def judge(clock, tick, plan):\n"
+        "    is_fresh_now(clock, reference_ns=tick, max_age_ns=5)\n"
+        "    require_fresh_now(clock, reference_ns=tick, max_age_ns=5, what='tick', future_tolerance_ns=0)\n"
+        "    is_expired_now(clock, valid_until_ns=plan)\n"
+        "    return require_not_expired_now(clock, valid_until_ns=plan, what='plan')\n"
+    ),
+    "from gie.core.freshness import MAX_FUTURE_TOLERANCE_NS\n\nLIMIT = MAX_FUTURE_TOLERANCE_NS\n",
+    "def is_fresh() -> bool:\n    return True\n\n\nok = is_fresh()\n",  # a local function of that name
+    "def judge(record):\n    return record.is_fresh() and record.age_ns\n",  # attributes of other objects
+    "from gie.alpha import helper\n\nok = helper.is_fresh\n",
+]
+
+
+@pytest.mark.requirement("S00-ASG-23", "G03-12")
+@pytest.mark.parametrize("snippet", CLOCKED_FRESHNESS_SNIPPETS)
+def test_ar008_clocked_helpers_and_other_names_are_allowed(tmp_path: Path, snippet: str) -> None:
+    assert check_engine(tmp_path, snippet) == []
+
+
+@pytest.mark.requirement("S00-ASG-23", "G03-12")
+def test_ar008_applies_below_gie_outside_gie_core_only(tmp_path: Path) -> None:
+    plain = f"from gie.core.freshness import is_fresh\n\nok = is_fresh({CALL_ARGS}, future_tolerance_ns=1)\n"
+    document = fixture_graph()
+    document["packages"]["dashboard.gie"] = {"session": "S11", "may_import": ["gie.core", "gie.contracts"]}
+    files = {"gie/core/timeutil.py": plain, "gie/contracts/records.py": plain, "dashboard/gie/view.py": plain}
+    root = make_tree(tmp_path, document=document, files=files)
+    # gie/core defines the helpers; the dashboard is not below gie/; gie/contracts is not exempt.
+    assert found(ca.check(root, use_git=False)) == {
+        ("AR008", "gie/contracts/records.py", 1),
+        ("AR008", "gie/contracts/records.py", 3),
+    }
+
+
+@pytest.mark.requirement("S00-ASG-23", "G03-12", "G06-04")
+def test_ar008_real_repository_passes_the_rule() -> None:
+    report = ca.scan(REPO_ROOT)
+    assert report.python_files > 0
+    assert [v.render() for v in report.violations if v.rule == "AR008"] == []
+
+
+# ============================================================================== AR009
+VIEW = "dashboard/gie/view.py"
+
+
+def read_only_tree(root: Path, view: str, *, read_only: object = True) -> Path:
+    """SYNTHETIC FIXTURE: the base tree plus a declared dashboard package with *view* as one module."""
+    document = fixture_graph()
+    document["packages"]["dashboard.gie"] = {
+        "session": "S11",
+        "may_import": ["gie.core", "gie.contracts"],
+        "read_only": read_only,
+    }
+    return make_tree(root, document=document, files={"dashboard/gie/__init__.py": "", VIEW: view})
+
+
+READ_ONLY_SNIPPETS: list[tuple[str, set[int]]] = [
+    ("from gie.contracts.interfaces import RecordSink\n", {1}),
+    ("from gie.contracts.guarded import GuardedExecutionAdapter\n", {1}),
+    ("from gie.contracts.interfaces import ExecutionAdapter, OrderGateway, ProtectionPort\n", {1}),
+    ("from gie.core.routing_lock import RoutingGuard, register_simulated_adapter\n", {1}),
+    ("from gie.contracts import journal\n\nsink = journal.MemoryJournal()\n", {3}),
+    ("import gie.contracts.journal as store\n\nkind = store.FileJournal\n", {3}),
+    ("from gie.contracts import journal\n\nkind = getattr(journal, 'MemoryJournal')\n", {3}),
+    (
+        "from gie.contracts import interfaces\n\n\ndef show(port: interfaces.ProtectionPort) -> None:\n"
+        "    return None\n",
+        {4},
+    ),
+    (
+        "def act(view, bus, db, ui, plan, old, new, name):\n"
+        "    view.submit(plan)\n"
+        "    view.cancel(plan)\n"
+        "    view.replace(plan)\n"
+        "    bus.publish(plan)\n"
+        "    db.commit()\n"
+        "    ui.tighten_stop(plan)\n"
+        "    ui.exit(plan)\n"
+        "    getattr(view, 'submit')(plan)\n"
+        "    name.replace(old, new)\n",
+        set(range(2, 11)),
+    ),
+    ("import os\n\nos.exit(0)\n", {3}),  # only sys.exit is provably harmless
+    ("def leave(sys):\n    sys.exit(1)\n", {2}),  # a parameter called sys is not the module
+]
+
+
+@pytest.mark.requirement("S11-ASG-16", "COM-06")
+@pytest.mark.parametrize(("snippet", "lines"), READ_ONLY_SNIPPETS)
+def test_ar009_write_capability_in_a_read_only_package_is_reported(
+    tmp_path: Path, snippet: str, lines: set[int]
+) -> None:
+    violations = ca.check(read_only_tree(tmp_path, snippet), use_git=False)
+    assert found(violations) == {("AR009", VIEW, line) for line in lines}
+    assert all("read-only" in violation.message for violation in violations)
+
+
+READ_ONLY_ALLOWED: list[str] = [
+    "from gie.contracts.journal import JournalReader\nfrom gie.contracts.interfaces import RecordSource\n",
+    "from gie.contracts import records\n\nshown = records.RECORD\n",
+    "import sys\n\nsys.exit(0)\n",
+    (
+        "def tidy(name, old, new):\n"
+        "    first = 'a-b'.replace(old, new)\n"
+        "    second = name.replace('-', '_')\n"
+        "    third = name.replace('-', '_', 1)\n"
+        "    fourth = f'{name}!'.replace(old, new)\n"
+        "    fifth = str.replace(name, old, new)\n"
+        "    return first, second, third, fourth, fifth\n"
+    ),
+    "def show(view, event):\n    view.on_submit(event)\n    return view.submit_label, view.cancelled\n",
+]
+
+
+@pytest.mark.requirement("S11-ASG-16")
+@pytest.mark.parametrize("snippet", READ_ONLY_ALLOWED)
+def test_ar009_reading_records_is_allowed(tmp_path: Path, snippet: str) -> None:
+    assert ca.check(read_only_tree(tmp_path, snippet), use_git=False) == []
+
+
+WRITER = "from gie.contracts.journal import MemoryJournal\n\n\ndef act(view, plan):\n    view.submit(plan)\n"
+
+
+@pytest.mark.requirement("S11-ASG-16")
+def test_ar009_applies_to_read_only_packages_only(tmp_path: Path) -> None:
+    root = read_only_tree(tmp_path / "declared-false", WRITER, read_only=False)
+    assert ca.check(root, use_git=False) == []
+    assert check_engine(tmp_path / "subsystem", WRITER) == []  # gie.alpha is not read-only
+    document = fixture_graph()
+    document["packages"]["gie.beta"]["read_only"] = True  # any package can be declared read-only
+    root = make_tree(tmp_path / "beta", document=document, files={"gie/beta/model.py": WRITER})
+    assert found(ca.check(root, use_git=False)) == {
+        ("AR009", "gie/beta/model.py", 1),
+        ("AR009", "gie/beta/model.py", 5),
+    }
+
+
+@pytest.mark.requirement("S11-ASG-16", "S00-DEL-03")
+@pytest.mark.parametrize("value", ["yes", 1, None, [True]])
+def test_ar009_unreadable_read_only_value_fails_closed(tmp_path: Path, value: object) -> None:
+    violations = ca.check(read_only_tree(tmp_path, WRITER, read_only=value), use_git=False)
+    assert ("AR006", GRAPH) in {(violation.rule, violation.path) for violation in violations}
+    assert any("'read_only' must be true or false" in violation.message for violation in violations)
+    assert {("AR009", VIEW, 1), ("AR009", VIEW, 5)} <= found(violations)
+
+
+@pytest.mark.requirement("S11-ASG-16")
+def test_ar009_real_repository_declares_the_dashboard_read_only_and_passes() -> None:
+    document = yaml.safe_load((REPO_ROOT / GRAPH).read_text(encoding="utf-8"))
+    assert document["packages"]["dashboard.gie"]["read_only"] is True
+    report = ca.scan(REPO_ROOT)
+    assert report.python_files > 0
+    assert [v.render() for v in report.violations if v.rule == "AR009"] == []
+
+
 # ============================================================================== command line
 def test_cli_reports_one_line_per_violation_and_exit_status(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
@@ -987,7 +1183,7 @@ def test_cli_json_document(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -
     assert document["violations"] == [
         {"rule": "AR005", "path": ENGINE, "line": 3, "message": document["violations"][0]["message"]}
     ]
-    assert sorted(document["rules"]) == [f"AR00{number}" for number in range(8)]
+    assert sorted(document["rules"]) == [f"AR00{number}" for number in range(10)]
     assert document["python_files_scanned"] == len(BASE_FILES)
     assert document["tracked_files_checked"] is None
     assert len(document["notes"]) == 1

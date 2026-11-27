@@ -1,9 +1,12 @@
 """JSON Schema publication for the contracts (deliverable S00-DEL-02).
 
-``python -m gie.contracts.schema_gen --write`` regenerates the schema files and
-the lock; ``--check`` (run in CI) fails when the committed files differ from
-what the code generates, when a released schema was edited, or when a contract
-changed without the version bump the evolution rules require.
+``python -m gie.contracts.schema_gen --check`` (run in CI) fails when the
+committed files differ from what the code generates, when a released schema was
+edited, or when a contract changed without the version bump the evolution rules
+require.  This module computes and checks; it writes nothing (code below
+``gie/`` does not write files - only the journal does).  The files are written
+by ``python -m tools.write_schemas``, which takes their content from
+:func:`planned_files`.
 
 The schemas are JSON Schema 2020-12.  Keywords starting with ``x-gie-`` carry
 what plain JSON Schema cannot express: decimal bounds, units, canonical order
@@ -192,50 +195,44 @@ def check(schema_dir: Path = SCHEMA_DIR) -> list[str]:
     return problems
 
 
-def write(schema_dir: Path = SCHEMA_DIR) -> list[str]:
-    """Publish the current schemas.  Returns the names of the files written.
+def planned_files(schema_dir: Path = SCHEMA_DIR) -> dict[str, bytes]:
+    """File name -> bytes of every schema of the current versions, and of the lock that follows.
 
-    A locked schema may only be rewritten while the lock is ``PROPOSED`` (before
-    the owner approved the contract set).  After approval every change needs a
-    new version, which adds a new file and leaves released files untouched.
+    The lock comes last.  Nothing is written here; ``tools/write_schemas.py`` writes the files.
+    A locked schema may only change while the lock is ``PROPOSED`` (before the owner approved the
+    contract set).  After approval every change needs a new version, which adds a new file and
+    leaves released files untouched; an attempt to change a released file ends here.
     """
-    schema_dir.mkdir(parents=True, exist_ok=True)
     lock = load_lock(schema_dir)
     locked: dict[str, dict[str, str]] = lock.setdefault("contracts", {})
     approved = lock.get("approval_status") == APPROVED
-    written: list[str] = []
+    files: dict[str, bytes] = {}
     for name, record_type in all_contracts().items():
         version = record_type.VERSION
         assert version is not None
         data = _file_bytes(render(json_schema(record_type)))
         digest = _sha256(data)
-        path = schema_dir / schema_filename(name, version)
+        filename = schema_filename(name, version)
         previous = locked.setdefault(name, {}).get(version)
         if previous is not None and previous != digest and approved:
             raise SystemExit(
-                f"{path.name} is released and approved; bump the version of {name} instead of editing it"
+                f"{filename} is released and approved; bump the version of {name} instead of editing it"
             )
-        if not path.exists() or path.read_bytes() != data:
-            path.write_bytes(data)  # bytes: no newline translation on any platform
-            written.append(path.name)
+        files[filename] = data
         locked[name][version] = digest
-    lock_data = _file_bytes(json.dumps(lock, indent=2, sort_keys=True) + "\n")
-    lock_path = schema_dir / LOCK_NAME
-    if not lock_path.exists() or lock_path.read_bytes() != lock_data:
-        lock_path.write_bytes(lock_data)
-        written.append(LOCK_NAME)
-    return written
+    files[LOCK_NAME] = _file_bytes(json.dumps(lock, indent=2, sort_keys=True) + "\n")
+    return files
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0] if __doc__ else None)
-    group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("--check", action="store_true", help="verify the committed schemas")
-    group.add_argument("--write", action="store_true", help="regenerate schemas and lock")
-    args = parser.parse_args(argv)
-    if args.write:
-        for name in write():
-            print(f"wrote {name}")
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        required=True,
+        help="verify the committed schemas (they are written by: python -m tools.write_schemas)",
+    )
+    parser.parse_args(argv)
     problems = check()
     for problem in problems:
         print(f"PROBLEM: {problem}", file=sys.stderr)

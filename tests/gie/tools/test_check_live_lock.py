@@ -4,7 +4,7 @@ Requirements: G08-03 (live lock), G08-10 / M-AUTH-19 / OWN-14 (real execution st
 S12-ASG-06 (check live lock); acceptance test S00-ACC-04 "Paper-only routing lock".  Every test of
 this module carries these markers.
 
-The expected behaviour is taken from the rule list of the tool's module documentation (LL000-LL014),
+The expected behaviour is taken from the rule list of the tool's module documentation (LL000-LL015),
 from ``gie/core/routing_lock.py`` (layer 4), ``docs/ARCHITECTURE.md`` section 6 and
 ``specifications/SHARED_CONTRACTS.md`` section 9.3 - not from the implementation.
 
@@ -285,8 +285,8 @@ def test_real_repository_is_actually_scanned() -> None:
     assert len(sources) >= 30
 
 
-def test_rule_ids_are_exactly_ll000_to_ll014() -> None:
-    assert sorted(cll.RULES) == [f"LL{number:03d}" for number in range(15)]
+def test_rule_ids_are_exactly_ll000_to_ll015() -> None:
+    assert sorted(cll.RULES) == [f"LL{number:03d}" for number in range(16)]
     assert all(rule in (cll.__doc__ or "") for rule in cll.RULES), "every rule is documented in the tool"
 
 
@@ -1026,8 +1026,8 @@ LL003_CONTROLS = [
 
         here = os.getcwd()
         joined = os.path.join(here, "data")
-        os.replace(joined, joined + ".bak")
-        os.makedirs(joined, exist_ok=True)
+        present = os.path.exists(joined) and os.listdir(joined)
+        size = os.stat(joined).st_size
         """,
     ),
     case(
@@ -2160,12 +2160,22 @@ ADAPTER_MODULE = src(
             self.book.replace(request)
     """
 )
+#: LL015 - the one-argument ``.replace`` of the adapter module (name and signature of ``Path.replace``).
+ADAPTER_REPLACE: Found = {
+    ("LL015", number)
+    for number, line in enumerate(ADAPTER_MODULE.splitlines(), start=1)
+    if "self.book.replace(request)" in line
+}
 
 
 @pytest.mark.parametrize("package", ["gie/execution/", "gie/backtesting/", "gie/contracts/"])
 def test_ll011_registration_is_allowed_in_the_adapter_packages(tmp_path: Path, package: str) -> None:
-    """Also the LL012 exemption: an adapter module may call its own collaborators."""
-    assert_marked(tmp_path, f"{package}simulated.py", ADAPTER_MODULE.format(mark=""))
+    """Also the LL012 exemption: an adapter module may call its own collaborators.
+
+    LL015 still reports the one-argument ``self.book.replace(request)``: by name and signature it
+    may be ``Path.replace(target)`` (documented limit of LL015, not relaxed for adapter modules).
+    """
+    assert_marked(tmp_path, f"{package}simulated.py", ADAPTER_MODULE.format(mark=""), extra=ADAPTER_REPLACE)
 
 
 @pytest.mark.parametrize(
@@ -2181,7 +2191,9 @@ def test_ll011_registration_is_allowed_in_the_adapter_packages(tmp_path: Path, p
     ],
 )
 def test_ll011_registration_is_denied_everywhere_else(tmp_path: Path, package: str) -> None:
-    assert_marked(tmp_path, f"{package}simulated.py", ADAPTER_MODULE.format(mark="  # !LL011"))
+    assert_marked(
+        tmp_path, f"{package}simulated.py", ADAPTER_MODULE.format(mark="  # !LL011"), extra=ADAPTER_REPLACE
+    )
 
 
 LL011_CASES = [
@@ -2256,6 +2268,12 @@ RAW_CALLS = src(
         self.engine.broker.cancel(event){mark}
     """
 )
+#: LL015 - ``broker.replace(event)`` has the name and the signature of ``Path.replace(target)``.
+RAW_REPLACE: Found = {
+    ("LL015", number)
+    for number, line in enumerate(RAW_CALLS.splitlines(), start=1)
+    if "broker.replace(event)" in line
+}
 
 
 def test_ll012_documented_convention() -> None:
@@ -2270,12 +2288,12 @@ def test_ll012_documented_convention() -> None:
 
 @pytest.mark.parametrize("package", GATEWAY_PACKAGES)
 def test_ll012_raw_adapter_calls_are_reported_in_the_gateway_packages(tmp_path: Path, package: str) -> None:
-    assert_marked(tmp_path, f"{package}engine.py", RAW_CALLS.format(mark="  # !LL012"))
+    assert_marked(tmp_path, f"{package}engine.py", RAW_CALLS.format(mark="  # !LL012"), extra=RAW_REPLACE)
 
 
 @pytest.mark.parametrize("package", PACKAGES_WITHOUT_A_GATEWAY)
 def test_ll012_applies_only_to_the_gateway_packages(tmp_path: Path, package: str) -> None:
-    assert_marked(tmp_path, f"{package}engine.py", RAW_CALLS.format(mark=""))
+    assert_marked(tmp_path, f"{package}engine.py", RAW_CALLS.format(mark=""), extra=RAW_REPLACE)
 
 
 LL012_CASES = [
@@ -2286,7 +2304,7 @@ LL012_CASES = [
         def run(adapters, make, event):
             adapters[0].submit(event)  # !LL012
             make().cancel(event)  # !LL012
-            (adapters or make).replace(event)  # !LL012
+            (adapters or make).replace(event)  # !LL012, LL015
         """,
     ),
     case(
@@ -2306,7 +2324,7 @@ LL012_CASES = [
         def run(text, event, old, new):
             text.replace(old, new)  # !LL012
             event.replace("a", new)  # !LL012
-            event.replace(new)  # !LL012
+            event.replace(new)  # !LL012, LL015
             event.replace("a", "b", position=new)  # !LL012
             event.replace("a", "b", "c", "d")  # !LL012
         """,
@@ -2329,7 +2347,7 @@ LL012_CASES = [
 
 
         def run(event):
-            dataclasses.replace(event)  # !LL012
+            dataclasses.replace(event)  # !LL012, LL015
         """,
     ),
     case(
@@ -2341,7 +2359,7 @@ LL012_CASES = [
 
         def run(make, event, str):
             dataclasses = make()
-            dataclasses.replace(event)  # !LL012
+            dataclasses.replace(event)  # !LL012, LL015
             str.replace(event, 1, 2)  # !LL012
         """,
     ),
@@ -2408,16 +2426,14 @@ LL012_CONTROLS = [
         import copy
         import dataclasses
         import dataclasses as dc
-        import os
         from dataclasses import replace
 
 
-        def revise(plan, source, target):
+        def revise(plan):
             first = dataclasses.replace(plan, stop_price=1)
             second = dc.replace(plan, stop_price=2)
             third = replace(plan, stop_price=3)
             fourth = copy.replace(plan, stop_price=4)
-            os.replace(source, target)
             return first, second, third, fourth
         """,
     ),
@@ -2530,6 +2546,293 @@ def test_tools_and_tests_are_outside_the_deny_rules(tmp_path: Path) -> None:
 
 def test_the_tool_does_not_contain_the_literal_it_searches_for() -> None:
     assert PRODUCTION not in Path(cll.__file__).read_text(encoding="utf-8").casefold()
+
+
+# ================================================================================================
+# LL015 - no file-drop channel: no file-system write below gie/ and dashboard/
+# ================================================================================================
+JOURNAL = "gie/contracts/journal.py"
+
+LL015_CASES = [
+    case(
+        "open-with-a-writing-mode",
+        "gie/execution/drop.py",
+        """
+        import io
+        from pathlib import Path
+
+
+        def drop(folder, name):
+            open(folder + "/order.txt", "w")  # !LL015
+            open(name, "a")  # !LL015
+            open(name, mode="x")  # !LL015
+            open(name, "r+")  # !LL015
+            open(name, "wb", encoding=None)  # !LL015
+            io.open(name, "w", encoding="utf-8")  # !LL015
+            Path(folder).open("w")  # !LL015
+            Path(folder).open(mode="ab")  # !LL015
+            folder.open("a+")  # !LL015
+            Path.open(folder, "w")  # !LL015
+        """,
+    ),
+    case(
+        "open-with-a-mode-that-cannot-be-verified",
+        "gie/backtesting/drop.py",
+        """
+        def drop(name, mode, options, settings):
+            open(name, mode)  # !LL015
+            open(name, mode=settings.mode)  # !LL015
+            open(name, *options)  # !LL015
+            open(name, **settings)  # !LL015
+            name.open(mode)  # !LL015
+            name.open("r" if mode else "w")  # !LL015
+        """,
+    ),
+    case(
+        "open-through-an-alias-or-a-renamed-module",
+        "gie/reflex/drop.py",
+        """
+        import io as files
+
+        writer = open
+
+
+        def drop(name):
+            writer(name, "w")  # !LL015
+            files.open(name, "a")  # !LL015
+        """,
+    ),
+    case(
+        "os-open-with-a-flag-that-writes-or-cannot-be-verified",
+        "gie/core/drop.py",
+        """
+        import os
+
+
+        def drop(name, flags):
+            os.open(name, os.O_WRONLY | os.O_CREAT)  # !LL015
+            os.open(name, os.O_RDWR)  # !LL015
+            os.open(name, os.O_RDONLY | os.O_APPEND)  # !LL015
+            os.open(name, flags)  # !LL015
+            os.open(name, 1)  # !LL015
+            os.open(name, flags=os.O_TRUNC)  # !LL015
+            opener = os.open  # !LL015
+        """,
+    ),
+    case(
+        "path-methods-that-write",
+        "gie/intermarket/drop.py",
+        """
+        from pathlib import Path
+
+
+        def drop(folder, target, text, parts):
+            order = Path(folder) / "order.txt"
+            order.write_text(text)  # !LL015
+            order.write_bytes(b"synthetic")  # !LL015
+            order.touch()  # !LL015
+            order.parent.mkdir(parents=True)  # !LL015
+            order.unlink(missing_ok=True)  # !LL015
+            order.parent.rmdir()  # !LL015
+            order.symlink_to(target)  # !LL015
+            order.hardlink_to(target)  # !LL015
+            order.rename(target)  # !LL015
+            order.replace(target)  # !LL015
+            order.replace(target=target)  # !LL015
+            order.rename(*parts)  # !LL015
+            move = order.replace  # !LL015
+            write = order.write_text  # !LL015
+            getattr(order, "write_text")(text)  # !LL015
+        """,
+    ),
+    case(
+        "os-functions-that-write",
+        "gie/market_data/drop.py",
+        """
+        import os
+        import os as system
+        from os import makedirs as make_all, remove  # !LL015
+
+
+        def drop(name, target):
+            os.rename(name, target)  # !LL015
+            os.replace(name, target)  # !LL015
+            os.remove(name)  # !LL015
+            os.unlink(name)  # !LL015
+            os.mkdir(name)  # !LL015
+            os.makedirs(name, exist_ok=True)  # !LL015
+            os.rmdir(name)  # !LL015
+            os.symlink(name, target)  # !LL015
+            os.link(name, target)  # !LL015
+            os.truncate(name, 0)  # !LL015
+            system.remove(name)  # !LL015
+            remove(name)  # !LL015
+            make_all(name)  # !LL015
+            getattr(os, "rename")(name, target)  # !LL015
+        """,
+    ),
+    case(
+        "everything-in-shutil-and-tempfile",
+        "gie/learning/drop.py",
+        """
+        import importlib
+        import shutil  # !LL015
+        import tempfile as scratch  # !LL015
+        from shutil import copyfile  # !LL015
+
+
+        def drop(name, target):
+            shutil.copy(name, target)  # !LL015
+            shutil.move(name, target)  # !LL015
+            scratch.mkstemp()  # !LL015
+            copyfile(name, target)  # !LL015
+            importlib.import_module("tempfile").mkdtemp()  # !LL015
+            getattr(shutil, "disk_usage")(name)  # !LL015
+        """,
+    ),
+    case(
+        "os-replace-in-a-gateway-package-is-a-write-not-an-adapter-call",
+        "gie/backtesting/plans.py",
+        """
+        import os
+
+
+        def revise(source, target):
+            os.replace(source, target)  # !LL015
+        """,
+    ),
+    case(
+        "dashboard-is-scanned-too",
+        "dashboard/gie/export.py",
+        """
+        from pathlib import Path
+
+        Path("report.csv").write_text("synthetic")  # !LL015
+        """,
+    ),
+]
+LL015_CONTROLS = [
+    case(
+        "read-only-opens",
+        "gie/market_data/read.py",
+        """
+        import io
+        import os
+        from pathlib import Path
+
+
+        def read(name, folder):
+            open(name)
+            open(name, "r")
+            open(name, "rb")
+            open(name, mode="rt", encoding="utf-8")
+            io.open(name, "rb")
+            Path(folder).open()
+            Path(folder).open("rb")
+            Path.open(folder, "r")
+            folder.open(mode="r")
+            Path(folder).read_text()
+            Path(folder).read_bytes()
+            os.open(name, os.O_RDONLY)
+            os.open(name, os.O_RDONLY | os.O_CLOEXEC)
+            os.open(name, flags=0)
+            os.path.exists(name)
+            os.listdir(folder)
+            os.stat(name)
+        """,
+    ),
+    case(
+        "rename-and-replace-that-cannot-be-path-methods",
+        "gie/core/text.py",
+        """
+        import copy
+        import dataclasses
+
+
+        def tidy(name, stamp, plan, frame, old, new):
+            first = name.replace(old, new)
+            second = stamp.replace(microsecond=0)
+            third = dataclasses.replace(plan)
+            fourth = copy.replace(plan)
+            fifth = str.replace(name, old, new)
+            sixth = frame.rename(columns={"a": "b"})
+            seventh = bytes.replace
+            return first, second, third, fourth, fifth, sixth, seventh
+        """,
+    ),
+    case(
+        "the-order-gateway-amends-an-order",
+        "gie/execution/engine.py",
+        """
+        class Engine:
+            def run(self, gateway, request):
+                gateway.replace(request)
+                self._order_gateway.replace(request)
+                getattr(gateway, "replace")(request)
+        """,
+    ),
+]
+
+
+@pytest.mark.parametrize(("path", "source", "extra"), LL015_CASES)
+def test_ll015_file_system_writes_are_reported(tmp_path: Path, path: str, source: str, extra: Found) -> None:
+    assert marked(source)
+    assert_marked(tmp_path, path, source, extra=extra)
+
+
+@pytest.mark.parametrize(("path", "source", "extra"), LL015_CONTROLS)
+def test_ll015_does_not_fire_on_controls(tmp_path: Path, path: str, source: str, extra: Found) -> None:
+    assert not marked(source)
+    assert_marked(tmp_path, path, source, extra=extra)
+
+
+JOURNAL_LIKE = src(
+    """
+    from pathlib import Path
+
+
+    def append(path, data):
+        with Path(path).open("ab") as handle:
+            handle.write(data)
+        Path(f"{path}.lock").touch()
+    """
+)
+
+
+def test_ll015_only_the_journal_module_may_write(tmp_path: Path) -> None:
+    assert frozenset({JOURNAL}) == cll.FILE_WRITE_EXEMPT_FILES
+    write_tree(tmp_path, {JOURNAL: JOURNAL_LIKE, "gie/contracts/journal_copy.py": JOURNAL_LIKE})
+    found = {(violation.rule, violation.path, violation.line) for violation in cll.check(tmp_path)}
+    assert found == {
+        ("LL015", "gie/contracts/journal_copy.py", 5),
+        ("LL015", "gie/contracts/journal_copy.py", 7),
+    }
+
+
+def test_ll015_exemption_is_documented_as_a_coordinator_decision() -> None:
+    text = Path(cll.__file__).read_text(encoding="utf-8")
+    before = text[: text.index("FILE_WRITE_EXEMPT_FILES: Final")]
+    comment = " ".join(line.strip("#: ") for line in before.splitlines()[-3:])
+    assert "coordinator decision" in comment
+    assert "docs/DECISION_LOG.md" in comment
+    documentation = " ".join((cll.__doc__ or "").split())
+    assert "file-drop" in documentation or "file drop" in documentation
+    assert "C extension" in documentation
+    assert "subprocess" in documentation
+    assert {"shutil", "tempfile"} == set(cll.FILE_WRITE_MODULES)
+    assert {"rename", "replace", "remove", "unlink", "mkdir", "makedirs", "rmdir", "symlink", "link"} | {
+        "truncate"
+    } <= cll.OS_WRITE_FUNCTIONS
+    assert {
+        "write_text", "write_bytes", "touch", "mkdir", "rename", "replace", "unlink", "rmdir", "symlink_to",
+        "hardlink_to",
+    } <= cll.PATH_WRITE_METHODS  # fmt: skip
+
+
+def test_ll015_tools_and_tests_may_write(tmp_path: Path) -> None:
+    source = 'from pathlib import Path\n\nPath("out.json").write_text("{}")\nopen("x", "w")\n'
+    write_tree(tmp_path, {"tools/report.py": source, "tests/gie/core/test_x.py": source})
+    assert cll.check(tmp_path) == []
 
 
 # ================================================================================================

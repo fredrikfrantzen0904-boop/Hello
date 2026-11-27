@@ -165,8 +165,11 @@ def _diff_since(old: dict[str, Any], new: dict[str, Any], here: str, reasons: li
         return Change.MAJOR
     level = Change.NONE
     for name in sorted(set(old_fields) & set(new_fields), key=str):
-        before = _FIRST_VERSION if old_since is None else old_since.get(name)
-        after = _FIRST_VERSION if new_since is None else new_since.get(name)
+        # A property without an entry is a field of the first version: the envelope properties
+        # (``contract``, ``schema_version``) never have one, and neither has any field of a schema
+        # that publishes no table at all.
+        before = _FIRST_VERSION if old_since is None else old_since.get(name, _FIRST_VERSION)
+        after = _FIRST_VERSION if new_since is None else new_since.get(name, _FIRST_VERSION)
         if before != after:
             reasons.append(
                 f"{here}/{name}: introduction version of an existing field changed {before!r} -> {after!r}"

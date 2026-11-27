@@ -33,7 +33,7 @@ from gie.contracts.common import (
     reason_codes_field,
 )
 from gie.contracts.registry import SEMVER_PATTERN, contract
-from gie.core.errors import IllegalTransitionError
+from gie.core.errors import ContractValidationError, IllegalTransitionError
 
 GIT_COMMIT_PATTERN: Final[str] = r"^[0-9a-f]{40}$"
 #: Repository-relative location.  No scheme, no credentials, no parent traversal.
@@ -466,7 +466,9 @@ class RegistryHistory:
     def check(self, entry: ModelVersion) -> bool:
         """Validate *entry*; returns False when it is the newest entry of its version again."""
         if type(entry) is not ModelVersion:
-            raise TypeError("the model registry holds ModelVersion records")
+            raise ContractValidationError(
+                "the model registry holds ModelVersion records", actual_type=type(entry).__name__
+            )
 
         def fail(rule: str) -> IllegalTransitionError:
             return IllegalTransitionError(
@@ -530,7 +532,9 @@ def validate_registry_history(entries: Sequence[ModelVersion]) -> None:
     last_seq: int | None = None
     for entry in entries:
         if type(entry) is not ModelVersion:
-            raise TypeError("validate_registry_history expects ModelVersion records")
+            raise ContractValidationError(
+                "validate_registry_history expects ModelVersion records", actual_type=type(entry).__name__
+            )
         if last_seq is not None and entry.seq != last_seq + 1:
             raise IllegalTransitionError(
                 "illegal registry history: registry seq must increase by exactly 1",

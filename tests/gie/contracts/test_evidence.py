@@ -1274,7 +1274,7 @@ def test_two_records_of_one_engine_for_one_event_are_refused() -> None:
     ],
 )
 def test_group_by_market_event_refuses_input_that_is_not_an_evidence_record(intruder: Build) -> None:
-    with pytest.raises(TypeError, match="Evidence"):
+    with pytest.raises(ContractValidationError, match="Evidence"):
         group_by_market_event([_active(), intruder()])  # type: ignore[list-item]
 
 
@@ -1285,7 +1285,7 @@ def test_group_by_market_event_refuses_a_subclass_posing_as_evidence() -> None:
 
     genuine = _active()
     fields = {field.name: getattr(genuine, field.name) for field in dataclasses.fields(genuine)}
-    with pytest.raises(TypeError, match="Evidence"):
+    with pytest.raises(ContractValidationError, match="Evidence"):
         group_by_market_event([LookAlike(**fields)])
 
 

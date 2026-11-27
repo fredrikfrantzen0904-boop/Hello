@@ -97,10 +97,14 @@ contract_extensions:
      change_request: CR-003, requirements: [S01-ASG-04, S02-DEP-01],
      must_define: [open and close instant, availability instant (its ordering time), price series (bid / ask / mid),
                    stream name and rank relative to ticks and order events, rule for a quiet interval (timer-closed candle),
-                   daylight-saving behaviour]}
+                   daylight-saving behaviour, revision rule for a tick that arrives after its candle closed,
+                   the sink interface through which consumers receive candles]}
   - {id: CX-02, name: BrokerCalendar and session classifier, proposed_by: [S01],
      consumed_by: [S02, S04, S05, S06, S08, S10], change_request: CR-003,
-     requirements: [S01-ASG-05, S08-ASG-08, S08-ASG-10]}
+     requirements: [S01-ASG-05, S08-ASG-08, S08-ASG-10],
+     must_define: [whether the market is open at an instant, session of an instant (sessions may overlap),
+                   next close / rollover / weekend, version of the holiday table,
+                   that the calendar is broker data owned by session 01 while account rules derived from it belong to session 08]}
   - {id: CX-03, name: Tick usability policy per quality flag, proposed_by: [S01],
      consumed_by: [S02, S06, S07, S08], change_request: CR-005,
      requirements: [S01-ASG-06, S01-ASG-08, G03-12]}
@@ -120,7 +124,10 @@ contract_extensions:
      requirements: [S01-ASG-12],
      must_define: [release vintage, futures last and volume, contract month, expiry and roll]}
   - {id: CX-07, name: MarketCondition / TradingRestriction, proposed_by: [S03],
-     consumed_by: [S05, S08], change_request: CR-003, requirements: [S08-ASG-10]}
+     consumed_by: [S05, S08], change_request: CR-003, requirements: [S08-ASG-10],
+     must_define: [a MISSING state that fails closed (an unknown condition never permits new risk),
+                   which part is market information of session 03 (news, volatility) and which is the
+                   calendar of session 01 (CX-02) or an account rule of session 08]}
   - {id: CX-08, name: Decision (unified decision stream), proposed_by: [S05],
      consumed_by: [S09, S10, S11], change_request: CR-003, requirements: [S11-DEP-01],
      must_define: [one ranking pass (candidates considered, scores, selected plan or no trade),
@@ -133,7 +140,8 @@ contract_extensions:
      proposed_by: [S00], consumed_by: [S01, S06, S07, S10], change_request: CR-003,
      requirements: [S10-ASG-01, S00-ASG-19, S10-ACC-01],
      must_define: [order of work inside a step (broker reports - positions - reflex - tactical - strategic),
-                   delivery of journaled records to listeners, timer steps, replay / paper conformance]}
+                   delivery of journaled records to listeners, timer steps, replay / paper conformance,
+                   building RunManifest.models from the model registry and refusing to start a run whose pins disagree with it]}
   - {id: CX-11, name: Health / error event and heartbeat rule, proposed_by: [S00],
      consumed_by: [S01, S06, S07, S11, S12], change_request: CR-003,
      requirements: [G08-06, G08-09, S09-ASG-05]}
@@ -160,7 +168,15 @@ contract_extensions:
      change_request: CR-003, requirements: [S08-ASG-03, S08-ACC-06]}
   - {id: CX-19, name: Adapter reconciliation queries / journal checkpoints / ledger eviction / raw tick storage,
      proposed_by: [S07], consumed_by: [S01, S10], change_request: CR-003,
-     requirements: [S07-ASG-07, S07-ASG-08, S01-ASG-02, G08-04, G08-05]}
+     requirements: [S07-ASG-07, S07-ASG-08, S01-ASG-02, G08-04, G08-05],
+     must_define: [reconciliation rule for a report that changes a reduce-only order,
+                   raw source timestamp with its offset and source symbol kept in the tick store (not in Tick)]}
+  - {id: CX-20, name: Feature dictionary and per-kind identity table of evidence, proposed_by: [S02],
+     consumed_by: [S03, S04, S09], change_request: CR-008,
+     requirements: [S02-DEL-01, S02-ACC-02, G02-02],
+     must_define: [location and canonical format of the dictionary (the content ModelVersion.feature_schema_sha256 hashes),
+                   identity levels and anchor per evidence kind - the same for every engine,
+                   that no engine emits evidence before the table is integrated]}
 
 # ---------------------------------------------------------------------------------------------
 # Brief path -> repository path (COM-03: "paths are proposed until coordinator approves").

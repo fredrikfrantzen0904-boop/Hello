@@ -468,7 +468,8 @@
       "market_event_id": "market_event_id(kind, symbol, timeframe, anchor_time_ns, identity level prices); evaluation_slot_id(engine, kind, symbol, timeframe, anchor_time_ns) for INACTIVE and MISSING"
     },
     "monotonic": [
-      "identity levels and market_event_id never change between revisions"
+      "identity levels and market_event_id never change between revisions",
+      "stage never goes back between revisions"
     ],
     "ordering_time": "decision_time_ns",
     "rank": {

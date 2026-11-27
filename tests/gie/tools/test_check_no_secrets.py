@@ -168,6 +168,12 @@ TEXT_FORMS: list[tuple[str, str, int, str]] = [
     ("notes.md", "Start it with `--api-key={value}` on the paper machine.\n", 1, "api-key"),
     ("notes.md", "Line one.\nSecretKey = {value}\n", 2, "SecretKey"),
     ("Start", "echo setup\nTOKEN={value}\n", 2, "TOKEN"),
+    # the three forms whose syntax ends the value without white space
+    ("compose.yaml", "environment: {{RETRIES: 3, API_TOKEN: {value}}}\n", 1, "API_TOKEN"),
+    ("compose.yaml", "services:\n  app: {{image: gie, secret: '{value}', replicas: 1}}\n", 2, "secret"),
+    ("run.sh", "  export GIE_AUTH={value} ./start.sh --paper\n", 1, "GIE_AUTH"),
+    ("notes.md", "Run `start --client-secret={value}.`\n", 1, "client-secret"),
+    ("notes.txt", 'start --auth-token="{value}" --paper\n', 1, "auth-token"),
 ]
 
 
@@ -214,6 +220,18 @@ NOT_A_LITERAL_CREDENTIAL: list[tuple[str, str]] = [
     ("meta.yaml", "author: Coordinator\nauthority: project-owner\nauthors: several-people\n"),
     ("meta.yaml", "path: specifications/acceptance_tests.yaml\ndescription: the password policy document\n"),
     ("meta.yaml", "keyboard: qwertz-layout\nmonkey: capuchin-fixture\n"),
+    # the flow-mapping, shell-prefix and flag forms with placeholders, expressions and prose
+    ("compose.yaml", "environment: {DB_PASSWORD: ${DB_PASSWORD}, RETRIES: 3}\n"),
+    ("compose.yaml", "environment: {DB_PASSWORD: some longer words, RETRIES: 3}\n"),
+    ("compose.yaml", "environment: {RETRIES: 3, TOKEN_TTL: 86400}\n"),
+    ("run.sh", "MT5_PASSWD=$MT5_PASSWD ./start.sh\n"),
+    ("run.sh", "MT5_PASSWD=$(read-secret mt5) ./start.sh\n"),
+    ("notes.md", "Then MT5_PASSWD=abcdefghij is typed by the owner, never written down.\n"),
+    ("notes.md", "Start it with `--api-key=<issued-key>` on the paper machine.\n"),
+    ("notes.md", "Start it with `--api-key=$GIE_API_KEY` or `--token=${GIE_TOKEN}`.\n"),
+    ("notes.md", "Start it with `--api-key=abc12` (too short to be a credential).\n"),
+    ("notes.md", "Pass --gie-evidence=out.json and --author=coordinator-fixture.\n"),
+    ("limits.json", '{"args": "--token-limit=1000000"}\n'),
     # comparisons and paths
     ("notes.txt", "if token == expected_value then continue\n"),
     ("notes.txt", "see https://example.org/login?next=/account for the form\n"),

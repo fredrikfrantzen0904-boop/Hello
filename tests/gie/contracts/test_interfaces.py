@@ -3,8 +3,12 @@
 Expected behaviour is taken from the specification, not from the implementation:
 
 * ``specifications/SHARED_CONTRACTS.md`` section 10 (the ``Protocol`` classes ``TickSink``,
-  ``TickSource``, ``RecordSink``, ``RecordSource``, ``PlanScorer``, ``RiskGate``,
-  ``ExecutionAdapter``, ``OrderGateway`` and ``ModelRegistry`` are the shared interface surface),
+  ``TickSource``, ``RecordSink``, ``RecordListener``, ``RecordSource``, ``PlanScorer``, ``RiskGate``,
+  ``ExecutionAdapter``, ``OrderGateway``, ``ProtectionPort`` and ``ModelRegistry`` are the shared
+  interface surface),
+* ``reviews/session_00/rework_2_change_notice.md`` section 5 (the gateway takes the request only and
+  ``poll()`` returns a ``PollResult``; the reflex engine uses ``ProtectionPort``) and section 3
+  (``commit()`` ends a step),
   section 6.2 (``MemoryJournal`` and ``FileJournal`` are the reference journals; history is read
   through ``RecordSource``) and section 9.3 (``GuardedExecutionAdapter`` is the ``OrderGateway``);
 * the docstrings of ``gie/contracts/interfaces.py`` (which methods each interface has; "nothing
@@ -29,12 +33,14 @@ import pytest
 from gie.contracts import interfaces
 from gie.contracts._spec import Record
 from gie.contracts.candidate import Candidate
-from gie.contracts.guarded import GuardedExecutionAdapter
+from gie.contracts.guarded import GuardedExecutionAdapter, PollResult
 from gie.contracts.interfaces import (
     ExecutionAdapter,
     ModelRegistry,
     OrderGateway,
     PlanScorer,
+    ProtectionPort,
+    RecordListener,
     RecordSink,
     RecordSource,
     RiskGate,
@@ -55,7 +61,8 @@ from tests.gie import samples
 DOCUMENTED_MEMBERS: dict[type, set[str]] = {
     TickSink: {"on_tick"},
     TickSource: {"ticks"},
-    RecordSink: {"publish"},
+    RecordSink: {"publish", "commit"},
+    RecordListener: {"accepts", "on_record"},
     RecordSource: {"run_id", "read", "streams"},
     PlanScorer: {"score_plan"},
     RiskGate: {"evaluate", "release"},
@@ -70,6 +77,7 @@ DOCUMENTED_MEMBERS: dict[type, set[str]] = {
         "open_positions",
     },
     OrderGateway: {"submit", "cancel", "replace", "on_tick", "poll", "open_positions"},
+    ProtectionPort: {"tighten_stop", "exit"},
     ModelRegistry: {"get", "active", "find", "history", "status_at", "register", "transition"},
 }
 
@@ -105,6 +113,17 @@ class _RecordSinkShape:
     def publish(self, record: Record) -> int:
         return 0
 
+    def commit(self) -> None:
+        return None
+
+
+class _RecordListenerShape:
+    def accepts(self) -> tuple[type[Record], ...]:
+        return (OrderEvent, Position)
+
+    def on_record(self, record: Record) -> None:
+        return None
+
 
 class _RecordSourceShape:
     @property
@@ -139,30 +158,31 @@ class _RiskGateShape:
 
 
 class _OrderGatewayShape:
-    def submit(
-        self,
-        request: OrderEvent,
-        *,
-        plan: TradePlan | None = None,
-        decision: RiskDecision | None = None,
-        position: Position | None = None,
-    ) -> None:
+    def submit(self, request: OrderEvent) -> None:
         return None
 
-    def cancel(self, request: OrderEvent, *, position: Position | None = None) -> None:
+    def cancel(self, request: OrderEvent) -> None:
         return None
 
-    def replace(self, request: OrderEvent, *, position: Position | None = None) -> None:
+    def replace(self, request: OrderEvent) -> None:
         return None
 
     def on_tick(self, tick: Tick) -> None:
         return None
 
-    def poll(self) -> tuple[OrderEvent, ...]:
-        return ()
+    def poll(self) -> PollResult:
+        return PollResult((), 0, ())
 
     def open_positions(self) -> tuple[Position, ...]:
         return ()
+
+
+class _ProtectionPortShape:
+    def tighten_stop(self, position_id: str, trigger_price: Decimal, reason_code: str) -> str:
+        return "ord-fixture"  # SYNTHETIC FIXTURE: structural stand-in, no order is built
+
+    def exit(self, position_id: str, volume_lots: Decimal, reason_code: str) -> str:
+        return "ord-fixture"
 
 
 class _ModelRegistryShape:
@@ -198,10 +218,12 @@ SHAPES: dict[type, type] = {
     TickSink: _TickSinkShape,
     TickSource: _TickSourceShape,
     RecordSink: _RecordSinkShape,
+    RecordListener: _RecordListenerShape,
     RecordSource: _RecordSourceShape,
     PlanScorer: _PlanScorerShape,
     RiskGate: _RiskGateShape,
     OrderGateway: _OrderGatewayShape,
+    ProtectionPort: _ProtectionPortShape,
     ModelRegistry: _ModelRegistryShape,
 }
 
@@ -214,16 +236,18 @@ def _name(protocol: type) -> str:
 
 # =========================================================================== the interface surface
 @pytest.mark.requirement("S00-ASG-25", "S00-ASG-18")
-def test_the_nine_documented_interfaces_exist() -> None:
+def test_the_eleven_documented_interfaces_exist() -> None:
     names = {
         "TickSink",
         "TickSource",
         "RecordSink",
+        "RecordListener",
         "RecordSource",
         "PlanScorer",
         "RiskGate",
         "ExecutionAdapter",
         "OrderGateway",
+        "ProtectionPort",
         "ModelRegistry",
     }
     assert {protocol.__name__ for protocol in DOCUMENTED_MEMBERS} == names
@@ -315,6 +339,7 @@ def test_memory_journal_is_a_record_sink_and_a_record_source() -> None:
     assert not isinstance(journal, TickSink)
     assert not isinstance(journal, ModelRegistry)
     assert _parameters(MemoryJournal.publish) == _parameters(RecordSink.publish)
+    assert _parameters(MemoryJournal.commit) == _parameters(RecordSink.commit) == []
     assert _parameters(MemoryJournal.read) == _parameters(RecordSource.read)
     assert _parameters(MemoryJournal.streams) == _parameters(RecordSource.streams)
     assert isinstance(inspect.getattr_static(MemoryJournal, "run_id"), property)
@@ -368,16 +393,30 @@ def test_guarded_execution_adapter_has_the_shape_of_an_order_gateway() -> None:
         implementation = inspect.getattr_static(GuardedExecutionAdapter, member)
         assert inspect.isfunction(implementation), member
         assert _parameters(implementation) == _parameters(getattr(OrderGateway, member)), member
-    # An entry needs its plan and approval, every other order its position: keyword-only, optional.
-    submit = inspect.signature(GuardedExecutionAdapter.submit).parameters
-    assert [name for name in submit if name != "self"] == ["request", "plan", "decision", "position"]
-    for name in ("plan", "decision", "position"):
-        assert submit[name].kind is inspect.Parameter.KEYWORD_ONLY
-        assert submit[name].default is None
-    for call in (GuardedExecutionAdapter.cancel, GuardedExecutionAdapter.replace):
-        parameters = inspect.signature(call).parameters
-        assert [name for name in parameters if name != "self"] == ["request", "position"]
-        assert parameters["position"].kind is inspect.Parameter.KEYWORD_ONLY
+    # The gateway takes the request only: plan, approval and position come from the run ledger,
+    # never from the caller (change notice section 5).
+    for call in (
+        GuardedExecutionAdapter.submit,
+        GuardedExecutionAdapter.cancel,
+        GuardedExecutionAdapter.replace,
+    ):
+        assert _parameters(call) == [("request", inspect.Parameter.POSITIONAL_OR_KEYWORD, False)]
+    # Constructor: (adapter, guard, *, clock, journal), all required.
+    assert _parameters(GuardedExecutionAdapter.__init__) == [
+        ("adapter", inspect.Parameter.POSITIONAL_OR_KEYWORD, False),
+        ("guard", inspect.Parameter.POSITIONAL_OR_KEYWORD, False),
+        ("clock", inspect.Parameter.KEYWORD_ONLY, False),
+        ("journal", inspect.Parameter.KEYWORD_ONLY, False),
+    ]
+    create = _parameters(inspect.getattr_static(GuardedExecutionAdapter, "create").__func__)
+    assert create == [
+        ("cls", inspect.Parameter.POSITIONAL_OR_KEYWORD, False),
+        ("adapter_type", inspect.Parameter.POSITIONAL_OR_KEYWORD, False),
+        ("guard", inspect.Parameter.POSITIONAL_OR_KEYWORD, False),
+        ("clock", inspect.Parameter.KEYWORD_ONLY, False),
+        ("journal", inspect.Parameter.KEYWORD_ONLY, False),
+        ("adapter_arguments", inspect.Parameter.VAR_KEYWORD, False),
+    ]
 
 
 @pytest.mark.requirement("S00-ASG-25", "M-AUTH-07")
@@ -396,16 +435,72 @@ def test_the_gateway_is_not_a_raw_execution_adapter_and_exposes_nothing_else() -
 
 @pytest.mark.requirement("S00-ASG-25")
 def test_gateway_and_adapter_calls_take_the_documented_arguments() -> None:
-    assert _parameters(OrderGateway.submit) == [
-        ("request", inspect.Parameter.POSITIONAL_OR_KEYWORD, False),
-        ("plan", inspect.Parameter.KEYWORD_ONLY, True),
-        ("decision", inspect.Parameter.KEYWORD_ONLY, True),
-        ("position", inspect.Parameter.KEYWORD_ONLY, True),
-    ]
-    for call in (ExecutionAdapter.submit, ExecutionAdapter.cancel, ExecutionAdapter.replace):
-        assert _parameters(call) == [("request", inspect.Parameter.POSITIONAL_OR_KEYWORD, False)]
+    request_only = [("request", inspect.Parameter.POSITIONAL_OR_KEYWORD, False)]
+    for call in (
+        OrderGateway.submit,
+        OrderGateway.cancel,
+        OrderGateway.replace,
+        ExecutionAdapter.submit,
+        ExecutionAdapter.cancel,
+        ExecutionAdapter.replace,
+    ):
+        assert _parameters(call) == request_only
     assert _parameters(OrderGateway.poll) == _parameters(ExecutionAdapter.poll) == []
     assert _parameters(OrderGateway.on_tick) == _parameters(TickSink.on_tick)
+    # The gateway's poll yields a PollResult; the adapter's poll the raw reports.
+    hints = inspect.get_annotations(OrderGateway.poll, eval_str=True)
+    assert hints["return"] is PollResult
+    assert inspect.get_annotations(GuardedExecutionAdapter.poll, eval_str=True)["return"] is PollResult
+    assert inspect.get_annotations(ExecutionAdapter.poll, eval_str=True)["return"] == Sequence[OrderEvent]
+
+
+@pytest.mark.requirement("S00-ASG-25")
+def test_poll_result_is_clean_exactly_when_nothing_was_refused() -> None:
+    event = samples.order_event()
+    clean = PollResult((event,), 2, ())
+    assert clean.clean
+    assert clean.events == (event,)
+    assert clean.duplicates == 2
+    refused = PollResult((), 0, (SequenceConflictError("SYNTHETIC FIXTURE: refused report"),))
+    assert not refused.clean
+    with pytest.raises(AttributeError):
+        clean.duplicates = 0  # type: ignore[misc]
+
+
+# =========================================================================== protection port, listener
+@pytest.mark.requirement("S00-ASG-25", "S00-ASG-18")
+def test_protection_port_takes_the_documented_arguments_and_returns_the_order_id() -> None:
+    expected = {
+        "tighten_stop": ["position_id", "trigger_price", "reason_code"],
+        "exit": ["position_id", "volume_lots", "reason_code"],
+    }
+    for member, names in expected.items():
+        parameters = _parameters(getattr(ProtectionPort, member))
+        assert parameters == [(name, inspect.Parameter.POSITIONAL_OR_KEYWORD, False) for name in names]
+        hints = inspect.get_annotations(getattr(ProtectionPort, member), eval_str=True)
+        assert hints["return"] is str  # the client_order_id of the order that carries the intent
+    assert inspect.get_annotations(ProtectionPort.tighten_stop, eval_str=True)["trigger_price"] is Decimal
+    assert inspect.get_annotations(ProtectionPort.exit, eval_str=True)["volume_lots"] is Decimal
+    # The reflex engine holds a protection port, never an order gateway or an adapter.
+    assert not isinstance(_ProtectionPortShape(), OrderGateway)
+    assert not isinstance(_OrderGatewayShape(), ProtectionPort)
+    assert not isinstance(GuardedExecutionAdapter, ProtectionPort)
+    assert not issubclass(GuardedExecutionAdapter, ProtectionPort)
+
+
+@pytest.mark.requirement("S00-ASG-25", "S00-ASG-18")
+def test_record_listener_names_the_contracts_it_wants_and_receives_records() -> None:
+    assert _parameters(RecordListener.accepts) == []
+    assert _parameters(RecordListener.on_record) == [
+        ("record", inspect.Parameter.POSITIONAL_OR_KEYWORD, False)
+    ]
+    listener: RecordListener = _RecordListenerShape()
+    assert all(issubclass(contract, Record) for contract in listener.accepts())
+    # A record sink is not a listener and vice versa; a tick sink is not a listener.
+    assert not isinstance(_RecordSinkShape(), RecordListener)
+    assert not isinstance(_RecordListenerShape(), RecordSink)
+    assert not isinstance(_TickSinkShape(), RecordListener)
+    assert not isinstance(MemoryJournal(), RecordListener)
 
 
 # =========================================================================== other interfaces

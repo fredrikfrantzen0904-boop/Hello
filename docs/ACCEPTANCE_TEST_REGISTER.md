@@ -26,7 +26,7 @@ One entry per acceptance requirement of the session briefs. 'status' is maintain
 | AT-S00-ACC-03 | Replay clock | planned | - | `tests/gie/core/test_clock.py` |  |
 | AT-S00-ACC-04 | Paper-only routing lock | planned | - | `tests/gie/core/test_routing_lock.py`<br>`tests/gie/tools/test_check_live_lock.py`<br>`tests/gie/contracts/test_guarded_adapter.py` |  |
 | AT-S00-ACC-05 | Baseline regression | planned | - | `tests/gie/baseline/test_baseline_regression.py` | B-001 |
-| AT-S00-ACC-06 | No production changes | planned | - | `tests/gie/tools/test_protected_paths.py`<br>`tests/gie/tools/test_baseline_audit.py` | B-001 |
+| AT-S00-ACC-06 | No production changes | planned | - | `tests/gie/tools/test_protected_paths.py`<br>`tests/gie/tools/test_baseline_audit.py`<br>`tests/gie/baseline/test_baseline_regression.py` | B-001 |
 
 ## S01
 
@@ -95,7 +95,7 @@ One entry per acceptance requirement of the session briefs. 'status' is maintain
 | AT-S06-ACC-03 | Stale tick | planned | - |  |  |
 | AT-S06-ACC-04 | Slow-model isolation | planned | - |  |  |
 | AT-S06-ACC-05 | No stop widening | planned | - |  |  |
-| AT-S06-ACC-06 | p99/max latency<br>Note: Two measures (p99; max): both must be reported. | planned | - |  |  |
+| AT-S06-ACC-06 | p99/max latency<br>Note: Two measures (p99; max): each needs its own marked test and both must be reported; the status is the worse of the two. | planned | - |  |  |
 | AT-S06-ACC-07 | Profit giveback comparisons<br>Note: An evaluation: 'passing' means the comparison ran reproducibly and was recorded, not that the result was favourable. | planned | - |  |  |
 | AT-S06-ACC-08 | Premature-exit comparisons<br>Note: An evaluation: 'passing' means the comparison ran reproducibly and was recorded, not that the result was favourable. | planned | - |  |  |
 

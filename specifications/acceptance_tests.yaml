@@ -431,7 +431,8 @@ acceptance_tests:
   test_modules: []
   status: planned
   blockers: []
-  notes: 'Two measures (p99; max): both must be reported.'
+  notes: 'Two measures (p99; max): each needs its own marked test and both must be reported; the status is the worse
+    of the two.'
 - id: AT-S06-ACC-07
   requirement: S06-ACC-07
   session: S06

@@ -48,6 +48,7 @@ from gie.contracts import (
     PriceTrigger,
     Record,
     RiskDecision,
+    RunManifest,
     Tick,
     TickFlag,
     TradePlan,
@@ -227,6 +228,31 @@ def _refused(wire: Any, error: type[GieError] = ContractValidationError) -> GieE
     return caught.value
 
 
+def _assert_same_json(parsed: Any, wire: Any, path: str = "<root>") -> None:
+    """*parsed* (canonical text read back with ``strict_loads``) is the JSON value *wire*.
+
+    The text does not say whether a number without a fraction was an integer or a double
+    (``gie.core.canonical``): an integral double is read back as an integer literal - and only as
+    its canonical rendering (``_spec.Float``).  Every other value must be identical, type included.
+    """
+    if isinstance(wire, dict):
+        assert type(parsed) is dict, path
+        assert set(parsed) == set(wire), path
+        for key, value in wire.items():
+            _assert_same_json(parsed[key], value, f"{path}.{key}")
+    elif isinstance(wire, list):
+        assert type(parsed) is list, path
+        assert len(parsed) == len(wire), path
+        for index, (left, right) in enumerate(zip(parsed, wire, strict=True)):
+            _assert_same_json(left, right, f"{path}[{index}]")
+    elif type(wire) is float and type(parsed) is int:
+        assert str(parsed) == canonical_dumps(wire), path
+        assert float(parsed) == wire, path
+    else:
+        assert type(parsed) is type(wire), path
+        assert parsed == wire, path
+
+
 def _replace_once(text: str, old: str, new: str) -> str:
     assert text.count(old) == 1, f"{old!r} must occur exactly once in the fixture text"
     return text.replace(old, new)
@@ -353,7 +379,8 @@ def test_wire_round_trip_and_bytes(contract: str, variant: str) -> None:
     assert from_wire(wire) == original
     assert from_wire(wire, expect=type(original)) == original
     assert from_wire(strict_loads(to_json(original))) == original
-    assert strict_loads(to_json(original)) == wire
+    _assert_same_json(strict_loads(to_json(original)), wire)
+    assert canonical_dumps(strict_loads(to_json(original))) == canonical_dumps(wire) == to_json(original)
     payload = to_bytes(original)
     assert isinstance(payload, bytes)
     assert payload == to_json(original).encode("utf-8")
@@ -466,7 +493,7 @@ def test_wire_values_have_the_json_type_of_their_unit(contract: str, variant: st
     for location in locations:
         check(location.spec.ftype, _get(wire, location.access), location.path)
     # The text form is plain JSON that any JSON parser reads to the same structure.
-    assert json.loads(to_json(_sample(contract, variant))) == wire
+    _assert_same_json(json.loads(to_json(_sample(contract, variant))), wire)
 
 
 @pytest.mark.requirement("S00-ACC-01", "S00-DEL-02")
@@ -718,6 +745,51 @@ def test_integer_literals_in_float_fields_are_accepted_only_when_exact() -> None
     for unrepresentable in (2**53 + 1, 2**63 - 1, 10**400):
         error = _refused(_with(wire, ("features", 0, "value"), unrepresentable))
         assert error.details["path"] == "features[0].value"
+
+
+@pytest.mark.requirement("S00-ASG-20", "S00-ASG-24", "S00-ASG-12")
+@pytest.mark.parametrize(
+    ("token", "double"),
+    [
+        ("1", 1.0),
+        ("0", 0.0),
+        ("9007199254740992", 2.0**53),
+        ("1234567890123456800", 1.2345678901234568e18),  # exact value 1234567890123456768
+        ("4611686018427388000", 4.611686018427388e18),
+        ("-1234567890123456800", -1.2345678901234568e18),
+        ("1000000000000000000", 1e18),
+        ("9223372036854775000", 9.223372036854775e18),  # the largest double below 2**63
+        ("9223372036854774784", None),  # the exact value of that double, not its rendering
+        ("1234567890123456768", None),  # the exact value of a double, but not its canonical rendering
+        ("1234567890123456770", None),  # the same double, other digits
+        ("9007199254740993", None),  # not a double at all
+        ("-1234567890123456768", None),
+    ],
+)
+def test_a_float_field_takes_an_integer_literal_exactly_when_it_renders_a_double(
+    token: str, double: float | None
+) -> None:
+    """Change notice 12: 'A float field accepts an integer literal exactly when it is the canonical
+    rendering of a double' - from text and from a JSON-compatible dict alike."""
+    text = to_json(samples.evidence())
+    damaged_text = _replace_once(text, '"value":0.6', f'"value":{token}')
+    wire = _with(to_wire(samples.evidence()), ("features", 0, "value"), int(token))
+    if double is not None:
+        assert canonical_dumps(double) == token
+        for decoded in (from_json(damaged_text), from_wire(wire)):
+            assert type(decoded.features[0].value) is float
+            assert decoded.features[0].value == double
+        assert to_json(from_json(damaged_text)) == damaged_text, "the literal is what the writer emits"
+    else:
+        assert canonical_dumps(float(int(token))) != token
+        with pytest.raises(ContractValidationError) as caught:
+            from_json(damaged_text)
+        assert type(caught.value) is ContractValidationError
+        assert caught.value.details["path"] == "features[0].value"
+        assert "canonical rendering of a double" in str(caught.value.details["rule"])
+        error = _refused(wire)
+        assert error.details["path"] == "features[0].value"
+        assert "canonical rendering of a double" in str(error.details["rule"])
 
 
 @pytest.mark.requirement("S00-ASG-20", "S00-ASG-24", "S00-ASG-12")
@@ -1401,6 +1473,17 @@ def test_fingerprint_is_the_documented_hash_and_is_stable(contract: str, variant
     assert digest != hashlib.sha256(to_bytes(original)).hexdigest(), "it is not the hash of the full envelope"
 
 
+def _replace_field(original: Record, name: str, value: Any) -> Record:
+    """*original* with one field changed.  A RunManifest derives its ``run_id`` from every other
+    field (RUN-1), so a changed manifest is built with ``RunManifest.create`` (change notice 2)."""
+    if isinstance(original, RunManifest) and name != "run_id":
+        fields = {spec.name: getattr(original, spec.name) for spec in RunManifest.FIELD_SPECS}
+        del fields["run_id"]
+        fields[name] = value
+        return RunManifest.create(**fields)
+    return dataclasses.replace(original, **{name: value})  # type: ignore[type-var]
+
+
 def _single_field_changes(original: Record) -> Iterator[tuple[str, Record]]:
     """Valid records that differ from *original* in exactly one field."""
     for spec in type(original).FIELD_SPECS:
@@ -1431,7 +1514,7 @@ def _single_field_changes(original: Record) -> Iterator[tuple[str, Record]]:
             candidates += [value + "x", value + "_x", value + "X", value[:-1]]
         for candidate in candidates:
             try:
-                changed = dataclasses.replace(original, **{spec.name: candidate})  # type: ignore[type-var]
+                changed = _replace_field(original, spec.name, candidate)
             except ContractValidationError:
                 continue
             if changed != original:

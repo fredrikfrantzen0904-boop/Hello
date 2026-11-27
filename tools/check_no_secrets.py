@@ -37,7 +37,9 @@ SC001  Private key header (``-----BEGIN`` ... ``PRIVATE KEY-----``, any key type
 SC002  A name that contains ``password``, ``passwd``, ``pwd``, ``secret``, ``token``, ``api_key``,
        ``apikey``, ``access_key`` or ``auth`` is given a literal value of six or more characters
        that is not an obvious placeholder.  Forms: ``NAME = "value"``, ``NAME: value`` (YAML),
-       ``"name": "value"`` (JSON), ``NAME=value`` (.env).  In Python files the forms are read from
+       ``{NAME: value, ...}`` (a YAML flow mapping), ``"name": "value"`` (JSON), ``NAME=value``
+       (.env), ``NAME=value command ...`` (a shell prefix assignment) and ``--name=value`` (a
+       command-line flag, also inside prose).  In Python files the forms are read from
        the syntax tree: assignments, dictionary entries, keyword arguments and parameter defaults
        whose value is a string or bytes literal.
 SC003  URL with embedded credentials: a user name and a password before the host, as in
@@ -89,7 +91,12 @@ Deliberate reading of the rule text
 * ``NAME: value`` is only read as a key and a value where YAML would read it so: the name starts
   the line (after indentation, a list dash or ``export``) or follows ``{`` or ``,``, and the colon
   is followed by white space.  A sentence that merely contains a colon is not an assignment.
-* An unquoted value followed by further words is prose, not a value.
+* An unquoted value followed by further words is prose, not a value - with three exceptions
+  whose syntax ends the value without white space: inside a YAML flow mapping (the name follows
+  ``{`` or ``,``) the value ends at the next ``,`` or ``}``; a shell prefix assignment
+  ``NAME=value command`` (the name opens the line, no white space around ``=``) ends at the first
+  white space; and a flag ``--name=value`` ends at white space, a quote or a back-tick.  A value
+  that itself contains white space, brackets or quotes is still not a literal.
 * Python source is read through :mod:`ast`, never with a regular expression, so a credential that
   appears only in a comment or inside a longer string is seen by SC001, SC003 and SC006 but not by
   SC002.  A Python file that cannot be parsed is read line by line like any other text.
@@ -207,6 +214,11 @@ _ASSIGNMENT: Final = re.compile(
     r"[ \t]*(?P<separator>:=|=|:)(?![=:])"
 )
 _LINE_START: Final = re.compile(r"\s*(?:[-*+]\s+)?(?:export\s+)?")
+#: SC002 - a command-line flag ``--name=value`` (anywhere on a line, prose included).
+_FLAG: Final = re.compile(
+    r"(?<![A-Za-z0-9_.\-])--(?P<name>[A-Za-z][A-Za-z0-9_.\-]*)="
+    r"(?:(?P<quote>[\"'])(?P<quoted>[^\"']*)(?P=quote)|(?P<bare>[^\s\"'`]+))"
+)
 _PDF_STREAM: Final = re.compile(rb"stream\r?\n(.*?)endstream", re.DOTALL)
 _NOT_A_LITERAL: Final = frozenset("()[]{}<>|`\"'\\")
 _NAME_CHARACTERS: Final = re.compile(r"[^A-Za-z0-9_.\-]")
@@ -351,8 +363,15 @@ def _entropy_tokens(path: str, text: str) -> Iterator[Violation]:
             )
 
 
-def _value_of(line: str, start: int, separator: str, quoted_name: bool, typed: bool) -> str | None:
-    """The literal value that follows an assignment at *start*, or ``None`` when there is none."""
+def _value_of(
+    line: str, start: int, separator: str, quoted_name: bool, typed: bool, *, in_flow: bool, prefix: bool
+) -> str | None:
+    """The literal value that follows an assignment at *start*, or ``None`` when there is none.
+
+    *in_flow*: the name follows ``{`` or ``,`` (a YAML flow mapping: the value ends at ``,`` or
+    ``}``).  *prefix*: ``NAME=value`` opens the line without white space around ``=`` (a shell
+    prefix assignment or a .env line: the value ends at the first white space).
+    """
     rest = line[start:]
     value = rest.lstrip(" \t")
     if not value:
@@ -364,10 +383,18 @@ def _value_of(line: str, start: int, separator: str, quoted_name: bool, typed: b
         return value[1:end] if end != -1 else value[1:]
     if typed:
         return None  # an unquoted JSON / TOML value is a number or a keyword, never a string
-    token, _, remainder = value.partition(" ")
-    remainder = remainder.strip()
-    if remainder and not remainder.startswith("#"):
-        return None  # further words: prose, not a value
+    if in_flow:
+        ends = [index for index in (value.find(","), value.find("}")) if index != -1]
+        token = value[: min(ends)] if ends else value
+        if any(character.isspace() for character in token.strip()):
+            return None  # a plain scalar of several words: prose, not a value
+    elif prefix and value is rest:
+        token = value.split(None, 1)[0]  # ``NAME=value command ...``: the command follows the value
+    else:
+        token, _, remainder = value.partition(" ")
+        remainder = remainder.strip()
+        if remainder and not remainder.startswith("#"):
+            return None  # further words: prose, not a value
     token = token.strip().rstrip(",;")
     if not token or any(character in _NOT_A_LITERAL for character in token):
         return None  # an expression, a collection or a placeholder - not a literal
@@ -387,18 +414,41 @@ def _line_assignments(path: str, text: str) -> Iterator[Violation]:
                 continue  # the text is itself inside the value of another assignment
             separator = match.group("separator")
             quoted = bool(match.group("quote"))
-            if separator == ":" and not quoted:
-                opens_line = _LINE_START.fullmatch(before) is not None
-                if not opens_line and not before.rstrip().endswith(("{", ",")):
-                    continue
-            value = _value_of(line, match.end(), separator, quoted, typed)
+            opens_line = _LINE_START.fullmatch(before) is not None
+            in_flow = before.rstrip().endswith(("{", ","))
+            if separator == ":" and not quoted and not opens_line and not in_flow:
+                continue
+            # ``NAME=value`` opening the line with no white space before ``=``: .env or shell prefix
+            prefix = separator == "=" and not quoted and opens_line and match.group(0) == f"{name}="
+            value = _value_of(
+                line,
+                match.end(),
+                separator,
+                quoted,
+                typed,
+                in_flow=in_flow and separator == ":",
+                prefix=prefix,
+            )
             if value is not None and _is_reportable(value):
-                yield Violation(
-                    "SC002",
-                    path,
-                    number,
-                    f"name '{_display_name(name)}' is given a literal value (value not shown)",
-                )
+                yield _sc002(path, number, name)
+        if typed:
+            continue  # a JSON / TOML file holds no command lines
+        for flag in _FLAG.finditer(line):
+            name = flag.group("name")
+            value = flag.group("quoted") if flag.group("quote") else flag.group("bare")
+            if not is_credential_name(name) or value is None:
+                continue
+            value = value.rstrip(".,;:)")
+            if any(character in _NOT_A_LITERAL for character in value):
+                continue  # an expression or a placeholder - not a literal
+            if _is_reportable(value):
+                yield _sc002(path, number, name)
+
+
+def _sc002(path: str, line: int, name: str) -> Violation:
+    return Violation(
+        "SC002", path, line, f"name '{_display_name(name)}' is given a literal value (value not shown)"
+    )
 
 
 # ============================================================================== rules on Python

@@ -41,7 +41,7 @@ from gie.contracts.common import (
     symbol_field,
 )
 from gie.contracts.registry import contract
-from gie.core.errors import IllegalTransitionError
+from gie.core.errors import ContractValidationError, IllegalTransitionError
 
 LEVEL_ROLE_PATTERN: Final[str] = r"^[A-Z][A-Z0-9_]{1,31}$"
 
@@ -461,7 +461,9 @@ def group_by_market_event(records: Iterable[Evidence]) -> tuple[EvidenceGroup, .
     groups: dict[str, list[Evidence]] = {}
     for item in records:
         if type(item) is not Evidence:
-            raise TypeError("group_by_market_event expects Evidence records")
+            raise ContractValidationError(
+                "group_by_market_event expects Evidence records", actual_type=type(item).__name__
+            )
         groups.setdefault(item.market_event_id, []).append(item)
     result = []
     for event_id in sorted(groups):

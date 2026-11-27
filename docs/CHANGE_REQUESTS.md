@@ -85,7 +85,7 @@ Proposed in D-002: all code under the `gie/` package; tests under `tests/gie/<su
 session 12 owning `tests/gie/qa/` (the brief gives session 12 all of `tests/gie/`, which would make
 it the owner of every other session's unit tests). Needs owner approval.
 
-## CR-003 - Additional shared contracts are needed before later sessions can start
+## CR-003 - Additional shared contracts are needed by later sessions
 
 - Status: OPEN
 - Raised: 2026-11-27 (Session 00); extended 2026-11-27 after review round 1
@@ -127,6 +127,7 @@ types it consumes are.
 | CX-17 | Display projection of records for browsers | 11 | 12 | design task of session 11 |
 | CX-18 | Reservation life-cycle record | 08 | 07 | reservation rules are the design task of session 08 |
 | CX-19 | Adapter queries for reconciliation, journal checkpoints, ledger eviction, storage of raw ticks | 07 | 01, 10 | depends on the persistence design of sessions 07 and 01 |
+| CX-20 | Feature dictionary and per-kind identity table of evidence (identity levels, anchor) | 02 | 03, 04, 09 | the six engines could not be inspected (B-001); no engine emits evidence before it is integrated |
 
 (CX-03 is CR-005.) Open item U-11 asks the owner to confirm this procedure.
 
@@ -213,9 +214,10 @@ their content belongs to session 04:
    to `expected_net_r` yet (an additive attribution with a stated tolerance, or another method).
    Session 04 proposes the rule together with its first model.
 2. The feature dictionary (a deliverable of session 02, used by session 04) that
-   `ModelVersion.feature_schema_sha256` refers to has no agreed location and canonical format;
-   sessions 02 and 04 propose both with their first review packages, and the hash is only then
-   meaningful.
+   `ModelVersion.feature_schema_sha256` refers to has no agreed location and canonical format. It
+   is extension CX-20, the first deliverable of session 02, together with the per-kind identity
+   table of evidence; the hash is only then meaningful, and until then the contract cannot detect
+   two engines that disagree about which levels identify an event.
 3. A scoring pass in a paper run reads the model registry once: the models of a run are pinned in
    its manifest (D-026), which gives replay and paper the same consistent view; a registry
    snapshot API beyond that is added only if session 04 or 05 shows the need.

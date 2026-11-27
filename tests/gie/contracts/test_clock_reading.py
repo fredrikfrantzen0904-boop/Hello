@@ -23,7 +23,6 @@ from typing import Any
 
 import pytest
 
-from gie.contracts import identity
 from gie.contracts.clock import (
     Clock,
     ClockMode,
@@ -37,6 +36,7 @@ from gie.contracts.clock import (
 from gie.contracts.codec import fingerprint, from_json, from_wire, to_json, to_wire
 from gie.contracts.common import RunMode
 from gie.contracts.ordering import ordering_key, ordering_time_ns, stream_name
+from gie.core.clock import ClockView, PaperClock
 from gie.core.errors import ContractValidationError
 from gie.core.timeutil import MAX_TIME_NS, NS_PER_SECOND, trading_day
 from tests.gie import samples
@@ -44,7 +44,7 @@ from tests.gie import samples
 T0 = samples.T0
 #: 2026-11-26 23:00:00 UTC is midnight in Prague (CET = UTC+1): the trading day changes here.
 PRAGUE_MIDNIGHT = T0 + 48_600 * NS_PER_SECOND
-PAPER_RUN_ID = identity.run_id("PAPER", samples.CONFIG_SHA, "fixture-paper")
+PAPER_RUN_ID = samples.variants()["RunManifest"]["paper_primary"].run_id
 
 
 def _utc_ns(year: int, month: int, day: int, hour: int) -> int:
@@ -440,16 +440,54 @@ def test_read_clock_refuses_an_invalid_header(argument: str, value: object) -> N
 def test_reference_clocks_and_schedulers_satisfy_the_protocols() -> None:
     replay = ReplayClock(T0)
     system = _system_clock(_Script(T0), _Script(1))
-    polling = PollingScheduler(system)
+    paper = PaperClock(system)
+    polling = PollingScheduler(paper)  # rework 2: the polling scheduler runs on the paper clock
     assert isinstance(replay, Clock)
     assert isinstance(replay, Scheduler)
     assert isinstance(system, Clock)
+    assert isinstance(paper, Clock)
     assert isinstance(polling, Scheduler)
     assert not isinstance(system, Scheduler)
+    assert not isinstance(paper, Scheduler)
     assert not isinstance(polling, Clock)
     assert replay.mode is ClockMode.REPLAY
     assert system.mode is ClockMode.SYSTEM
+    assert paper.mode is ClockMode.SYSTEM
     assert [member.value for member in ClockMode] == ["REPLAY", "SYSTEM"]
+
+
+@pytest.mark.requirement("S00-ASG-19")
+@pytest.mark.parametrize(
+    "not_a_paper_clock",
+    [_system_clock(_Script(T0), _Script(1)), ReplayClock(T0), None],
+    ids=["system-clock", "replay-clock", "none"],
+)
+def test_the_polling_scheduler_refuses_anything_but_the_paper_clock(not_a_paper_clock: object) -> None:
+    with pytest.raises(ContractValidationError):
+        PollingScheduler(not_a_paper_clock)  # type: ignore[arg-type]
+    with pytest.raises(ContractValidationError):
+        PollingScheduler(ClockView(PaperClock(_system_clock(_Script(T0), _Script(1)))))  # type: ignore[arg-type]
+
+
+# =========================================================================== read_clock: paper step time
+@pytest.mark.requirement("S00-ASG-19")
+def test_reading_a_paper_clock_shows_the_step_instant_not_the_system_clock() -> None:
+    # Rework 2 (D-024): a paper run sees the instant of the input being processed; only the run loop
+    # moves it.  The system clock runs ahead (T0 + 5 s) but the reading stays at the step instant.
+    wall = _Script(T0, T0 + 5 * NS_PER_SECOND)
+    paper = PaperClock(_system_clock(wall, _Script(10, 20, 30, 40)))
+
+    def read(clock: Clock, seq: int) -> ClockReading:
+        return read_clock(clock, run_id=PAPER_RUN_ID, mode=RunMode.PAPER, producer="core.clock", seq=seq)
+
+    first = read(paper, 0)
+    assert (first.wall_time_ns, first.clock_mode) == (T0, ClockMode.SYSTEM)
+    assert read(paper, 1).wall_time_ns == T0  # does not move while a step is processed
+    assert paper.begin_step(T0 + NS_PER_SECOND) == T0 + NS_PER_SECOND
+    assert read(ClockView(paper), 2).wall_time_ns == T0 + NS_PER_SECOND  # same through the view
+    with pytest.raises(ContractValidationError) as excinfo:
+        read_clock(paper, run_id=samples.RUN_ID, mode=RunMode.REPLAY, producer="core.clock", seq=3)
+    assert _invariant(excinfo) == "CLK-2"
 
 
 @pytest.mark.requirement("S00-ASG-19")

@@ -34,6 +34,7 @@ from gie.contracts.model_version import (
     ModelKind,
     ModelStatus,
     ModelVersion,
+    RegistryHistory,
     is_out_of_sample,
     validate_model_transition,
     validate_registry_history,
@@ -61,6 +62,7 @@ EMBARGO = DAY
 ACTIVATION: dict[str, Any] = {
     "evaluation_report_uri": "models/research/fixture_net_r/0.1.0/model_card.md",
     "evaluation_report_sha256": "56" * 32,
+    "evaluation_data_origin": samples.ORIGIN,
     "promotion_criteria_sha256": "78" * 32,
     "shadow_run_ids": (samples.RUN_ID,),
     "approved_by": samples.FIXTURE_APPROVER,
@@ -190,6 +192,7 @@ VIOLATIONS = [
     pytest.param("MDL-7", ACTIVE, 2, {"evaluation_report_sha256": None}, id="MDL-7-no-report-hash"),
     pytest.param("MDL-7", ACTIVE, 2, {"promotion_criteria_sha256": None}, id="MDL-7-no-criteria-hash"),
     pytest.param("MDL-7", ACTIVE, 2, {"shadow_run_ids": ()}, id="MDL-7-no-shadow-run"),
+    pytest.param("MDL-7", ACTIVE, 2, {"evaluation_data_origin": None}, id="MDL-7-no-evaluation-data-origin"),
     pytest.param("MDL-8", SHADOW, 1, {"replaces_model_version_id": OTHER_ID}, id="MDL-8-replaces-on-shadow"),
     pytest.param(
         "MDL-8", RETIRED, 3, {"replaces_model_version_id": OTHER_ID}, id="MDL-8-replaces-on-retired"
@@ -334,7 +337,7 @@ ACCEPTED = [
     pytest.param("MDL-7", lambda: _entry(ACTIVE, 2), id="MDL-7-active-with-evidence"),
     pytest.param(
         "MDL-7",
-        lambda: _entry(ACTIVE, 2, shadow_run_ids=(samples.RUN_ID, identity.run_id("PAPER", "1" * 64, "s2"))),
+        lambda: _entry(ACTIVE, 2, shadow_run_ids=(samples.RUN_ID, identity.run_id("PAPER", "1" * 64))),
         id="MDL-7-active-with-two-shadow-runs",
     ),
     pytest.param("MDL-7", lambda: _entry(SHADOW, 1), id="MDL-7-shadow-without-evidence"),
@@ -564,7 +567,7 @@ def test_contract_reference_is_a_contract_name_and_a_semantic_version(contract: 
 
 @pytest.mark.requirement("S00-ASG-18")
 def test_unordered_lists_are_stored_in_their_canonical_order() -> None:
-    second_run = identity.run_id("PAPER", "1" * 64, "fixture-shadow-2")
+    second_run = identity.run_id("PAPER", "1" * 64)
     runs = tuple(sorted((samples.RUN_ID, second_run)))
     refs = (ContractRef(contract="Tick", version="1.0.0"), ContractRef(contract="Evidence", version="1.0.0"))
     one = _entry(ACTIVE, 2, shadow_run_ids=runs, contract_versions=refs, status_reasons=("B_CODE", "A_CODE"))
@@ -609,10 +612,68 @@ def test_active_model_fitted_on_fixture_data_is_never_validated() -> None:
     assert active.validated is False
 
 
+REAL_ORIGINS = [origin for origin in DataOrigin if origin is not DataOrigin.SYNTHETIC_FIXTURE]
+
+
 @pytest.mark.requirement("G07-10")
-@pytest.mark.parametrize("origin", [DataOrigin.HISTORICAL, DataOrigin.BROKER_FEED])
-def test_active_model_fitted_on_real_data_is_validated(origin: DataOrigin) -> None:
-    assert _entry(ACTIVE, 2, training_data_origin=origin).validated is True
+@pytest.mark.parametrize("training", REAL_ORIGINS, ids=lambda origin: f"trained-{origin.value}")
+@pytest.mark.parametrize("evaluation", REAL_ORIGINS, ids=lambda origin: f"evaluated-{origin.value}")
+def test_active_model_fitted_and_evaluated_on_real_data_is_validated(
+    training: DataOrigin, evaluation: DataOrigin
+) -> None:
+    model = _entry(ACTIVE, 2, training_data_origin=training, evaluation_data_origin=evaluation)
+    assert model.validated is True
+
+
+@pytest.mark.requirement("G07-10", "COM-07")
+@pytest.mark.parametrize("training", REAL_ORIGINS, ids=lambda origin: origin.value)
+def test_active_model_evaluated_on_fixture_data_is_never_validated(training: DataOrigin) -> None:
+    # Rework 2: 'validated' needs a non-fixture training AND evaluation origin.
+    model = _entry(
+        ACTIVE, 2, training_data_origin=training, evaluation_data_origin=DataOrigin.SYNTHETIC_FIXTURE
+    )
+    assert model.validated is False
+    assert _entry(ACTIVE, 2, training_data_origin=training).validated is False  # ACTIVATION: fixture
+
+
+@pytest.mark.requirement("G07-10", "COM-07")
+@pytest.mark.parametrize("evaluation", REAL_ORIGINS, ids=lambda origin: origin.value)
+def test_active_model_fitted_on_fixture_data_is_not_validated_by_a_real_evaluation(
+    evaluation: DataOrigin,
+) -> None:
+    model = _entry(ACTIVE, 2, evaluation_data_origin=evaluation)
+    assert model.training_data_origin is DataOrigin.SYNTHETIC_FIXTURE
+    assert model.validated is False
+
+
+@pytest.mark.requirement("G07-10")
+def test_a_rule_set_is_validated_by_its_evaluation_alone() -> None:
+    # A rule set uses no training data; its validation rests on the evaluation origin.
+    assert _ruleset(**{**_active_fields(), "evaluation_data_origin": DataOrigin.HISTORICAL}).validated
+    assert _ruleset(**_active_fields()).validated is False  # evaluated on fixture data
+
+
+def _active_fields() -> dict[str, Any]:
+    return {
+        **ACTIVATION,
+        "status": ACTIVE,
+        "revision": 2,
+        "seq": 2,
+        "status_time_ns": BASE + 2 * NS_PER_SECOND,
+    }
+
+
+@pytest.mark.requirement("G07-10", "S00-ASG-18")
+def test_the_evaluation_data_origin_is_mandatory_for_active_only() -> None:
+    with pytest.raises(ContractValidationError) as excinfo:
+        _entry(ACTIVE, 2, training_data_origin=DataOrigin.HISTORICAL, evaluation_data_origin=None)
+    assert _invariant(excinfo) == "MDL-7"
+    assert "evaluation data" in str(excinfo.value.details["rule"])
+    # A version that is not ACTIVE may state it or not.
+    assert _entry(SHADOW, 1).evaluation_data_origin is None
+    assert _entry(SHADOW, 1, evaluation_data_origin=DataOrigin.HISTORICAL).validated is False
+    # ... and it may change between status revisions (it is not part of the immutable artifact).
+    validate_model_transition(_entry(SHADOW, 1), _entry(ACTIVE, 2))
 
 
 @pytest.mark.requirement("G07-09", "G07-10")
@@ -621,8 +682,10 @@ def test_active_model_fitted_on_real_data_is_validated(origin: DataOrigin) -> No
     [(RESEARCH, 0), (SHADOW, 1), (REJECTED, 1), (RETIRED, 3), (ROLLED_BACK, 3)],
 )
 def test_only_an_active_version_can_be_validated(status: ModelStatus, revision: int) -> None:
-    for origin in DataOrigin:
-        assert _entry(status, revision, training_data_origin=origin).validated is False
+    for training in DataOrigin:
+        for evaluation in (None, *DataOrigin):
+            model = _entry(status, revision, training_data_origin=training, evaluation_data_origin=evaluation)
+            assert model.validated is False
 
 
 @pytest.mark.requirement("COM-07", "M-AUTH-07")
@@ -1078,9 +1141,15 @@ def test_composite_with_registered_components_is_accepted() -> None:
 
 
 @pytest.mark.requirement("S00-ASG-18", "G07-10")
-def test_activating_a_composite_with_an_unregistered_component_is_refused() -> None:
-    error = _refused([_reg(COMBO, 0, RESEARCH, 0), _reg(COMBO, 1, SHADOW, 1), _reg(COMBO, 2, ACTIVE, 2)])
-    assert "component" in str(error.details["rule"])
+def test_a_component_registered_after_the_composite_does_not_repair_it() -> None:
+    # Rework 2: components are registered before the composite.  The refusal names the composite at
+    # its first registry entry, whatever follows.
+    history = [_reg(COMBO, 0, RESEARCH, 0), _reg(A, 1, RESEARCH, 0), _reg(COMBO, 2, SHADOW, 1)]
+    with pytest.raises(IllegalTransitionError) as excinfo:
+        validate_registry_history(history)
+    assert excinfo.value.details["model_version_id"] == history[0].model_version_id
+    assert excinfo.value.details["revision"] == 0
+    assert "component" in str(excinfo.value.details["rule"])
 
 
 @pytest.mark.requirement("S00-ASG-18", "G07-10")
@@ -1088,6 +1157,107 @@ def test_registering_a_composite_with_an_unregistered_component_is_refused() -> 
     # "component versions of a composite are registered" is a rule of the history, not only of the
     # activation: a composite cannot enter the registry before the versions it is built from.
     _refused([_reg(COMBO, 0, RESEARCH, 0)])
+
+
+# =========================================================================== RegistryHistory
+@pytest.mark.requirement("S00-ASG-18", "G07-10")
+def test_registry_history_check_validates_without_recording_and_admit_records() -> None:
+    history = RegistryHistory()
+    research = _reg(A, 0, RESEARCH, 0)
+    assert history.check(research) is True
+    assert history.model(A_ID) is None  # check changes nothing
+    assert history.admit(research) is True
+    assert history.model(A_ID) == research
+    # The identical newest entry again is a repeat: accepted, not recorded twice.
+    assert history.check(research) is False
+    assert history.admit(research) is False
+    assert history.model(A_ID) == research
+    assert history.active(ModelKind.NET_R_MODEL, samples.MODEL_NAME) is None
+
+
+@pytest.mark.requirement("S00-ASG-18", "G07-10")
+def test_registry_history_active_follows_activation_retirement_and_rollback() -> None:
+    history = RegistryHistory()
+    family = (ModelKind.NET_R_MODEL, samples.MODEL_NAME)
+    seen: list[str | None] = []
+    for entry in [*_rolled_back(), _reactivation()]:
+        history.admit(entry)
+        active = history.active(*family)
+        seen.append(None if active is None else active.model_version_id)
+    #          A res A sh  A act  B res  B sh  A ret B act  B rb  A re-act
+    assert seen == [None, None, A_ID, A_ID, A_ID, None, B_ID, None, A_ID]
+    assert history.model(B_ID) is not None
+    assert history.model(B_ID).status is ROLLED_BACK  # type: ignore[union-attr]
+    assert history.active(ModelKind.PAYOFF_MODEL, samples.MODEL_NAME) is None  # another kind
+    assert history.active(ModelKind.NET_R_MODEL, "fixture_other") is None  # another name
+
+
+@pytest.mark.requirement("G07-10")
+def test_registry_history_refuses_a_second_active_version_and_check_leaves_it_unchanged() -> None:
+    history = RegistryHistory()
+    for entry in _promotion()[:5]:  # A ACTIVE, B SHADOW
+        history.admit(entry)
+    second = _reg(B, 5, ACTIVE, 2, replaces_model_version_id=A_ID)
+    with pytest.raises(IllegalTransitionError) as excinfo:
+        history.check(second)
+    assert "ACTIVE" in str(excinfo.value.details["rule"])
+    with pytest.raises(IllegalTransitionError):
+        history.admit(second)
+    # A refused entry changes nothing.
+    assert history.model(B_ID) == _promotion()[4]
+    assert history.active(ModelKind.NET_R_MODEL, samples.MODEL_NAME) == _promotion()[2]
+    # Same name, other kind: another family, which may have its own ACTIVE version.
+    other_kind = {"kind": ModelKind.PAYOFF_MODEL, "artifact_sha256": "ef" * 32}
+    for seq, (status, revision) in enumerate([(RESEARCH, 0), (SHADOW, 1), (ACTIVE, 2)], start=5):
+        assert history.admit(_reg(other_kind, seq, status, revision)) is True
+    assert history.active(ModelKind.PAYOFF_MODEL, samples.MODEL_NAME) is not None
+
+
+@pytest.mark.requirement("G07-11")
+def test_a_rollback_names_the_version_that_was_active_immediately_before() -> None:
+    # A active -> B replaces A -> B rolled back -> C replaces B -> C rolled back.  Re-activating A is
+    # a rollback of C (ACTIVE immediately before); B was rolled back too, but earlier.
+    history = [
+        *_rolled_back(),
+        _reg(C, 8, RESEARCH, 0),
+        _reg(C, 9, SHADOW, 1),
+        _reg(C, 10, ACTIVE, 2, replaces_model_version_id=B_ID),
+        _reg(C, 11, ROLLED_BACK, 3),
+    ]
+    validate_registry_history(history)
+    accepted = _reactivation(12, replaces_model_version_id=C_ID, rollback_of_model_version_id=C_ID)
+    validate_registry_history([*history, accepted])
+    for wrong in (B_ID, X_ID, OTHER_ID):
+        error = _refused(
+            [*history, _reactivation(12, replaces_model_version_id=C_ID, rollback_of_model_version_id=wrong)]
+        )
+        assert "rollback_of_model_version_id" in str(error.details["rule"])
+
+
+@pytest.mark.requirement("S00-ASG-18", "G07-10")
+def test_registry_history_components_before_the_composite() -> None:
+    history = RegistryHistory()
+    composite = _reg(COMBO, 1, RESEARCH, 0)
+    with pytest.raises(IllegalTransitionError) as excinfo:
+        history.check(composite)
+    assert "component" in str(excinfo.value.details["rule"])
+    assert history.admit(_reg(A, 0, RESEARCH, 0)) is True
+    assert history.admit(composite) is True
+
+
+@pytest.mark.requirement("S00-ASG-18")
+@pytest.mark.parametrize(
+    "not_a_model",
+    [None, "mdl_0", to_wire(samples.model_version()), samples.tick()],
+    ids=["none", "text", "wire-dict", "tick"],
+)
+def test_the_registry_refuses_what_is_not_a_model_version_with_a_gie_error(not_a_model: object) -> None:
+    # CLAUDE.md: errors derive from GieError and fail closed.  The change notice is silent on the error
+    # class here; anything else than a GieError escapes the documented error handling.
+    with pytest.raises(GieError):
+        RegistryHistory().check(not_a_model)  # type: ignore[arg-type]
+    with pytest.raises(GieError):
+        validate_registry_history([not_a_model])  # type: ignore[list-item]
 
 
 # =========================================================================== out of sample

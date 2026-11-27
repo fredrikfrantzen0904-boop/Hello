@@ -81,13 +81,17 @@ protective stop, no averaging down, one executed alternative per group, fail clo
   `GuardedExecutionAdapter.create(adapter_type, guard, *, clock, journal, **kw)`. The gateway has
   no ledger of its own: it reads plan, approval and position from `journal.ledger`.
 * `submit(request)`, `cancel(request)`, `replace(request)` take the request only. Order:
-  routing lock -> authorisation -> `journal.publish(request)` (write-ahead) -> adapter. A request
+  routing lock (nothing is journaled for an adapter the guard refuses) -> authorisation ->
+  `journal.publish(request)` (write-ahead) -> adapter. A request
   that is already journaled is forwarded again (the adapter is idempotent per `order_event_id`).
 * `poll()` returns `PollResult(events, duplicates, errors)` (`clean` when there is no error):
-  every report is journaled one by one; a refused report is returned in `errors` and does not
-  hide the others.
+  every report is journaled one by one; a refused report - also one of another run mode or venue -
+  is returned in `errors` and does not hide the others.
 * Single writer: order events are written by session 07 only. The reflex engine uses
   `interfaces.ProtectionPort` (`tighten_stop`, `exit`).
+* Time order of an entry: the plan was made before its approval, the approval before the request,
+  and the request is not later than the clock reading (`IllegalTransitionError`); a request at or
+  after an expiry that the clock has reached is stale (`StaleDataError`).
 * `validate_entry_authorization(plan, decision, request, *, now_ns, role)`,
   `validate_reducing_order(position, request, *, protective=None, other_reducing_lots=0)`,
   `validate_protective_cancel(position, request)`. Wrong argument types are a
@@ -196,7 +200,9 @@ protective stop, no averaging down, one executed alternative per group, fail clo
 ## 14. Samples
 
 `tests/gie/samples.py`: `RUN_ID` is derived from the sample manifest; `run_manifest()` uses
-`RunManifest.create`; `run_story()` returns one coherent run of 28 records (manifest, model, ticks,
+`RunManifest.create`; `run_story()` returns one coherent run of 28 records (manifest, ticks,
 evidence, candidate, plan, approval, entry order with partial fills, broker-created stop, position
-snapshots, stop tightening, close) that a `MemoryJournal` accepts in order. All sample data is
+snapshots, stop tightening, close) that a `MemoryJournal` accepts in order. The story contains no
+`ModelVersion` record: its model is pinned in the manifest, and the registry rules are exercised by
+the model tests, not by the story. All sample data is
 `DataOrigin.SYNTHETIC_FIXTURE`.

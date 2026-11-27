@@ -424,7 +424,7 @@
       "initial_stop_price"
     ],
     "monotonic_gie_owner": [
-      "volume_lots never increases",
+      "initial_volume_lots and volume_lots grow only while the entry order fills: the open volume grows by no more than initial_volume_lots grows; otherwise volume_lots never increases",
       "stop_price never moves away from the entry and is never removed while open",
       "peak_net_pnl_amount never decreases",
       "trough_net_pnl_amount never increases"

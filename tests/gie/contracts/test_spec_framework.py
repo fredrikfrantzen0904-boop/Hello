@@ -1464,3 +1464,137 @@ def test_the_published_printable_pattern_never_refuses_text_the_framework_accept
         assert not pattern.fullmatch(chr(control))
         with pytest.raises(ContractValidationError):
             free_text.check(chr(control), "text")
+
+
+# =========================================================================== rework 2 (change notice 12)
+@record
+@dataclass(frozen=True, slots=True, kw_only=True)
+class Reporting(Record):
+    """SYNTHETIC record whose invariant fails with a contract error of its own."""
+
+    mode: str = fld(Str(), "Synthetic selector.")
+
+    INVARIANTS: ClassVar[tuple[Invariant, ...]] = (
+        inv(
+            "REP-1", "the version part is valid", lambda r: r.mode != "version" or bool(parse_semver(r.mode))
+        ),
+    )
+
+
+@pytest.mark.requirement(*CONTRACTS, "S00-ASG-24")
+@pytest.mark.parametrize(
+    ("mode", "overrides", "invariant", "cause"),
+    [
+        ("compare", {"high": None}, "FRG-1", "TypeError"),
+        ("divide", {"low": 0}, "FRG-2", "ZeroDivisionError"),
+        ("parse", {"label": "abc"}, "FRG-3", "ValueError"),
+        ("attribute", {"label": None}, "FRG-4", "AttributeError"),
+        ("index", {"items": ()}, "FRG-5", "IndexError"),
+        ("lookup", {}, "FRG-6", "KeyError"),
+    ],
+)
+def test_an_invariant_that_cannot_be_evaluated_names_the_invariant_and_its_rule(
+    mode: str, overrides: dict[str, Any], invariant: str, cause: str
+) -> None:
+    """'An invariant that cannot be evaluated is a ContractValidationError naming the invariant.'"""
+    error = _invalid(lambda: fragile(mode, **overrides))
+    rule = next(item.text for item in Fragile.ALL_INVARIANTS if item.id == invariant)
+    assert error.details == {"contract": "Fragile", "invariant": invariant, "rule": rule, "cause": cause}
+    assert f"invariant {invariant} could not be evaluated: {rule}" in error.message
+    assert type(error.__cause__).__name__ == cause
+    # The same values with a rule that can be evaluated are accepted.
+    assert fragile("none", **overrides).mode == "none"
+
+
+@pytest.mark.requirement(*CONTRACTS, "S00-ASG-24")
+def test_an_invariant_that_fails_with_a_contract_error_is_reported_unchanged() -> None:
+    assert Reporting(mode="fine").mode == "fine"
+    with pytest.raises(ContractVersionError) as caught:
+        Reporting(mode="version")
+    assert type(caught.value) is ContractVersionError, "a GieError keeps its own class and code"
+    assert "invariant" not in caught.value.details
+
+
+NOT_RECORDS = [
+    pytest.param(None, id="None"),
+    pytest.param({"contract": "Tick", "schema_version": "1.0.0"}, id="dict"),
+    pytest.param('{"contract":"Tick"}', id="json-text"),
+    pytest.param(b'{"contract":"Tick"}', id="json-bytes"),
+    pytest.param(1, id="int"),
+    pytest.param(1.5, id="float"),
+    pytest.param(Decimal("1"), id="decimal"),
+    pytest.param([samples.tick()], id="list-of-records"),
+    pytest.param((samples.tick(),), id="tuple-of-records"),
+    pytest.param(Tick, id="contract-class"),
+    pytest.param(samples.trade_plan().targets[0], id="nested-value-object"),
+    pytest.param(NamedValue(name="sweep_depth", value=1.0), id="named-value"),
+    pytest.param(object(), id="object"),
+]
+
+
+@pytest.mark.requirement(*CONTRACTS)
+@pytest.mark.parametrize("value", NOT_RECORDS)
+def test_encoding_something_that_is_not_a_registered_record_is_an_unknown_contract_error(value: Any) -> None:
+    from gie.contracts import fingerprint, to_bytes
+
+    for encode in (to_wire, to_json, to_bytes, fingerprint):
+        with pytest.raises(UnknownContractError) as caught:
+            encode(value)
+        assert type(caught.value) is UnknownContractError, encode.__name__
+        assert caught.value.code == "GIE.CONTRACT.UNKNOWN"
+    # The genuine record is encoded.
+    assert to_wire(samples.tick())["contract"] == "Tick"
+
+
+@pytest.mark.requirement(*CONTRACTS, "S00-ASG-20")
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        (1, 1.0),
+        (-0, 0.0),
+        (9007199254740992, 2.0**53),
+        (1234567890123456800, 1.2345678901234568e18),
+        (10**19, 1e19),
+        (1234567890123456768, None),
+        (9007199254740993, None),
+        (10**19 + 1, None),
+        (10**400, None),
+    ],
+)
+def test_float_decode_takes_an_integer_literal_only_as_the_canonical_rendering_of_a_double(
+    raw: int, expected: float | None
+) -> None:
+    field = Float()
+    if expected is not None:
+        decoded = field.decode(raw, "x", STRICT)
+        assert type(decoded) is float
+        assert decoded == expected
+        assert canonical_dumps(decoded) == str(raw)
+    else:
+        with pytest.raises(ContractValidationError) as caught:
+            field.decode(raw, "x", STRICT)
+        assert caught.value.details["path"] == "x"
+        rule = caught.value.details["rule"]
+        assert "canonical rendering of a double" in rule or rule == "must be a finite number", rule
+    for wrong in (True, False, "1", None):
+        with pytest.raises(ContractValidationError):
+            field.decode(wrong, "x", STRICT)
+
+
+@pytest.mark.requirement(*CONTRACTS)
+def test_object_schema_states_min_properties_for_every_object() -> None:
+    defs: dict[str, Any] = {}
+    schema = object_schema(Probe, defs)
+    assert schema["minProperties"] == len(schema["properties"]) == len(Probe.FIELD_SPECS)
+    assert defs
+    for name, nested in defs.items():
+        assert nested["minProperties"] == len(nested["properties"]), name
+    # Without an optional key the schema refuses the object, as the decoder does.
+    complete = encode_fields(probe())
+    validator = jsonschema.Draft202012Validator({**schema, "$defs": defs})
+    assert validator.is_valid(complete)
+    incomplete = {key: value for key, value in complete.items() if key != "maybe"}
+    assert [error.validator for error in validator.iter_errors(incomplete)] == ["minProperties"]
+    with pytest.raises(ContractValidationError) as caught:
+        _decode(Probe, incomplete, DecodeContext(message_version=FIRST_VERSION))
+    assert caught.value.details["path"] == "maybe"

@@ -299,7 +299,7 @@
   "type": "object",
   "x-gie-behaviour": {
     "identity": {
-      "run_id": "run_id(mode, config_sha256, label)"
+      "run_id": "run_id(mode, SHA-256 of the canonical form of every other field of the manifest)"
     },
     "ordering_time": "data_start_ns | created_time_ns",
     "rank": {

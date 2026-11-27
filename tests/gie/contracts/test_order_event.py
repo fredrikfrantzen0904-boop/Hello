@@ -1,8 +1,11 @@
 """Independent tests for the ``OrderEvent`` contract and ``validate_order_transition``.
 
 Expected behaviour is taken from ``specifications/SHARED_CONTRACTS.md`` (sections 4, 9.1, 9.2),
-``specifications/contracts/FIELDS.md`` (OrderEvent fields, invariants OEV-1..14 and the table
-"Order state machine", transcribed below as ``SPEC_TRANSITIONS``), the class docstrings and the
+``reviews/session_00/rework_2_change_notice.md`` section 6 (originator, max_slippage, the matched
+quote of a fill, the added PENDING_CANCEL transitions, the time and volume rules of
+``validate_order_transition``), ``specifications/contracts/FIELDS.md`` (OrderEvent fields,
+invariants OEV-1..18 and the table "Order state machine", transcribed below as
+``SPEC_TRANSITIONS``), the class and function docstrings and the
 owner's specification (G04 "no martingale, averaging down or widening protective stops; hard
 protective stops", G08 "live lock, idempotent orders") - not from the implementation.
 
@@ -27,6 +30,7 @@ from gie.contracts import (
     OrderEvent,
     OrderEventType,
     OrderIntent,
+    OrderOriginator,
     OrderState,
     OrderType,
     RunMode,
@@ -76,6 +80,13 @@ SPEC_TRANSITIONS: dict[tuple[OrderState | None, OrderEventType], frozenset[Order
     (S.PENDING_SUBMIT, E.REJECTED): frozenset({S.REJECTED}),
     **{(S.WORKING, event): after for event, after in _OPEN_ROWS.items()},
     **{(S.PARTIALLY_FILLED, event): after for event, after in _OPEN_ROWS.items()},
+    # Fills are never taken back: a partially filled order is never reconciled to WORKING.
+    (S.PARTIALLY_FILLED, E.RECONCILED): _RECONCILED_TO - {S.WORKING},
+    # Reports that were under way when the cancel was requested (change notice section 6).
+    (S.PENDING_CANCEL, E.ACCEPTED): frozenset({S.PENDING_CANCEL}),
+    (S.PENDING_CANCEL, E.REJECTED): frozenset({S.REJECTED}),
+    (S.PENDING_CANCEL, E.REPLACED): frozenset({S.PENDING_CANCEL}),
+    (S.PENDING_CANCEL, E.REPLACE_REJECTED): frozenset({S.PENDING_CANCEL}),
     (S.PENDING_CANCEL, E.CANCELED): frozenset({S.CANCELED}),
     (S.PENDING_CANCEL, E.CANCEL_REJECTED): frozenset({S.PARTIALLY_FILLED, S.WORKING}),
     (S.PENDING_CANCEL, E.EXPIRED): frozenset({S.EXPIRED}),
@@ -135,9 +146,17 @@ def _next(
         last_fill_lots=None,
         last_fill_price=None,
         last_fill_cost_amount=None,
-        reason_code=REASON if event_type in _NEEDS_REASON else None,
+        fill_tick_source=None,
+        fill_tick_seq=None,
+        # OEV-15: an order the simulated broker created keeps stating why it exists.
+        reason_code=REASON
+        if event_type in _NEEDS_REASON
+        else (previous.reason_code if previous.originator is OrderOriginator.BROKER else None),
     )
-    if order_state is not S.PENDING_REPLACE:
+    outstanding = (S.PENDING_REPLACE, S.PENDING_CANCEL)
+    carried = previous.order_state in outstanding and order_state in outstanding
+    if event_type in (E.REPLACED, E.REPLACE_REJECTED) or not (order_state is S.PENDING_REPLACE or carried):
+        # The requested values are carried only while a replacement is outstanding (OEV-14).
         fields.update(dict.fromkeys(_REQUESTED))
     if previous.broker_order_id is None and event_type is not E.CANCEL_REQUESTED:
         fields["broker_order_id"] = identity.broker_order_id(previous.client_order_id)
@@ -173,6 +192,9 @@ def _fill(
         "last_fill_price": _price(previous),
         "average_fill_price": _price(previous),
         "last_fill_cost_amount": D("0.40"),
+        # OEV-9: the quote the fill was matched against (synthetic fixture feed).
+        "fill_tick_source": "fixture",
+        "fill_tick_seq": previous.order_seq + 1,
     }
     fields.update(overrides)
     return _next(previous, E.FILLED if complete else E.PARTIALLY_FILLED, order_state, **fields)
@@ -206,6 +228,8 @@ def _child_submit(intent: OrderIntent, order_type: OrderType, **overrides: Any) 
         "order_type": order_type,
         "trigger_price": D("2648.50") if order_type is OrderType.STOP else None,
         "limit_price": D("2652.80") if order_type is OrderType.LIMIT else None,
+        # OEV-16: a MARKET order carries the executable price it was requested against.
+        "reference_price": D("2650.10") if order_type is OrderType.MARKET else None,
         "reason_code": "TIME_EXIT",
     }
     fields.update(overrides)
@@ -248,6 +272,7 @@ def _follow(previous: OrderEvent, event_type: OrderEventType, after: OrderState)
     if event_type is E.REPLACE_REQUESTED:
         return _next(previous, event_type, after, requested_volume_lots=D("0.40"))
     if event_type is E.REPLACED:
+        assert previous.requested_volume_lots is not None
         return _next(previous, event_type, after, volume_lots=previous.requested_volume_lots)
     if event_type is E.RECONCILED:
         cumulative = previous.cumulative_filled_lots
@@ -270,7 +295,12 @@ def _standalone(previous: OrderEvent, event_type: OrderEventType) -> OrderEvent:
     volume = previous.volume_lots
     no_fill = {"cumulative_filled_lots": D("0"), "average_fill_price": None}
     some_fill = {"cumulative_filled_lots": D("0.10"), "average_fill_price": _price(previous)}
-    last = {"last_fill_lots": D("0.10"), "last_fill_price": _price(previous)}
+    last = {
+        "last_fill_lots": D("0.10"),
+        "last_fill_price": _price(previous),
+        "fill_tick_source": "fixture",
+        "fill_tick_seq": 1,
+    }
     shapes: dict[OrderEventType, tuple[OrderState, dict[str, Any]]] = {
         E.ACCEPTED: (S.WORKING, no_fill),
         E.REJECTED: (S.REJECTED, no_fill),
@@ -330,7 +360,7 @@ def test_every_named_sample_order_event_survives_the_wire() -> None:
 
 
 def test_the_published_state_machine_is_the_enforced_one() -> None:
-    assert len(SPEC_TRANSITIONS) == 36
+    assert len(SPEC_TRANSITIONS) == 40
     assert dict(ORDER_TRANSITIONS) == SPEC_TRANSITIONS
     assert TERMINAL_ORDER_STATES == SPEC_TERMINAL
     assert not [key for key in ORDER_TRANSITIONS if key[0] in SPEC_TERMINAL]
@@ -357,6 +387,17 @@ _ROWS = sorted(
 )
 
 
+def _reach_for(before: OrderState, event_type: OrderEventType, *, filled: bool) -> OrderEvent:
+    """A history in *before* for which *event_type* is a report that can really arrive."""
+    if before is S.PENDING_CANCEL and event_type in (E.ACCEPTED, E.REJECTED):
+        # The submit was cancelled before the simulated broker acknowledged it.
+        return _next(_submit(), E.CANCEL_REQUESTED, S.PENDING_CANCEL)
+    if before is S.PENDING_CANCEL and event_type in (E.REPLACED, E.REPLACE_REJECTED):
+        # A cancel was requested while a replacement was still outstanding.
+        return _next(_reach(S.PENDING_REPLACE, filled=filled), E.CANCEL_REQUESTED, S.PENDING_CANCEL)
+    return _reach(before, filled=filled)
+
+
 @pytest.mark.parametrize(
     ("before", "event_type", "after"),
     _ROWS,
@@ -365,7 +406,7 @@ _ROWS = sorted(
 def test_every_row_of_the_state_machine_is_accepted(
     before: OrderState, event_type: OrderEventType, after: OrderState
 ) -> None:
-    previous = _reach(before, filled=_needs_fills(before, event_type, after))
+    previous = _reach_for(before, event_type, filled=_needs_fills(before, event_type, after))
     assert previous.order_state is before
     event = _follow(previous, event_type, after)
     assert (event.event_type, event.order_state) == (event_type, after)
@@ -387,7 +428,10 @@ def test_a_reconciliation_cannot_take_fills_back() -> None:
     unfilled = _next(
         partially, E.RECONCILED, S.WORKING, cumulative_filled_lots=D("0"), average_fill_price=None
     )
-    assert "cumulative_filled_lots" in _rule(_refused(partially, unfilled))
+    assert "PARTIALLY_FILLED --RECONCILED--> WORKING" in _rule(_refused(partially, unfilled))
+    # Reconciled to a state that may follow, fills still cannot be taken back.
+    fewer = _next(partially, E.RECONCILED, S.PARTIALLY_FILLED, cumulative_filled_lots=D("0.10"))
+    assert "cumulative_filled_lots" in _rule(_refused(partially, fewer))
 
 
 _NON_TERMINAL = [S.PENDING_SUBMIT, S.WORKING, S.PARTIALLY_FILLED, S.PENDING_CANCEL, S.PENDING_REPLACE]
@@ -470,28 +514,75 @@ def test_a_first_event_with_a_later_order_seq_is_refused() -> None:
     _refused(None, _next(accepted, E.EXPIRED, S.EXPIRED))
 
 
-@pytest.mark.parametrize("field", ["event_time_ns", "receive_time_ns", "seq"])
-def test_times_and_stream_position_never_go_back(field: str) -> None:
-    submit = _submit(seq=5, receive_time_ns=T0 + 5 * NS_PER_MS)
-    assert submit.event_time_ns < submit.receive_time_ns
-    good = _next(submit, E.ACCEPTED, S.WORKING)
-    validate_order_transition(submit, good)
-    overrides: dict[str, Any] = {field: getattr(submit, field) - 1}
+@pytest.mark.parametrize("field", ["receive_time_ns", "seq"])
+def test_receive_time_and_stream_position_never_go_back(field: str) -> None:
+    working = _working(seq=5)
+    good = _next(working, E.CANCELED, S.CANCELED)
+    validate_order_transition(working, good)
+    overrides: dict[str, Any] = {field: getattr(working, field) - 1}
     if field == "receive_time_ns":
-        overrides["event_time_ns"] = submit.event_time_ns  # keep OEV-12: event time <= receive time
-    assert field in _rule(_refused(submit, _next(submit, E.ACCEPTED, S.WORKING, **overrides)))
+        overrides["event_time_ns"] = working.event_time_ns - 1  # keep OEV-12: event time <= receive time
+    assert field in _rule(_refused(working, _next(working, E.CANCELED, S.CANCELED, **overrides)))
 
 
-def test_times_may_stay_equal_between_two_events() -> None:
-    submit = _submit()
-    same_instant = _next(
-        submit,
-        E.ACCEPTED,
-        S.WORKING,
-        event_time_ns=submit.event_time_ns,
-        receive_time_ns=submit.receive_time_ns,
+def test_the_broker_time_of_a_report_may_lie_before_an_earlier_request() -> None:
+    # Change notice section 6: only receive_time_ns must not decrease.  A fill that happened at the
+    # broker while GIE's cancel request was on its way carries the broker's earlier event time.
+    working = _working()
+    cancel = _next(working, E.CANCEL_REQUESTED, S.PENDING_CANCEL)
+    assert cancel.event_time_ns > working.event_time_ns
+    raced = _fill(cancel, "0.20", event_time_ns=cancel.event_time_ns - 1)
+    assert raced.receive_time_ns > cancel.receive_time_ns
+    validate_order_transition(cancel, raced)
+    validate_order_transition(cancel, _fill(cancel, "0.20", event_time_ns=working.event_time_ns))
+
+
+def test_seq_is_compared_only_within_one_producer() -> None:
+    working = _working(seq=5)
+    assert (working.producer, working.seq) == ("execution.sim", 6)
+    # Another producer's stream has its own numbering: a lower seq there is no regression.
+    other_stream = _next(working, E.CANCELED, S.CANCELED, producer="execution.broker", seq=0)
+    validate_order_transition(working, other_stream)
+    # Within the same producer it is.
+    assert "seq" in _rule(_refused(working, _next(working, E.CANCELED, S.CANCELED, seq=5)))
+
+
+def test_two_reports_may_be_observed_at_the_same_instant() -> None:
+    working = _working()
+    same_instant = _fill(
+        working, "0.20", event_time_ns=working.event_time_ns, receive_time_ns=working.receive_time_ns
     )
-    validate_order_transition(submit, same_instant)
+    validate_order_transition(working, same_instant)
+    # A request may follow a report at the instant the report was observed (step time).
+    cancel = _next(
+        working,
+        E.CANCEL_REQUESTED,
+        S.PENDING_CANCEL,
+        event_time_ns=working.receive_time_ns,
+        receive_time_ns=working.receive_time_ns,
+    )
+    validate_order_transition(working, cancel)
+
+
+@pytest.mark.parametrize("lag_ns", [0, -1], ids=["same_instant", "earlier"])
+def test_a_report_is_observed_strictly_later_than_the_request_it_answers(lag_ns: int) -> None:
+    submit = _submit()
+    validate_order_transition(
+        submit,
+        _next(
+            submit,
+            E.ACCEPTED,
+            S.WORKING,
+            event_time_ns=submit.receive_time_ns,
+            receive_time_ns=submit.receive_time_ns + 1,
+        ),
+    )
+    moment = submit.receive_time_ns + lag_ns
+    early = _next(
+        submit, E.ACCEPTED, S.WORKING, event_time_ns=min(moment, submit.event_time_ns), receive_time_ns=moment
+    )
+    error = _refused(submit, early)
+    assert "receive_time_ns" in _rule(error) if lag_ns < 0 else "strictly later" in _rule(error)
 
 
 # --------------------------------------------------------------------------- immutable fields
@@ -504,9 +595,15 @@ def _other_plan_ids() -> dict[str, str]:
 @pytest.mark.parametrize(
     "changed",
     [
-        {"side": Side.SELL, "attached_stop_price": D("2651.80")},
+        # (OEV-17: a SELL limit rests at or above, a BUY stop at or above its reference price)
+        {"side": Side.SELL, "attached_stop_price": D("2651.80"), "reference_price": D("2649.50")},
         {"reference_price": D("2650.40")},
-        {"order_type": OrderType.STOP, "limit_price": None, "trigger_price": D("2649.80")},
+        {
+            "order_type": OrderType.STOP,
+            "limit_price": None,
+            "trigger_price": D("2649.80"),
+            "reference_price": D("2649.50"),
+        },
         {"order_type": OrderType.MARKET, "limit_price": None},
         {"mode": RunMode.PAPER},
         _other_plan_ids(),
@@ -534,7 +631,7 @@ def test_an_event_of_another_order_cannot_continue_this_order() -> None:
         broker_order_id=None,
     )
     assert "client_order_id" in _rule(_refused(submit, other_order))
-    other_run = identity.run_id("REPLAY", "1" * 64, "other-fixture")
+    other_run = identity.run_id("REPLAY", "1" * 64)
     assert submit.risk_decision_id is not None
     foreign_run = _next(
         submit,
@@ -568,10 +665,10 @@ def test_broker_order_id_is_assigned_once_and_then_fixed() -> None:
     accepted = _next(submit, E.ACCEPTED, S.WORKING)
     assert accepted.broker_order_id == identity.broker_order_id(submit.client_order_id)
     validate_order_transition(submit, accepted)
+    # OEV-18: a broker id of another order cannot even be represented on this order.
     other = identity.broker_order_id(_stop_submit().client_order_id)
-    changed = _next(accepted, E.CANCELED, S.CANCELED, broker_order_id=other)
+    _violates("OEV-18", lambda: _next(accepted, E.CANCELED, S.CANCELED, broker_order_id=other))
     removed = _next(accepted, E.CANCELED, S.CANCELED, broker_order_id=None)
-    assert "broker_order_id" in _rule(_refused(accepted, changed))
     assert "broker_order_id" in _rule(_refused(accepted, removed))
 
 
@@ -633,6 +730,8 @@ def test_a_final_fill_must_add_up_as_well() -> None:
         cumulative_filled_lots=D("0.50"),
         last_fill_lots=D("0.20"),
         last_fill_price=D("2649.80"),
+        fill_tick_source="fixture",
+        fill_tick_seq=3,
     )
     _refused(partially, wrong)
 
@@ -697,6 +796,8 @@ def test_an_over_fill_cannot_be_constructed() -> None:
             last_fill_lots=quantity,
             last_fill_price=D("2649.80"),
             average_fill_price=D("2649.80"),
+            fill_tick_source="fixture",
+            fill_tick_seq=2,
         )
 
     assert fill(working, E.FILLED, S.FILLED, "0.50").cumulative_filled_lots == working.volume_lots
@@ -810,20 +911,39 @@ def test_a_stop_replacement_to_the_same_trigger_is_refused() -> None:
 
 @pytest.mark.requirement("G04-09", "G04-10")
 @pytest.mark.parametrize("requested", ["0.500000000001", "0.51", "1.00", "5"])
-def test_no_order_may_grow_by_replacement(requested: str) -> None:
+def test_no_entry_may_grow_by_replacement_or_reconciliation(requested: str) -> None:
     grow = {"requested_volume_lots": D(requested)}
     entry = _working()
-    assert "volume_lots" in _rule(
+    assert entry.volume_lots == D("0.50")
+    assert "volume_lots of an ENTRY order may not increase" in _rule(
         _refused(entry, _next(entry, E.REPLACE_REQUESTED, S.PENDING_REPLACE, **grow))
     )
+    partially = _reach(S.PARTIALLY_FILLED)
+    _refused(partially, _next(partially, E.REPLACE_REQUESTED, S.PENDING_REPLACE, **grow))
+    assert "may not increase" in _rule(
+        _refused(entry, _next(entry, E.RECONCILED, S.WORKING, volume_lots=D(requested)))
+    )
+
+
+@pytest.mark.requirement("G04-09", "G04-12")
+@pytest.mark.parametrize("requested", ["0.25", "0.500000000001", "0.51", "1.00"])
+def test_the_volume_of_a_reduce_only_order_follows_its_position_in_a_replacement(requested: str) -> None:
+    # Change notice section 6: the volume of a reduce-only order may change in a replacement in
+    # either direction (it follows the position); that it never exceeds the open volume is checked
+    # against the position by the authorisation (tests/gie/contracts/test_authorization.py).
     stop = samples.protective_stop_lifecycle()[1]
-    _refused(stop, _next(stop, E.REPLACE_REQUESTED, S.PENDING_REPLACE, **grow))
-    for child in (
-        _child_submit(OrderIntent.TAKE_PROFIT, OrderType.LIMIT),
-        _child_submit(OrderIntent.EXIT, OrderType.LIMIT),
-    ):
-        resting = _next(child, E.ACCEPTED, S.WORKING)
-        _refused(resting, _next(resting, E.REPLACE_REQUESTED, S.PENDING_REPLACE, **grow))
+    children = [
+        _next(_child_submit(OrderIntent.TAKE_PROFIT, OrderType.LIMIT), E.ACCEPTED, S.WORKING),
+        _next(_child_submit(OrderIntent.EXIT, OrderType.LIMIT), E.ACCEPTED, S.WORKING),
+    ]
+    for resting in (stop, *children):
+        assert resting.intent is not OrderIntent.ENTRY
+        request = _next(resting, E.REPLACE_REQUESTED, S.PENDING_REPLACE, requested_volume_lots=D(requested))
+        validate_order_transition(resting, request)
+        validate_order_transition(request, _next(request, E.REPLACED, S.WORKING, volume_lots=D(requested)))
+        # Reconciliation adopts the broker's volume of a reduce-only order as well (run_story: the
+        # broker-created stop grows with the second fill of the entry).
+        validate_order_transition(resting, _next(resting, E.RECONCILED, S.WORKING, volume_lots=D(requested)))
 
 
 @pytest.mark.requirement("G04-09")
@@ -993,8 +1113,15 @@ def test_a_reconciliation_cannot_widen_a_protective_stop() -> None:
     validate_order_transition(
         sell_stop, _next(sell_stop, E.RECONCILED, S.WORKING, trigger_price=D("2648.00"))
     )
-    _refused(sell_stop, _next(sell_stop, E.RECONCILED, S.WORKING, trigger_price=D("2647.79")))
-    _refused(sell_stop, _next(sell_stop, E.RECONCILED, S.WORKING, volume_lots=D("0.60")))
+    assert "never widened" in _rule(
+        _refused(sell_stop, _next(sell_stop, E.RECONCILED, S.WORKING, trigger_price=D("2647.79")))
+    )
+    # Its volume follows the position (change notice section 6); a widening never does.
+    validate_order_transition(sell_stop, _next(sell_stop, E.RECONCILED, S.WORKING, volume_lots=D("0.60")))
+    _refused(
+        sell_stop,
+        _next(sell_stop, E.RECONCILED, S.WORKING, volume_lots=D("0.60"), trigger_price=D("2647.79")),
+    )
     buy_stop = _next(_buy_stop_submit(), E.ACCEPTED, S.WORKING)
     validate_order_transition(buy_stop, _next(buy_stop, E.RECONCILED, S.WORKING, trigger_price=D("2652.00")))
     _refused(buy_stop, _next(buy_stop, E.RECONCILED, S.WORKING, trigger_price=D("2652.11")))
@@ -1154,9 +1281,7 @@ def test_oev7_an_entry_cannot_take_an_order_id_from_anything_else() -> None:
         identity.client_order_id(entry.run_id, position_id, "ENTRY", 0),
         identity.client_order_id(entry.run_id, other.decision_id, "ENTRY", 0),
         identity.client_order_id(entry.run_id, entry.risk_decision_id, "EXIT", 0),
-        identity.client_order_id(
-            identity.run_id("REPLAY", "1" * 64, "other-fixture"), entry.risk_decision_id, "ENTRY", 0
-        ),
+        identity.client_order_id(identity.run_id("REPLAY", "1" * 64), entry.risk_decision_id, "ENTRY", 0),
     ):
         _violates("OEV-7", lambda foreign=foreign: _submit(client_order_id=foreign))
 
@@ -1364,26 +1489,31 @@ def test_oev11_the_stop_of_a_sell_entry_lies_above_its_order_price(
 
 @pytest.mark.requirement("G04-12")
 @pytest.mark.parametrize(
-    ("side", "stop", "fill_price", "accepted"),
+    ("side", "stop", "fill_price"),
     [
-        (Side.BUY, "2647.80", "2647.81", True),
-        (Side.BUY, "2647.80", "2647.80", False),
-        (Side.BUY, "2647.80", "2647.00", False),
-        (Side.SELL, "2651.80", "2651.79", True),
-        (Side.SELL, "2651.80", "2651.80", False),
-        (Side.SELL, "2651.80", "2652.50", False),
+        (Side.BUY, "2647.80", "2647.81"),
+        (Side.BUY, "2647.80", "2647.80"),
+        (Side.BUY, "2647.80", "2647.00"),
+        (Side.SELL, "2651.80", "2651.79"),
+        (Side.SELL, "2651.80", "2651.80"),
+        (Side.SELL, "2651.80", "2652.50"),
     ],
+    ids=["buy_above", "buy_at_stop", "buy_gapped", "sell_below", "sell_at_stop", "sell_gapped"],
 )
-def test_oev11_the_stop_lies_on_the_losing_side_of_the_average_fill_price(
-    side: Side, stop: str, fill_price: str, accepted: bool
+def test_oev11_a_fill_at_or_beyond_the_attached_stop_is_a_fact_and_not_judged(
+    side: Side, stop: str, fill_price: str
 ) -> None:
-    working = _working(side=side, attached_stop_price=D(stop))
+    # Change notice section 7 / OEV-11: attached protection is judged against the price GIE asked
+    # for; a fill can gap through the stop and the venue reports it as it happened.
+    reference = {"reference_price": D("2649.50")} if side is Side.SELL else {}
+    working = _working(side=side, attached_stop_price=D(stop), **reference)
     fills = {"average_fill_price": D(fill_price), "last_fill_price": D(fill_price)}
-    if accepted:
-        assert _fill(working, "0.50", **fills).average_fill_price == D(fill_price)
-    else:
-        _violates("OEV-11", lambda: _fill(working, "0.50", **fills))
-        _violates("OEV-11", lambda: _fill(working, "0.20", **fills))
+    for lots in ("0.50", "0.20"):
+        event = _fill(working, lots, **fills)
+        assert event.average_fill_price == D(fill_price)
+        validate_order_transition(working, event)
+    # The request itself is still judged: the same stop on the winning side of the limit is refused.
+    _violates("OEV-11", lambda: _submit(side=side, attached_stop_price=D("2649.80"), **reference))
 
 
 @pytest.mark.parametrize(
@@ -1401,7 +1531,13 @@ def test_oev11_the_stop_lies_on_the_losing_side_of_the_average_fill_price(
 def test_oev11_an_attached_take_profit_lies_on_the_winning_side(
     side: Side, stop: str, take_profit: str, accepted: bool
 ) -> None:
-    fields = {"side": side, "attached_stop_price": D(stop), "attached_take_profit_price": D(take_profit)}
+    fields: dict[str, Any] = {
+        "side": side,
+        "attached_stop_price": D(stop),
+        "attached_take_profit_price": D(take_profit),
+    }
+    if side is Side.SELL:
+        fields["reference_price"] = D("2649.50")  # OEV-17: a SELL limit rests at or above the bid
     if accepted:
         assert _submit(**fields).attached_take_profit_price == D(take_profit)
     else:
@@ -1589,3 +1725,286 @@ def test_the_helpers_of_this_module_build_what_they_claim() -> None:
         event = _reach(state, filled=True)
         assert event.order_state is state
         assert event.cumulative_filled_lots == D("0.20")
+
+
+# =========================================================================== rework 2 (change notice 6)
+# --------------------------------------------------------------------------- OEV-15 originator
+@pytest.mark.requirement("G04-09", "G04-10")
+def test_oev15_an_entry_is_always_created_by_the_execution_engine() -> None:
+    assert _submit().originator is OrderOriginator.EXECUTION
+    _violates("OEV-15", lambda: _submit(originator=OrderOriginator.BROKER))
+    _violates("OEV-15", lambda: _submit(originator=OrderOriginator.BROKER, reason_code="ENTRY_FILLED"))
+
+
+@pytest.mark.parametrize(
+    ("intent", "order_type"),
+    [
+        (OrderIntent.PROTECTIVE_STOP, OrderType.STOP),
+        (OrderIntent.TAKE_PROFIT, OrderType.LIMIT),
+        (OrderIntent.EXIT, OrderType.MARKET),
+    ],
+)
+def test_oev15_an_order_created_by_the_broker_states_why(intent: OrderIntent, order_type: OrderType) -> None:
+    by_broker = _child_submit(
+        intent, order_type, originator=OrderOriginator.BROKER, reason_code="ENTRY_FILLED"
+    )
+    assert by_broker.originator is OrderOriginator.BROKER
+    _violates(
+        "OEV-15",
+        lambda: _child_submit(intent, order_type, originator=OrderOriginator.BROKER, reason_code=None),
+    )
+    # The broker's reason stays on every later event of its order.
+    working = _next(by_broker, E.ACCEPTED, S.WORKING)
+    validate_order_transition(by_broker, working)
+    _violates("OEV-15", lambda: _next(by_broker, E.ACCEPTED, S.WORKING, reason_code=None))
+    # An order of the execution engine needs no reason on a plain acknowledgement.
+    own = _child_submit(intent, order_type, originator=OrderOriginator.EXECUTION, reason_code=None)
+    assert own.reason_code is None
+
+
+def test_the_originator_of_an_order_never_changes() -> None:
+    stop = _stop_submit()
+    assert stop.originator is OrderOriginator.BROKER
+    taken_over = _next(stop, E.ACCEPTED, S.WORKING, originator=OrderOriginator.EXECUTION)
+    assert "originator" in _rule(_refused(stop, taken_over))
+    own = _child_submit(OrderIntent.EXIT, OrderType.MARKET, originator=OrderOriginator.EXECUTION)
+    handed = _next(own, E.ACCEPTED, S.WORKING, originator=OrderOriginator.BROKER, reason_code="TIME_EXIT")
+    assert "originator" in _rule(_refused(own, handed))
+
+
+# --------------------------------------------------------------------------- OEV-16 max_slippage, MARKET
+@pytest.mark.requirement("G04-12")
+def test_oev16_max_slippage_is_carried_by_an_entry_only() -> None:
+    assert _submit().max_slippage == D("0.10")
+    assert _submit(max_slippage=None).max_slippage is None
+    assert _submit(max_slippage=D("0")).max_slippage == D("0")
+    for intent, order_type in (
+        (OrderIntent.PROTECTIVE_STOP, OrderType.STOP),
+        (OrderIntent.TAKE_PROFIT, OrderType.LIMIT),
+        (OrderIntent.EXIT, OrderType.MARKET),
+    ):
+        assert _child_submit(intent, order_type).max_slippage is None
+        _violates(
+            "OEV-16",
+            lambda intent=intent, order_type=order_type: _child_submit(
+                intent, order_type, max_slippage=D("0.10")
+            ),
+        )
+
+
+@pytest.mark.parametrize("value", [D("-0.01"), 0.1, "0.10"], ids=["negative", "float", "string"])
+def test_max_slippage_is_a_non_negative_decimal(value: object) -> None:
+    with pytest.raises(ContractValidationError) as caught:
+        _submit(max_slippage=value)
+    assert caught.value.details.get("path") == "max_slippage"
+
+
+def test_the_slippage_limit_of_an_order_never_changes() -> None:
+    submit = _submit()
+    for other in (D("0.20"), None):
+        changed = _next(submit, E.ACCEPTED, S.WORKING, max_slippage=other)
+        assert "max_slippage" in _rule(_refused(submit, changed))
+
+
+def test_oev16_every_market_order_carries_its_reference_price() -> None:
+    market_entry = _submit(order_type=OrderType.MARKET, limit_price=None, valid_until_ns=None)
+    assert market_entry.reference_price == D("2650.35")
+    # The entry rule OEV-5 asks for it as well; a MARKET EXIT is held to OEV-16.
+    assert _child_submit(OrderIntent.EXIT, OrderType.MARKET).reference_price == D("2650.10")
+    _violates("OEV-16", lambda: _child_submit(OrderIntent.EXIT, OrderType.MARKET, reference_price=None))
+    # A resting reduce-only order needs none.
+    assert _child_submit(OrderIntent.EXIT, OrderType.LIMIT).reference_price is None
+
+
+# --------------------------------------------------------------------------- OEV-9 matched quote
+def test_oev9_a_fill_names_the_quote_it_was_matched_against() -> None:
+    working = _working()
+    partial = _fill(working, "0.20")
+    assert (partial.fill_tick_source, partial.fill_tick_seq) == ("fixture", 2)
+    _violates("OEV-9", lambda: _fill(working, "0.20", fill_tick_source=None))
+    _violates("OEV-9", lambda: _fill(working, "0.20", fill_tick_seq=None))
+    _violates("OEV-9", lambda: _fill(working, "0.20", fill_tick_source=None, fill_tick_seq=None))
+    # The quote fields belong to a fill and appear on no other event.
+    for stray in ({"fill_tick_source": "fixture"}, {"fill_tick_seq": 1}):
+        _violates("OEV-9", lambda stray=stray: _next(_submit(), E.ACCEPTED, S.WORKING, **stray))
+        _violates("OEV-9", lambda stray=stray: _submit(**stray))
+
+
+def test_oev9_a_fill_found_by_reconciliation_may_name_its_quote() -> None:
+    working = _working()
+    plain = _next(
+        working,
+        E.RECONCILED,
+        S.PARTIALLY_FILLED,
+        cumulative_filled_lots=D("0.20"),
+        average_fill_price=D("2649.80"),
+    )
+    validate_order_transition(working, plain)
+    traced = _next(
+        working,
+        E.RECONCILED,
+        S.PARTIALLY_FILLED,
+        cumulative_filled_lots=D("0.20"),
+        average_fill_price=D("2649.80"),
+        last_fill_lots=D("0.20"),
+        last_fill_price=D("2649.80"),
+        fill_tick_source="fixture",
+        fill_tick_seq=7,
+    )
+    validate_order_transition(working, traced)
+    _violates(
+        "OEV-9",
+        lambda: _next(
+            working,
+            E.RECONCILED,
+            S.PARTIALLY_FILLED,
+            cumulative_filled_lots=D("0.20"),
+            average_fill_price=D("2649.80"),
+            last_fill_lots=D("0.20"),
+            last_fill_price=D("2649.80"),
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    ("path", "value"),
+    [
+        ("fill_tick_source", ""),
+        ("fill_tick_source", "Fixture Feed"),
+        ("fill_tick_source", "x" * 65),
+        ("fill_tick_seq", -1),
+        ("fill_tick_seq", 1.0),
+        ("fill_tick_seq", True),
+    ],
+)
+def test_the_matched_quote_fields_are_refused_when_malformed(path: str, value: object) -> None:
+    with pytest.raises(ContractValidationError) as caught:
+        _fill(_working(), "0.20", **{path: value})
+    assert caught.value.details.get("path") == path
+
+
+# --------------------------------------------------------------------------- OEV-13 protective stop expiry
+@pytest.mark.requirement("G04-11", "G04-12")
+def test_a_protective_stop_never_expires() -> None:
+    for working in (
+        _next(_stop_submit(), E.ACCEPTED, S.WORKING),
+        _next(_buy_stop_submit(), E.ACCEPTED, S.WORKING),
+    ):
+        for previous in (working, _next(working, E.CANCEL_REQUESTED, S.PENDING_CANCEL)):
+            expired = _next(previous, E.EXPIRED, S.EXPIRED)
+            assert "never expires" in _rule(_refused(previous, expired))
+    # Nor even before it was acknowledged.
+    submit = _stop_submit()
+    assert "never expires" in _rule(_refused(submit, _next(submit, E.EXPIRED, S.EXPIRED)))
+    # Other reduce-only orders may expire.
+    for intent in (OrderIntent.TAKE_PROFIT, OrderIntent.EXIT):
+        resting = _next(_child_submit(intent, OrderType.LIMIT), E.ACCEPTED, S.WORKING)
+        validate_order_transition(resting, _next(resting, E.EXPIRED, S.EXPIRED))
+
+
+@pytest.mark.requirement("G04-12")
+def test_oev13_an_order_fills_strictly_before_its_expiry() -> None:
+    working = _working()
+    assert working.valid_until_ns == T0 + 30 * NS_PER_SECOND
+    expiry = working.valid_until_ns
+    in_time = _fill(working, "0.20", event_time_ns=expiry - 1, receive_time_ns=expiry)
+    validate_order_transition(working, in_time)
+    for late in (expiry, expiry + 1):
+        _violates(
+            "OEV-13",
+            lambda late=late: _fill(working, "0.20", event_time_ns=late, receive_time_ns=late),
+        )
+
+
+# --------------------------------------------------------------------------- OEV-17 resting entry geometry
+@pytest.mark.requirement("G04-12")
+@pytest.mark.parametrize(
+    ("side", "order", "accepted"),
+    [
+        (Side.BUY, {"limit_price": D("2650.35")}, True),
+        (Side.BUY, {"limit_price": D("2650.350000000001")}, False),
+        (Side.SELL, {"limit_price": D("2650.35"), "attached_stop_price": D("2652.00")}, True),
+        (Side.SELL, {"limit_price": D("2650.349999999999"), "attached_stop_price": D("2652.00")}, False),
+        (Side.BUY, {"order_type": OrderType.STOP, "limit_price": None, "trigger_price": D("2650.35")}, True),
+        (
+            Side.BUY,
+            {"order_type": OrderType.STOP, "limit_price": None, "trigger_price": D("2650.349999999999")},
+            False,
+        ),
+        (
+            Side.SELL,
+            {
+                "order_type": OrderType.STOP,
+                "limit_price": None,
+                "trigger_price": D("2650.35"),
+                "attached_stop_price": D("2652.00"),
+            },
+            True,
+        ),
+        (
+            Side.SELL,
+            {
+                "order_type": OrderType.STOP,
+                "limit_price": None,
+                "trigger_price": D("2650.350000000001"),
+                "attached_stop_price": D("2652.00"),
+            },
+            False,
+        ),
+    ],
+    ids=[
+        "buy_limit_at_reference",
+        "buy_limit_through_market",
+        "sell_limit_at_reference",
+        "sell_limit_through_market",
+        "buy_stop_at_reference",
+        "buy_stop_through_market",
+        "sell_stop_at_reference",
+        "sell_stop_through_market",
+    ],
+)
+def test_oev17_a_resting_entry_rests_beyond_the_market(
+    side: Side, order: dict[str, Any], accepted: bool
+) -> None:
+    fields = {"side": side, "reference_price": D("2650.35"), **order}
+    if accepted:
+        assert _submit(**fields).reference_price == D("2650.35")
+    else:
+        _violates("OEV-17", lambda: _submit(**fields))
+
+
+# --------------------------------------------------------------------------- PENDING_CANCEL races
+def test_a_late_acknowledgement_or_rejection_is_only_possible_before_the_order_was_acknowledged() -> None:
+    unacknowledged = _next(_submit(), E.CANCEL_REQUESTED, S.PENDING_CANCEL)
+    assert unacknowledged.broker_order_id is None
+    validate_order_transition(unacknowledged, _next(unacknowledged, E.ACCEPTED, S.PENDING_CANCEL))
+    validate_order_transition(unacknowledged, _next(unacknowledged, E.REJECTED, S.REJECTED))
+    # The late acknowledgement leaves the cancel pending; it does not reopen the order.
+    _refused(unacknowledged, _next(unacknowledged, E.ACCEPTED, S.WORKING))
+    acknowledged = _reach(S.PENDING_CANCEL)
+    assert acknowledged.broker_order_id is not None
+    for event_type, state in ((E.ACCEPTED, S.PENDING_CANCEL), (E.REJECTED, S.REJECTED)):
+        error = _refused(acknowledged, _next(acknowledged, event_type, state))
+        assert "already acknowledged" in _rule(error)
+
+
+def test_the_outcome_of_a_replacement_can_arrive_while_a_cancel_is_pending() -> None:
+    replacing = _reach(S.PENDING_REPLACE)
+    cancel = _next(replacing, E.CANCEL_REQUESTED, S.PENDING_CANCEL)
+    assert cancel.requested_volume_lots == D("0.40")  # still outstanding (OEV-14)
+    validate_order_transition(replacing, cancel)
+    replaced = _next(cancel, E.REPLACED, S.PENDING_CANCEL, volume_lots=D("0.40"))
+    assert replaced.requested_volume_lots is None
+    validate_order_transition(cancel, replaced)
+    validate_order_transition(cancel, _next(cancel, E.REPLACE_REJECTED, S.PENDING_CANCEL))
+    # The replacement outcome must still apply exactly what was requested.
+    assert "exactly the requested" in _rule(_refused(cancel, _next(cancel, E.REPLACED, S.PENDING_CANCEL)))
+    # It cannot carry the requested values on, and a cancel without a replacement has no outcome.
+    _violates(
+        "OEV-14",
+        lambda: _next(cancel, E.REPLACED, S.WORKING, volume_lots=D("0.40"), requested_volume_lots=D("0.40")),
+    )
+    plain_cancel = _reach(S.PENDING_CANCEL)
+    for event_type in (E.REPLACED, E.REPLACE_REJECTED):
+        error = _refused(plain_cancel, _next(plain_cancel, event_type, S.PENDING_CANCEL))
+        assert "no replacement is outstanding" in _rule(error)

@@ -5,8 +5,10 @@ The execution engine never holds a raw adapter.  It holds a
 
 1. authorises the adapter with the :class:`~gie.core.routing_lock.RoutingGuard`
    (registered simulated class, exact type, no instance attributes, methods
-   unchanged since registration) and then calls the adapter only through the
-   functions that were registered;
+   unchanged since registration) **before anything else** - nothing is checked,
+   journaled or sent for an adapter the guard refuses - and later calls the
+   adapter only through the functions that were registered, after authorising
+   it once more;
 2. checks that the request is a genuine :class:`OrderEvent` (exact type) for the
    simulated venue and the guard's run mode;
 3. takes the plan, the risk approval and the position the request refers to
@@ -122,8 +124,12 @@ class GuardedExecutionAdapter:
         return self._guard.mode
 
     # ------------------------------------------------------------------ checks
+    def _authorise_adapter(self) -> None:
+        """Routing lock first: nothing is checked, journaled or sent for an adapter the guard refuses."""
+        RoutingGuard.authorized_methods(self._guard, self._adapter)
+
     def _call(self, method: str, *arguments: object) -> Any:
-        """Authorise the adapter, then call the function that was registered for *method*."""
+        """Authorise the adapter (again), then call the function that was registered for *method*."""
         methods = RoutingGuard.authorized_methods(self._guard, self._adapter)
         return methods[method](self._adapter, *arguments)
 
@@ -178,6 +184,7 @@ class GuardedExecutionAdapter:
     # ------------------------------------------------------------------ requests
     def submit(self, request: OrderEvent) -> None:
         """Authorise, journal and forward the first event of an order of the execution engine."""
+        self._authorise_adapter()
         event = self._request(request, OrderEventType.SUBMIT_REQUESTED)
         if event.originator is not OrderOriginator.EXECUTION:
             raise IllegalTransitionError(
@@ -211,6 +218,7 @@ class GuardedExecutionAdapter:
         self._call("submit", event)
 
     def cancel(self, request: OrderEvent) -> None:
+        self._authorise_adapter()
         event = self._request(request, OrderEventType.CANCEL_REQUESTED)
         if event.intent is OrderIntent.PROTECTIVE_STOP:
             validate_protective_cancel(self._position(event), event)
@@ -218,6 +226,7 @@ class GuardedExecutionAdapter:
         self._call("cancel", event)
 
     def replace(self, request: OrderEvent) -> None:
+        self._authorise_adapter()
         event = self._request(request, OrderEventType.REPLACE_REQUESTED)
         if event.intent is not OrderIntent.ENTRY:
             self._authorise_reducing(event)
@@ -258,7 +267,11 @@ class GuardedExecutionAdapter:
 
         An adapter that models latency holds a report back until its receive
         instant and schedules its own wake-up through the run's scheduler; the
-        gateway refuses a report that lies in the future.
+        gateway refuses a report that lies in the future.  A report for another
+        run mode or venue is refused like any other faulty report: it is not
+        journaled, its lock error is returned in ``errors``, and the reports
+        behind it are still processed.  (An adapter the routing guard refuses is
+        never polled at all: that error is raised.)
         """
         events: list[OrderEvent] = []
         errors: list[GieError] = []
@@ -266,8 +279,6 @@ class GuardedExecutionAdapter:
         for item in tuple(self._call("poll")):
             try:
                 admitted = self._admit_report(item)
-            except LiveRoutingLockedError:
-                raise
             except GieError as error:
                 errors.append(error)
                 continue

@@ -37,7 +37,9 @@ from gie.contracts import (
     ClockMode,
     ContractRef,
     Contribution,
+    DailyState,
     Destination,
+    ModelStatus,
     NamedValue,
     OrderEventType,
     PlanStatus,
@@ -45,9 +47,12 @@ from gie.contracts import (
     QuantilePoint,
     Record,
     RiskOutcome,
+    RunManifest,
     RunMode,
+    RunModel,
     Target,
     TickFlag,
+    derive_run_id,
     fingerprint,
     from_json,
     from_wire,
@@ -58,7 +63,7 @@ from gie.contracts import (
 from gie.contracts._spec import Dec, FieldType, ListOf, Obj, Opt
 from gie.contracts.registry import all_contracts
 from gie.contracts.schema_gen import json_schema
-from gie.core.canonical import strict_loads
+from gie.core.canonical import canonical_dumps, decimal_to_str, fraction_of, strict_loads
 from gie.core.errors import ContractValidationError
 from gie.core.timeutil import MAX_TIME_NS
 from tests.gie import samples
@@ -222,7 +227,12 @@ def assert_round_trip(original: Record) -> dict[str, Any]:
     wire = to_wire(original)
     assert from_wire(wire) == original
     parsed = strict_loads(text)
-    assert parsed == wire
+    # The text does not say whether a number without a fraction was an integer or a double
+    # (gie.core.canonical): an integral double beyond 2**53 is read back as an integer literal and
+    # the field type decides.  Parsed text and wire form are therefore the same JSON value.
+    assert canonical_dumps(parsed) == text == canonical_dumps(wire)
+    assert_same_json(parsed, wire)
+    assert from_wire(parsed) == original
     assert fingerprint(back) == fingerprint(original)
     assert wire["contract"] == cls.CONTRACT
     assert wire["schema_version"] == cls.VERSION
@@ -232,6 +242,37 @@ def assert_round_trip(original: Record) -> dict[str, Any]:
     errors = list(_validator(cls.CONTRACT).iter_errors(parsed))
     assert errors == [], errors[0].message
     return wire
+
+
+def assert_same_json(parsed: Any, wire: Any, path: str = "") -> None:
+    """*parsed* (text read back) is the JSON value *wire*; an int literal stands for a double only
+    when it is the canonical rendering of that double (``_spec.Float``)."""
+    if isinstance(wire, dict):
+        assert type(parsed) is dict, path
+        assert set(parsed) == set(wire), path
+        for key, value in wire.items():
+            assert_same_json(parsed[key], value, f"{path}.{key}")
+    elif isinstance(wire, list):
+        assert type(parsed) is list, path
+        assert len(parsed) == len(wire), path
+        for index, (left, right) in enumerate(zip(parsed, wire, strict=True)):
+            assert_same_json(left, right, f"{path}[{index}]")
+    elif type(wire) is float and type(parsed) is int:
+        assert str(parsed) == canonical_dumps(wire), path
+        assert float(parsed) == wire, path
+    else:
+        assert type(parsed) is type(wire), path
+        assert parsed == wire, path
+
+
+def replace(item: Record, **changes: Any) -> Record:
+    """``dataclasses.replace`` that keeps a RunManifest valid: its ``run_id`` is derived (RUN-1)."""
+    if isinstance(item, RunManifest) and "run_id" not in changes:
+        fields = {spec.name: getattr(item, spec.name) for spec in RunManifest.FIELD_SPECS}
+        fields.pop("run_id")
+        fields.update(changes)
+        return RunManifest.create(**fields)
+    return dataclasses.replace(item, **changes)  # type: ignore[type-var]
 
 
 def assert_same_record(left: Record, right: Record) -> None:
@@ -432,13 +473,19 @@ def test_trade_plan_round_trip_property(data: st.DataObject) -> None:
     total = sum(shares)
     if total > 1000:
         shares = [share * 1000 // total for share in shares]
+    # PLN-15: no two targets have the same (scenario, label); the labels are drawn distinct.
+    labels = data.draw(
+        st.lists(st.sampled_from(CODE_NAMES), unique=True, min_size=len(offsets), max_size=len(offsets)),
+        label="labels",
+    )
     targets = [
         Target(
-            label=data.draw(st.sampled_from(CODE_NAMES)),
+            label=label,
+            scenario=data.draw(st.none() | st.sampled_from(CODE_NAMES), label="scenario"),
             price=scaled(264_980 + offset, 2),
             close_frac=scaled(share, 3),
         )
-        for offset, share in zip(offsets, shares, strict=True)
+        for offset, share, label in zip(offsets, shares, labels, strict=True)
     ]
     reasons = data.draw(shuffled_subset(REASON_CODES, min_size=1), label="reasons")
     selected = data.draw(st.booleans(), label="selected")
@@ -474,37 +521,66 @@ def test_trade_plan_round_trip_property(data: st.DataObject) -> None:
 @PROPERTY
 @given(data=st.data())
 def test_risk_decision_round_trip_property(data: st.DataObject) -> None:
-    frac_units = data.draw(st.integers(1, 10**6), label="risk_frac in 1e-6")
+    # D-028 "amounts decide, fractions report": the amounts are drawn, the fractions are derived from
+    # them with gie.core.canonical.fraction_of (RSK-9); risk_frac <= 1, so risk_amount <= reference equity.
     equity_units = data.draw(st.integers(100, 10**14), label="reference equity in cents")
-    # risk_amount <= risk_frac * reference_equity (RSK-9), all three exact.
-    amount_units = data.draw(st.integers(1, frac_units * equity_units), label="risk amount in 1e-8")
+    approved = data.draw(st.booleans(), label="approved")
+    amount_units = data.draw(st.integers(1, equity_units * 10**6), label="risk amount in 1e-8")
     reasons = data.draw(shuffled_subset(REASON_CODES, min_size=1), label="reasons")
     decision_time = data.draw(st.integers(0, MAX_TIME_NS - 1), label="decision")
-    fields = {
-        "outcome": RiskOutcome.APPROVED_REDUCED,
-        "risk_frac": scaled(frac_units, 6),
+    margin_free = data.draw(decimals(0, 10**17), label="margin free")
+    fields: dict[str, Any] = {
         "reference_equity_amount": scaled(equity_units, 2),
-        "risk_amount": scaled(amount_units, 8),
-        "volume_lots": data.draw(prices, label="volume"),
-        "daily_pnl_frac": data.draw(decimals(-(10**6), 10**6, 6), label="daily pnl"),
-        "equity_amount": data.draw(st.none() | money, label="equity"),
-        "open_risk_amount": data.draw(st.none() | volumes, label="open risk"),
-        "pending_risk_amount": data.draw(st.none() | volumes, label="pending risk"),
-        "margin_required_amount": data.draw(st.none() | volumes, label="margin required"),
-        "margin_free_amount": data.draw(st.none() | money, label="margin free"),
-        "gap_stress_loss_amount": data.draw(st.none() | volumes, label="gap stress"),
+        "daily_state": DailyState.NORMAL,
+        "daily_pnl_amount": data.draw(money, label="daily pnl"),
+        "profit_floor_amount": None,
         "decision_time_ns": decision_time,
         "as_of_time_ns": data.draw(st.integers(0, decision_time), label="as_of"),
         "valid_until_ns": data.draw(st.integers(decision_time + 1, MAX_TIME_NS), label="valid_until"),
         "attempt": data.draw(st.integers(0, 65535), label="attempt"),
         "seq": data.draw(counts, label="seq"),
     }
+    if approved:
+        # RSK-13: an approval states every aggregate it rests on, and margin_required <= margin_free.
+        fields.update(
+            outcome=RiskOutcome.APPROVED_REDUCED,
+            risk_amount=scaled(amount_units, 8),
+            volume_lots=data.draw(prices, label="volume"),
+            equity_amount=data.draw(money, label="equity"),
+            open_risk_amount=data.draw(volumes, label="open risk"),
+            pending_risk_amount=data.draw(volumes, label="pending risk"),
+            margin_free_amount=margin_free,
+            margin_required_amount=data.draw(
+                decimals(0, 10**17).filter(lambda value: value <= margin_free), label="margin required"
+            ),
+            gap_stress_loss_amount=data.draw(volumes, label="gap stress"),
+        )
+    else:
+        # RSK-2: a rejection grants nothing; the aggregates may be unknown (null).
+        fields.update(
+            outcome=RiskOutcome.REJECTED,
+            risk_amount=Decimal(0),
+            volume_lots=Decimal(0),
+            equity_amount=data.draw(st.none() | money, label="equity"),
+            open_risk_amount=data.draw(st.none() | volumes, label="open risk"),
+            pending_risk_amount=data.draw(st.none() | volumes, label="pending risk"),
+            margin_free_amount=data.draw(st.none() | money, label="margin free"),
+            margin_required_amount=None,
+            gap_stress_loss_amount=data.draw(st.none() | volumes, label="gap stress"),
+        )
     decision = samples.risk_decision(**fields, reason_codes=tuple(reasons))
     wire = assert_round_trip(decision)
     assert decision.reason_codes == tuple(sorted(reasons)), "sorted ascending"
     assert_same_record(decision, samples.risk_decision(**fields, reason_codes=sorted(reasons)))
     assert wire["trading_day"] == decision.trading_day
-    assert Decimal(wire["risk_amount"]) == scaled(amount_units, 8)
+    assert Decimal(wire["risk_amount"]) == fields["risk_amount"]
+    equity = fields["reference_equity_amount"]
+    assert wire["risk_frac"] == decimal_to_str(fraction_of(fields["risk_amount"], equity, round_up=True))
+    assert wire["daily_pnl_frac"] == decimal_to_str(
+        fraction_of(fields["daily_pnl_amount"], equity, round_up=False)
+    )
+    assert wire["profit_floor_frac"] is None
+    assert (wire["reservation_id"] is None) is (not approved)
     reordered = {**wire, "reason_codes": list(data.draw(st.permutations(wire["reason_codes"])))}
     assert_same_record(from_wire(reordered), decision)
 
@@ -664,28 +740,58 @@ def test_clock_round_trip_property(
 @given(data=st.data())
 def test_run_manifest_round_trip_property(data: st.DataObject) -> None:
     sources = data.draw(shuffled_subset(FEED_IDS, min_size=1), label="sources")
-    models = data.draw(st.lists(ids("mdl"), unique=True, max_size=6), label="models")
+    model_ids = data.draw(st.lists(ids("mdl"), unique=True, max_size=6), label="models")
+    models = []
+    for model_id in model_ids:
+        status = data.draw(st.sampled_from(list(ModelStatus)), label="status")
+        window = sorted(data.draw(st.lists(instants, unique=True, min_size=2, max_size=2), label="window"))
+        bounded = data.draw(st.booleans(), label="bounded")
+        models.append(
+            RunModel(
+                model_version_id=model_id,
+                status=status,
+                validated=status is ModelStatus.ACTIVE and data.draw(st.booleans(), label="validated"),
+                valid_from_ns=window[0] if bounded else None,
+                valid_until_ns=window[1] if bounded else None,
+            )
+        )
+    paper = data.draw(st.booleans(), label="paper")
     start, end = sorted(data.draw(st.lists(instants, unique=True, min_size=2, max_size=2), label="period"))
-    fields = {
-        "data_start_ns": start,
-        "data_end_ns": end,
-        "created_time_ns": data.draw(instants, label="created"),
+    # RUN-2: a replay states its data period and no creation time, a paper run the reverse.
+    fields: dict[str, Any] = {
+        "mode": RunMode.PAPER if paper else RunMode.REPLAY,
+        "data_start_ns": None if paper else start,
+        "data_end_ns": None if paper else end,
+        "created_time_ns": data.draw(instants, label="created") if paper else None,
         "seed": data.draw(st.none() | counts, label="seed"),
         "label": data.draw(st.sampled_from(["fixture", "fixture-b", "a", "z9_.-x"]), label="label"),
+        "code_tree_dirty": data.draw(st.booleans(), label="dirty"),
     }
-    manifest = samples.run_manifest(**fields, data_sources=tuple(sources), model_version_ids=tuple(models))
+    manifest = samples.run_manifest(**fields, data_sources=tuple(sources), models=tuple(models))
     wire = assert_round_trip(manifest)
     assert manifest.data_sources == tuple(sorted(sources))
-    assert manifest.model_version_ids == tuple(sorted(models))
+    order = sorted(
+        models,
+        key=lambda item: (-1 if item.valid_from_ns is None else item.valid_from_ns, item.model_version_id),
+    )
+    assert manifest.models == tuple(order), "sorted by start of validity, then id"
+    assert manifest.run_id == derive_run_id(
+        **{
+            spec.name: getattr(manifest, spec.name)
+            for spec in RunManifest.FIELD_SPECS
+            if spec.name != "run_id"
+        }
+    ), "RUN-1: the run id is derived from every other field"
     assert_same_record(
         manifest,
-        samples.run_manifest(**fields, data_sources=sorted(sources), model_version_ids=sorted(models)),
+        samples.run_manifest(**fields, data_sources=sorted(sources), models=list(reversed(models))),
     )
     reordered = copy.deepcopy(wire)
-    for name in ("data_sources", "model_version_ids"):
+    for name in ("data_sources", "models"):
         reordered[name] = list(data.draw(st.permutations(wire[name]), label=f"wire {name}"))
     assert_same_record(from_wire(reordered), manifest)
-    assert wire["data_end_ns"] == end
+    assert wire["data_end_ns"] == (None if paper else end)
+    assert wire["created_time_ns"] == fields["created_time_ns"]
     assert wire["shadow_of_run_id"] is None
 
 
@@ -747,7 +853,7 @@ def _nullable_fields(item: Record) -> list[str]:
     for spec in type(item).FIELD_SPECS:
         if spec.ftype.optional and getattr(item, spec.name) is not None:
             try:
-                dataclasses.replace(item, **{spec.name: None})  # type: ignore[type-var]
+                replace(item, **{spec.name: None})
             except ContractValidationError:
                 continue
             names.append(spec.name)
@@ -827,7 +933,7 @@ def test_each_optional_field_set_to_none_is_written_as_explicit_null(index: int)
     variant_index, names = NULLABLE[index]
     original = VARIANTS[variant_index][2]
     for name in names:
-        changed = dataclasses.replace(original, **{name: None})  # type: ignore[type-var]
+        changed = replace(original, **{name: None})
         assert changed != original
         wire = assert_round_trip(changed)
         assert name in wire
@@ -848,7 +954,7 @@ def test_any_allowed_combination_of_null_optional_fields_round_trips(data: st.Da
     applied = []
     for name in chosen:
         try:
-            changed = dataclasses.replace(changed, **{name: None})  # type: ignore[type-var]
+            changed = replace(changed, **{name: None})
         except ContractValidationError:
             continue  # this combination is not allowed by an invariant
         applied.append(name)

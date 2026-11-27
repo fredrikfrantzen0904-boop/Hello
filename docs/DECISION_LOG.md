@@ -425,8 +425,13 @@ gateway and the journal cannot disagree. The order of every call is: routing loc
 journal (write-ahead), adapter. A request that is already journaled is forwarded again - the adapter
 is idempotent per `order_event_id` - so a crash between journal and adapter loses nothing. `poll()`
 journals every report on its own and returns `PollResult(events, duplicates, errors)`; a refused
-report never hides the reports after it. Reduce-only rules are aggregates of the ledger: at most one
-working protective stop per position, working exit and take-profit volume within the open volume.
+report never hides the reports after it - also when it is refused because it belongs to another run
+mode or venue. Reduce-only rules are aggregates of the ledger: at most one working protective stop
+per position, working exit and take-profit volume within the open volume.
+The routing lock is checked first: nothing is examined, journaled or sent for an adapter the guard
+refuses (the engineers who maintained the gateway tests found that the first version of the rework
+journaled the request before that check; corrected, and the pin of the gateway updated with this
+entry).
 
 ## D-022 - Timers come from an injected scheduler; there are no timer threads
 

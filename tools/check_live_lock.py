@@ -106,6 +106,31 @@ LL013  No string literal names the production tree (the read-only directory of C
 LL014  ``specifications/lock_pins.json`` pins the SHA-256 of the bytes of the lock module and the
        gateway module.  A changed file fails until the pin is updated - which needs a decision-log
        entry and the owner's approval.
+LL015  No file-drop channel: below ``gie/`` and ``dashboard/`` no code writes to the file system.
+       A simulated adapter that writes an order file into a terminal's exchange folder would be a
+       real routing channel that leaves the process without any network call.  Reported:
+       ``open()`` / ``io.open()`` / ``Path.open()`` (any call of a function or method named
+       ``open``) with a mode that contains ``w``, ``a``, ``x`` or ``+``, and a mode that is not a
+       string fixed in the source (it cannot be verified); ``os.open`` with any flag but the
+       read-only ones (:data:`READ_ONLY_OPEN_FLAGS`); the path methods
+       (:data:`PATH_WRITE_METHODS`) ``write_text``, ``write_bytes``, ``touch``, ``mkdir``,
+       ``unlink``, ``rmdir``, ``symlink_to``, ``hardlink_to``, ``link_to``, ``rename`` and
+       ``replace``; the ``os`` functions of :data:`OS_WRITE_FUNCTIONS`; and everything in
+       ``shutil`` and ``tempfile`` (:data:`FILE_WRITE_MODULES`: every import, every use and every
+       literal ``getattr``).  The only exempt file is the journal module
+       (:data:`FILE_WRITE_EXEMPT_FILES`); every addition is a coordinator decision recorded in
+       ``docs/DECISION_LOG.md``.  The scan has no types, so the path methods are matched **by
+       name** on any receiver.  ``rename`` / ``replace`` are matched by name *and signature*:
+       ``Path.rename(target)`` / ``Path.replace(target)`` take exactly one argument, so a call with
+       exactly one argument (positional or ``target=``), a call with ``*`` / ``**`` arguments and
+       an uncalled reference are reported; a call with any other arity (``str.replace(old, new)``,
+       ``datetime.replace(microsecond=0)``) cannot be the path method and is not.  Not reported
+       either: the order gateway by the naming convention of LL012 (``gateway.replace(request)``
+       amends an order), the built-in ``str`` / ``bytes`` classes and ``dataclasses.replace`` /
+       ``copy.replace`` on the imported module.  The mode of an ``open`` call is its second
+       positional argument when the function is a plain name (``open``, ``io.open`` imported by
+       name) or an attribute of an imported module or class (``io.open``, ``codecs.open``,
+       ``Path.open(path, mode)``), else its first (``path.open(mode)``); ``mode=`` wins over both.
 
 Differences from the minimum rule text (each covered by a test)
 ---------------------------------------------------------------
@@ -130,6 +155,9 @@ Stricter:
 * LL009 reports every explicit ``__setattr__`` / ``__delattr__``, not only the one of ``object``.
 * LL010 also reports ``type("X", (RoutingGuard,), {})``; LL012 also reports ``<expr>.submit`` used
   without a call and ``getattr(<expr>, "submit")``.
+* LL015 also reports ``Path.link_to`` and ``os.renames`` / ``removedirs`` / ``mkfifo`` / ``mknod``
+  / ``ftruncate``, references to a write function without a call and literal ``getattr`` access
+  to one.
 
 Wider (provably harmless cases only):
 
@@ -147,6 +175,17 @@ code outside the scanned trees (installed packages, ``tools/``).  A person who s
 can; the pinned hashes, the tests and review exist for that.  What the scan guarantees is that the
 ordinary ways of placing a real order - and the ordinary ways of switching the lock off - cannot be
 written into GIE code by mistake or convenience without failing CI.
+
+LL015 sees the writes that are spelled in the scanned code.  A write through a C extension or a
+subprocess is covered by the existing rules (LL003 forbids ``ctypes``, ``cffi``, ``subprocess``
+and the process functions of ``os``) or not at all: a function of an installed package that writes
+a file (``numpy.save``, ``DataFrame.to_csv``, ``zipfile.ZipFile(..., "w")``, ``sqlite3.connect``,
+``logging.FileHandler``, ``shelve``, ``dbm``) is not recognised, and neither is a write method
+reached through a value the resolution does not follow (``opener = path.open`` then
+``opener("w")``) or a mode that only a function call returns at run time *and* that is passed to a
+function not named ``open``.  Like LL012 the rule knows names, not types: an object with a method
+``touch`` or ``unlink`` that is not a path, and a one-argument ``.replace(x)`` of an object that is
+not a path, are reported; that is deliberately not relaxed here.
 
 LL012 knows names, not types.  In the gateway packages it therefore also reports objects that are
 not adapters but have a method called ``submit``, ``cancel`` or ``replace`` - a timer scheduler
@@ -190,6 +229,7 @@ RULES: Final[Mapping[str, str]] = MappingProxyType(
         "LL012": "adapter call that does not go through the order gateway",
         "LL013": "string literal names the production tree",
         "LL014": "pinned lock file changed or pins invalid",
+        "LL015": "file-system write (file-drop channel)",
     }
 )
 
@@ -479,6 +519,73 @@ STDLIB_REPLACE_FUNCTIONS: Final[frozenset[str]] = frozenset(
     {"dataclasses.replace", "copy.replace", "os.replace"}
 )
 _TEXT_CLASSES: Final[frozenset[str]] = frozenset({"str", "bytes"})
+
+#: LL015 - the only files that may write to the file system.  The journal writes the run's records.
+#: Every addition is a coordinator decision recorded in docs/DECISION_LOG.md (D-011).
+FILE_WRITE_EXEMPT_FILES: Final[frozenset[str]] = frozenset({"gie/contracts/journal.py"})
+#: LL015 - modules whose every function copies, moves, deletes or creates files.
+FILE_WRITE_MODULES: Final[frozenset[str]] = frozenset({"shutil", "tempfile"})
+#: LL015 - functions of ``os`` that write to the file system (``os.open`` is checked by its flags).
+OS_WRITE_FUNCTIONS: Final[frozenset[str]] = frozenset(
+    {
+        "rename",
+        "replace",
+        "remove",
+        "unlink",
+        "mkdir",
+        "makedirs",
+        "rmdir",
+        "symlink",
+        "link",
+        "truncate",
+        # stricter than the minimum list: the same capability under other names
+        "renames",
+        "removedirs",
+        "mkfifo",
+        "mknod",
+        "ftruncate",
+    }
+)
+#: LL015 - methods of ``pathlib.Path`` that write; matched by name on any receiver.
+PATH_WRITE_METHODS: Final[frozenset[str]] = frozenset(
+    {
+        "write_text",
+        "write_bytes",
+        "touch",
+        "mkdir",
+        "unlink",
+        "rmdir",
+        "symlink_to",
+        "hardlink_to",
+        "link_to",
+        "rename",
+        "replace",
+    }
+)
+#: LL015 - path methods whose names are common elsewhere; matched by the path signature (one argument).
+_SIGNATURE_MATCHED_METHODS: Final[frozenset[str]] = frozenset({"rename", "replace"})
+#: LL015 - characters of an ``open`` mode that write.
+WRITE_MODE_CHARACTERS: Final[frozenset[str]] = frozenset("wax+")
+#: LL015 - flags of ``os.open`` that do not write; any other flag (or a computed one) is reported.
+READ_ONLY_OPEN_FLAGS: Final[frozenset[str]] = frozenset(
+    {
+        "O_RDONLY",
+        "O_BINARY",
+        "O_TEXT",
+        "O_CLOEXEC",
+        "O_NOFOLLOW",
+        "O_NONBLOCK",
+        "O_NOCTTY",
+        "O_DIRECTORY",
+        "O_NOINHERIT",
+        "O_NOATIME",
+        "O_PATH",
+        "O_SEQUENTIAL",
+        "O_RANDOM",
+    }
+)
+#: LL015 - ``replace`` functions of the standard library that do not touch files.
+_HARMLESS_REPLACE_FUNCTIONS: Final[frozenset[str]] = frozenset({"dataclasses.replace", "copy.replace"})
 
 #: Functions that take an attribute name as a string.
 _REFLECTIVE_FUNCTIONS: Final[frozenset[str]] = frozenset(
@@ -1570,6 +1677,168 @@ def _production_path(source: _Source) -> Iterator[Violation]:
                 )
 
 
+# ============================================================================== LL015
+def _os_write_function(qualified: str) -> str | None:
+    """``os.<name>`` when the dotted name is a writing function of ``os`` or ``os.open``, else ``None``."""
+    parts = qualified.split(".")
+    if len(parts) == 2 and parts[0] in _OS_MODULES and (parts[1] in OS_WRITE_FUNCTIONS or parts[1] == "open"):
+        return f"os.{parts[1]}"
+    return None
+
+
+def _write_module(qualified: str) -> str | None:
+    top = _top_level(qualified)
+    return top if top in FILE_WRITE_MODULES else None
+
+
+def _write_target(names: _Names, node: ast.AST) -> str | None:
+    """The writing module or ``os`` function a name or attribute chain may stand for, else ``None``.
+
+    Over-approximates like LL003: a name counts as everything it is bound to anywhere in the file;
+    only the private spellings ``posix`` / ``nt`` of ``os`` count when they are imported.
+    """
+    _attributes, root = _split_chain(node)
+    unimported = (
+        isinstance(root, ast.Name) and root.id in _OS_PRIVATE_MODULES and not names.import_origins(root.id)
+    )
+    for candidate in sorted(names.candidates(node)):
+        if unimported and _top_level(candidate) in _OS_PRIVATE_MODULES:
+            continue
+        found = _write_module(candidate) or _os_write_function(candidate)
+        if found is not None:
+            return found
+    return None
+
+
+def _is_read_only_flag(names: _Names, node: ast.expr) -> bool:
+    """Whether an ``os.open`` flag expression is provably read-only: read-only flags joined by ``|``."""
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
+        return _is_read_only_flag(names, node.left) and _is_read_only_flag(names, node.right)
+    if isinstance(node, ast.Constant):
+        return type(node.value) is int and node.value == 0  # os.O_RDONLY is 0 on every platform
+    if isinstance(node, ast.Name | ast.Attribute):
+        finals = _final_names(names.candidates(node))
+        other_flags = {name for name in finals if name.startswith("O_")} - READ_ONLY_OPEN_FLAGS
+        return bool(finals & READ_ONLY_OPEN_FLAGS) and not other_flags
+    return False
+
+
+def _argument(call: ast.Call, position: int, keyword: str) -> tuple[bool, ast.expr | None]:
+    """``(verifiable, argument)``: the keyword wins; ``*`` / ``**`` arguments cannot be verified."""
+    for item in call.keywords:
+        if item.arg == keyword:
+            return True, item.value
+    if any(isinstance(argument, ast.Starred) for argument in call.args):
+        return False, None
+    if any(item.arg is None for item in call.keywords):
+        return False, None
+    return True, call.args[position] if len(call.args) > position else None
+
+
+def _open_mode_problem(names: _Names, function: ast.Name | ast.Attribute, call: ast.Call) -> str | None:
+    """Why a call of a function named ``open`` writes or cannot be verified, else ``None``."""
+    position = 1
+    if isinstance(function, ast.Attribute):
+        _attributes, root = _split_chain(function.value)
+        anchored = isinstance(root, ast.Name) and bool(names.import_origins(root.id))
+        position = 1 if anchored else 0  # a module function / unbound method, else ``path.open(mode)``
+    verifiable, mode = _argument(call, position, "mode")
+    if not verifiable:
+        return "open(...) with * / ** arguments: the mode cannot be verified"
+    if mode is None:
+        return None  # the default mode "r" only reads
+    text = _static_str(mode)
+    if text is None:
+        return "open(...) with a mode that is not a string literal: it cannot be verified"
+    if WRITE_MODE_CHARACTERS & set(text):
+        return f"open(...) with the mode {text!r} writes to the file system"
+    return None
+
+
+def _os_open_problem(names: _Names, call: ast.Call) -> str | None:
+    verifiable, flags = _argument(call, 1, "flags")
+    if verifiable and flags is not None and _is_read_only_flag(names, flags):
+        return None
+    return "os.open(...) with a flag that writes or cannot be verified"
+
+
+def _is_path_signature(call: ast.Call | None) -> bool:
+    """Whether a call may be ``Path.rename(target)`` / ``Path.replace(target)``: exactly one argument."""
+    if call is None:
+        return True  # an uncalled reference may be called with anything
+    if any(isinstance(argument, ast.Starred) for argument in call.args):
+        return True
+    keywords = [keyword.arg for keyword in call.keywords]
+    if None in keywords:
+        return True
+    return (len(call.args), keywords) in ((1, []), (0, ["target"]))
+
+
+def _is_not_a_path(names: _Names, receiver: ast.expr, method: str) -> bool:
+    """A receiver of ``.rename`` / ``.replace`` that is provably not a path (LL015)."""
+    if _is_gateway(receiver):
+        return True  # the order gateway by the naming convention of LL012: it amends an order
+    if not isinstance(receiver, ast.Name) or names.is_rebound(receiver.id):
+        return False
+    origins = names.import_origins(receiver.id)
+    if not origins:
+        return receiver.id in _TEXT_CLASSES
+    return all(f"{origin}.{method}" in _HARMLESS_REPLACE_FUNCTIONS for origin in origins)
+
+
+def _file_write_problem(names: _Names, node: ast.Name | ast.Attribute, call: ast.Call | None) -> str | None:
+    """The LL015 message for one outermost name or attribute chain (and its call), else ``None``."""
+    target = _write_target(names, node)
+    if target == "os.open":
+        if call is None:
+            return "reference to 'os.open' (it can write to the file system)"
+        return _os_open_problem(names, call)
+    if target is not None:
+        return f"use of '{target}' (it writes to the file system)"
+    if isinstance(node, ast.Attribute) and node.attr in PATH_WRITE_METHODS:
+        if node.attr in _SIGNATURE_MATCHED_METHODS and (
+            not _is_path_signature(call) or _is_not_a_path(names, node.value, node.attr)
+        ):
+            return None
+        how = "reference to" if call is None else "call of"
+        return f"{how} '.{node.attr}' (a path method that writes)"
+    if call is not None and "open" in names.callee_names(node):
+        return _open_mode_problem(names, node, call)
+    return None
+
+
+def _file_writes(source: _Source) -> Iterator[Violation]:
+    if source.path in FILE_WRITE_EXEMPT_FILES:
+        return
+    names = source.names
+    for reference in names.imports:
+        found = _write_module(reference.qualified) or _os_write_function(reference.qualified)
+        if found is not None:
+            yield source.hit("LL015", reference.line, f"import of '{found}' (it writes to the file system)")
+    called = {id(node.func): node for node in source.nodes if isinstance(node, ast.Call)}
+    inner = {id(node.value) for node in source.nodes if isinstance(node, ast.Attribute)}
+    for node in source.nodes:
+        # the outermost attribute of a chain speaks for the whole chain
+        if (
+            isinstance(node, ast.Name | ast.Attribute)
+            and isinstance(node.ctx, ast.Load)
+            and id(node) not in inner
+        ):
+            call = called.get(id(node))
+            problem = _file_write_problem(names, node, call)
+            if problem is not None:
+                yield source.hit("LL015", node if call is None else call, problem)
+    for call, _functions, literal in _reflective_literals(source):
+        receiver = call.args[0] if call.args else None
+        owners = names.candidates(receiver) if receiver is not None else frozenset()
+        via_module = any(_write_module(owner) or _os_write_function(f"{owner}.{literal}") for owner in owners)
+        exempt = literal in _SIGNATURE_MATCHED_METHODS and receiver is not None and _is_gateway(receiver)
+        if via_module or (literal in PATH_WRITE_METHODS and not exempt):
+            yield source.hit(
+                "LL015", call, f"reflective access to '{literal}' (it writes to the file system)"
+            )
+
+
 # ============================================================================== LL014
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -1675,6 +1944,7 @@ _DENY_RULES: Final[tuple[_Rule, ...]] = (
     _registration,
     _adapter_calls,
     _production_path,
+    _file_writes,
 )
 #: Rules for every such file except the lock module, which has its own.
 _OUTSIDE_LOCK_RULES: Final[tuple[_Rule, ...]] = (_reserved_vocabulary, _tampering)

@@ -62,6 +62,9 @@ def _marks(contract: str) -> list[pytest.MarkDecorator]:
 
 #: Every committed golden file, discovered on disk (not derived from the samples).
 GOLDEN_FILES = sorted(GOLDEN_DIR.glob("*/*.json"))
+#: The golden run trace (change notice 12): the sample run, one canonical message per line.
+GOLDEN_TRACE = GOLDEN_DIR / "traces" / "run_story.jsonl"
+TRACE_NAME = "traces/run_story.jsonl"
 FILE_PARAMS = [
     pytest.param(path, id=f"{path.parent.name}/{path.stem}", marks=_marks(path.parent.name.split("-")[0]))
     for path in GOLDEN_FILES
@@ -99,6 +102,31 @@ def _rewrite(path: Path, change: Any) -> dict[str, Any]:
     change(message)
     path.write_text(canonical_dumps(message) + "\n", encoding="utf-8")
     return message
+
+
+def _assert_same_json(parsed: Any, wire: Any, path: str = "<root>") -> None:
+    """*parsed* (text read with ``strict_loads``) is the JSON value *wire* of the record.
+
+    The text does not say whether a number without a fraction was an integer or a double
+    (``gie.core.canonical``): an integral double is read back as an integer literal, and only as
+    its canonical rendering.  Every other value must be identical, type included.
+    """
+    if isinstance(wire, dict):
+        assert type(parsed) is dict, path
+        assert set(parsed) == set(wire), path
+        for key, value in wire.items():
+            _assert_same_json(parsed[key], value, f"{path}.{key}")
+    elif isinstance(wire, list):
+        assert type(parsed) is list, path
+        assert len(parsed) == len(wire), path
+        for index, (left, right) in enumerate(zip(parsed, wire, strict=True)):
+            _assert_same_json(left, right, f"{path}[{index}]")
+    elif type(wire) is float and type(parsed) is int:
+        assert str(parsed) == canonical_dumps(wire), path
+        assert float(parsed) == wire, path
+    else:
+        assert type(parsed) is type(wire), path
+        assert parsed == wire, path
 
 
 def _problems_for(root: Path, path: Path) -> list[str]:
@@ -139,7 +167,13 @@ def test_golden_tree_holds_exactly_one_file_per_sample_variant() -> None:
     assert len(expected) >= 45
     assert set(GOLDEN_FILES) == expected
     assert set(make_golden.expected_files()) == expected
-    assert {path.name for path in GOLDEN_DIR.iterdir()} == {path.parent.name for path in expected}
+    # Besides one directory per contract version only the directory of the golden run trace exists.
+    assert {path.name for path in GOLDEN_DIR.iterdir()} == {path.parent.name for path in expected} | {
+        make_golden.TRACE_DIR
+    }
+    assert sorted(path.name for path in (GOLDEN_DIR / make_golden.TRACE_DIR).iterdir()) == [
+        make_golden.TRACE_FILE
+    ]
     # Every one of the ten contracts has golden messages.
     assert {_directory(path)[0] for path in GOLDEN_FILES} == set(all_contracts()) & set(samples.variants())
     assert len({_directory(path)[0] for path in GOLDEN_FILES}) == 10
@@ -181,7 +215,9 @@ def test_golden_file_decodes_and_re_encodes_byte_for_byte(path: Path) -> None:
     assert message["schema_version"] == version
     assert parse_semver(version).major == parse_semver(_current_version(contract)).major
     assert from_wire(message) == decoded
-    assert to_wire(decoded) == strict_loads(text)
+    assert from_wire(strict_loads(text)) == decoded
+    _assert_same_json(strict_loads(text), to_wire(decoded))
+    assert canonical_dumps(to_wire(decoded)) + "\n" == text
 
 
 @pytest.mark.requirement("S00-ACC-01", "S00-DEL-02")
@@ -411,19 +447,41 @@ def test_missing_and_surplus_golden_files_are_detected(golden_copy: Path) -> Non
 
 @pytest.mark.requirement("S00-ACC-01", "S00-ASG-24")
 @pytest.mark.acceptance("S00-ACC-01")
-def test_a_golden_file_of_an_unreadable_version_is_reported(golden_copy: Path) -> None:
-    """Golden files of other directories only need to decode; another MAJOR never does."""
+@pytest.mark.parametrize("version", ["0.9.0", "2.0.0", "10.0.0"])
+def test_a_golden_directory_of_another_major_is_listed_and_not_decoded(
+    golden_copy: Path, version: str
+) -> None:
+    """``make_golden``: 'A directory of another MAJOR version than the current one is not decoded
+    here ... - it is listed as a note, never silently ignored.'  The current reader refuses such a
+    message (ContractVersionError), so decoding it would prove nothing."""
+    assert make_golden.other_major_directories() == []
+    assert make_golden.other_major_directories(golden_copy) == []
     text = (golden_copy / f"Tick-{_current_version('Tick')}" / "typical.json").read_text(encoding="utf-8")
-    old = golden_copy / "Tick-0.9.0"
-    old.mkdir()
-    (old / "typical.json").write_text(
-        text.replace(f'"schema_version":"{_current_version("Tick")}"', '"schema_version":"0.9.0"'),
-        encoding="utf-8",
-    )
-    problems = make_golden.check(golden_copy)
-    assert len(problems) == 1
-    assert problems[0].startswith("Tick-0.9.0/typical.json: no longer decodes")
-    assert "GIE.CONTRACT.VERSION" in problems[0]
+    other = text.replace(f'"schema_version":"{_current_version("Tick")}"', f'"schema_version":"{version}"')
+    with pytest.raises(ContractVersionError):
+        from_json(other)
+    directory = golden_copy / f"Tick-{version}"
+    directory.mkdir()
+    (directory / "typical.json").write_bytes(other.encode("utf-8"))
+    (directory / "not_even_json.json").write_bytes(b"{ this is not decoded")
+    assert make_golden.other_major_directories(golden_copy) == [directory.name]
+    assert make_golden.check(golden_copy) == []
+    # A second contract with another MAJOR is listed too, in name order.
+    (golden_copy / "Position-7.0.0").mkdir()
+    assert make_golden.other_major_directories(golden_copy) == sorted([directory.name, "Position-7.0.0"])
+
+
+@pytest.mark.requirement("S00-ACC-01", "S00-ASG-24")
+@pytest.mark.acceptance("S00-ACC-01")
+@pytest.mark.parametrize("version", ["1.0.1", "1.1.0", "1.0.0"])
+def test_a_golden_directory_of_the_current_major_is_decoded(golden_copy: Path, version: str) -> None:
+    """The counterpart: within the current MAJOR every golden file must decode, so damage is reported."""
+    directory = golden_copy / f"Tick-{version}"
+    directory.mkdir(exist_ok=True)
+    (directory / "damaged.json").write_bytes(b'{"contract":"Tick","schema_version":"1.0.0"')
+    assert directory.name not in make_golden.other_major_directories(golden_copy)
+    problems = _problems_for(golden_copy, directory / "damaged.json")
+    assert any("no longer decodes" in problem for problem in problems), problems
 
 
 @pytest.mark.requirement("S00-ACC-01")
@@ -464,10 +522,12 @@ def test_write_adds_missing_files_and_changes_nothing_else(golden_copy: Path, tm
     # An empty directory is filled completely and matches the committed tree byte for byte.
     fresh = tmp_path / "fresh"
     written = make_golden.write(force=False, root=fresh)
-    assert len(written) == len(GOLDEN_FILES)
+    assert len(written) == len(GOLDEN_FILES) + 1, "every golden message and the golden run trace"
+    assert f"{make_golden.TRACE_DIR}/{make_golden.TRACE_FILE}" in written
     assert make_golden.check(fresh) == []
-    for path in GOLDEN_FILES:
+    for path in [*GOLDEN_FILES, GOLDEN_TRACE]:
         assert (fresh / path.relative_to(GOLDEN_DIR)).read_bytes() == path.read_bytes()
+        assert b"\r" not in (fresh / path.relative_to(GOLDEN_DIR)).read_bytes(), "LF on every platform"
 
 
 @pytest.mark.requirement("S00-ACC-01")
@@ -493,3 +553,206 @@ def test_write_never_rewrites_a_changed_golden_file_without_force(golden_copy: P
         assert make_golden.write(force=True, root=golden_copy) == [f"{typical.parent.name}/typical.json"]
         assert typical.read_bytes() == original
         assert make_golden.check(golden_copy) == []
+
+
+# =========================================================================== bytes and line ends
+@pytest.mark.requirement("S00-ACC-01", "S00-ASG-24")
+@pytest.mark.acceptance("S00-ACC-01")
+@pytest.mark.parametrize(
+    "relative",
+    ["Tick-1.0.0/typical.json", "TradePlan-1.0.0/float_edge_values.json", TRACE_NAME],
+)
+def test_a_golden_file_with_crlf_line_ends_is_reported(golden_copy: Path, relative: str) -> None:
+    """Change notice 12: golden files are read and written as bytes with LF on every platform; a file
+    whose line ends were converted is a different file, not a harmless variant."""
+    target = golden_copy / relative
+    original = target.read_bytes()
+    assert original.endswith(b"\n")
+    assert b"\r" not in original
+    target.write_bytes(original.replace(b"\n", b"\r\n"))
+    problems = _problems_for(golden_copy, target)
+    assert problems, "a CRLF golden file must be reported"
+    assert all("\r" not in problem for problem in problems)
+    with pytest.raises(SystemExit) as stopped:
+        make_golden.write(force=False, root=golden_copy)
+    assert "differs from the sample" in str(stopped.value)
+    assert target.read_bytes() == original.replace(b"\n", b"\r\n"), "left alone without --force"
+    if load_lock().get("approval_status") != APPROVED:
+        assert make_golden.write(force=True, root=golden_copy) == [relative]
+        assert target.read_bytes() == original, "rewritten with LF"
+        assert make_golden.check(golden_copy) == []
+
+
+@pytest.mark.requirement("S00-ACC-01")
+@pytest.mark.acceptance("S00-ACC-01")
+def test_every_committed_golden_file_uses_lf_line_ends() -> None:
+    for path in [*GOLDEN_FILES, GOLDEN_TRACE]:
+        data = path.read_bytes()
+        assert b"\r" not in data, path
+        assert data.endswith(b"\n"), path
+        assert not data.endswith(b"\n\n"), path
+
+
+# =========================================================================== float edge values
+@pytest.mark.requirement("S00-ACC-01", "S00-ASG-14", "S00-ASG-20")
+@pytest.mark.acceptance("S00-ACC-01")
+def test_the_float_edge_golden_message_round_trips() -> None:
+    """``TradePlan-1.0.0/float_edge_values.json`` carries a double beyond 2**63 (``net_r_stdev``,
+    1e19) and one between 2**53 and 2**63 (``expected_net_r_stderr``, the double 1234567890123456768,
+    written with the shortest digits as ``1234567890123456800``)."""
+    path = GOLDEN_DIR / f"TradePlan-{_current_version('TradePlan')}" / "float_edge_values.json"
+    data = path.read_bytes()
+    assert b'"net_r_stdev":10000000000000000000,' in data
+    assert b'"expected_net_r_stderr":1234567890123456800,' in data
+    plan = from_json(data, expect=all_contracts()["TradePlan"])
+    assert plan == samples.variants()["TradePlan"]["float_edge_values"]
+    for name, double in (("net_r_stdev", 1e19), ("expected_net_r_stderr", 1.2345678901234568e18)):
+        value = getattr(plan, name)
+        assert type(value) is float, name
+        assert value == double, name
+        assert type(to_wire(plan)[name]) is float, name
+    assert plan.net_r_stdev >= 2.0**63
+    assert 2.0**53 < plan.expected_net_r_stderr < 2.0**63
+    assert int(plan.expected_net_r_stderr) == 1234567890123456768
+    assert to_bytes(plan) + b"\n" == data
+    assert from_json(to_json(plan)) == plan
+
+
+@pytest.mark.requirement("S00-ACC-01", "S00-ASG-14", "S00-ASG-20")
+@pytest.mark.acceptance("S00-ACC-01")
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        ('"expected_net_r_stderr":1234567890123456800,', '"expected_net_r_stderr":1234567890123456768,'),
+        ('"expected_net_r_stderr":1234567890123456800,', '"expected_net_r_stderr":1234567890123456801,'),
+        ('"net_r_stdev":10000000000000000000,', '"net_r_stdev":10000000000000000001,'),
+    ],
+    ids=["exact-value-not-the-rendering", "not-a-double", "beyond-64-bit-not-a-double"],
+)
+def test_a_float_edge_literal_that_no_double_renders_to_is_refused_and_reported(
+    golden_copy: Path, old: str, new: str
+) -> None:
+    target = golden_copy / f"TradePlan-{_current_version('TradePlan')}" / "float_edge_values.json"
+    text = target.read_bytes().decode("utf-8")
+    assert text.count(old) == 1
+    target.write_bytes(text.replace(old, new).encode("utf-8"))
+    with pytest.raises((ContractValidationError, CanonicalEncodingError)):
+        from_json(target.read_bytes())
+    assert any("no longer decodes" in problem for problem in _problems_for(golden_copy, target))
+
+
+# =========================================================================== the golden run trace
+@pytest.mark.requirement("S00-ACC-01")
+@pytest.mark.acceptance("S00-ACC-01")
+def test_the_golden_trace_is_the_current_encoding_of_the_sample_run() -> None:
+    story = samples.run_story()
+    assert len(story) == 28
+    data = GOLDEN_TRACE.read_bytes()
+    assert make_golden.trace_path() == GOLDEN_TRACE
+    assert data == b"".join(to_bytes(record) + b"\n" for record in story)
+    assert data.decode("utf-8") == make_golden.expected_trace()
+    assert make_golden.trace_problems() == []
+    assert make_golden.trace_problems(GOLDEN_DIR) == []
+
+
+@pytest.mark.requirement("S00-ACC-01")
+@pytest.mark.acceptance("S00-ACC-01")
+def test_every_line_of_the_golden_trace_decodes_and_a_fresh_journal_accepts_them_in_order() -> None:
+    from gie.contracts import MemoryJournal
+
+    lines = GOLDEN_TRACE.read_bytes().split(b"\n")
+    assert lines[-1] == b"", "the trace ends with a newline"
+    records = [from_json(line) for line in lines[:-1]]
+    assert records == list(samples.run_story())
+    assert [to_bytes(record) for record in records] == lines[:-1], "every line re-encodes byte for byte"
+    assert type(records[0]) is all_contracts()["RunManifest"], "the manifest opens the run"
+    journal = MemoryJournal()
+    for record in records:
+        journal.publish(record)
+    for record in records:
+        for key in ("origin", "data_origin"):
+            if hasattr(record, key):
+                assert getattr(record, key).value == "SYNTHETIC_FIXTURE"
+
+
+def _trace_lines(root: Path) -> list[str]:
+    return (root / TRACE_NAME).read_bytes().decode("utf-8").splitlines(keepends=True)
+
+
+def _store_trace(root: Path, lines: list[str]) -> None:
+    (root / TRACE_NAME).write_bytes("".join(lines).encode("utf-8"))
+
+
+@pytest.mark.requirement("S00-ACC-01")
+@pytest.mark.acceptance("S00-ACC-01")
+def test_trace_problems_reports_a_missing_trace(golden_copy: Path) -> None:
+    assert make_golden.trace_problems(golden_copy) == []
+    (golden_copy / TRACE_NAME).unlink()
+    expected = [f"{TRACE_NAME}: golden trace is missing (run --write)"]
+    assert make_golden.trace_problems(golden_copy) == expected
+    assert make_golden.check(golden_copy) == expected
+    assert make_golden.write(force=False, root=golden_copy) == [TRACE_NAME]
+    assert (golden_copy / TRACE_NAME).read_bytes() == GOLDEN_TRACE.read_bytes()
+    assert make_golden.check(golden_copy) == []
+
+
+@pytest.mark.requirement("S00-ACC-01")
+@pytest.mark.acceptance("S00-ACC-01")
+def test_trace_problems_reports_a_changed_line(golden_copy: Path) -> None:
+    lines = _trace_lines(golden_copy)
+    # Still canonical JSON of a valid record that the journal accepts, but not the sample's bytes.
+    record = from_json(lines[0])
+    message = strict_loads(lines[0])
+    message["label"] = message["label"] + "x"
+    lines[0] = canonical_dumps(message) + "\n"
+    assert lines[0] != to_json(record) + "\n"
+    _store_trace(golden_copy, lines)
+    problems = make_golden.trace_problems(golden_copy)
+    assert problems[0] == (
+        f"{TRACE_NAME}: the sample run no longer encodes to the golden trace (contract or sample changed)"
+    )
+    # The changed manifest no longer matches its run id (RUN-1): the journal refuses the first line.
+    assert len(problems) == 2, problems
+    assert problems[1].startswith(f"{TRACE_NAME}:1: not accepted by the journal")
+    assert problems == [
+        problem for problem in make_golden.check(golden_copy) if problem.startswith("traces/")
+    ]
+
+
+@pytest.mark.requirement("S00-ACC-01")
+@pytest.mark.acceptance("S00-ACC-01")
+def test_trace_problems_reports_a_line_order_the_journal_refuses(golden_copy: Path) -> None:
+    lines = _trace_lines(golden_copy)
+    # Line 4 is the candidate and line 5 the plan built on it: the plan before its candidate is refused
+    # by the referential ledger of the journal.
+    assert '"contract":"Candidate"' in lines[3]
+    assert '"contract":"TradePlan"' in lines[4]
+    lines[3], lines[4] = lines[4], lines[3]
+    _store_trace(golden_copy, lines)
+    problems = make_golden.trace_problems(golden_copy)
+    assert len(problems) == 2, problems
+    assert "no longer encodes to the golden trace" in problems[0]
+    assert problems[1].startswith(f"{TRACE_NAME}:4: not accepted by the journal: ")
+    assert "GIE." in problems[1], "the journal's error code is named"
+
+
+@pytest.mark.requirement("S00-ACC-01")
+@pytest.mark.acceptance("S00-ACC-01")
+@pytest.mark.parametrize(
+    ("damage", "line"),
+    [
+        (lambda lines: [*lines[:4], '{"contract":"TradePlan"\n', *lines[5:]], 5),
+        (lambda lines: lines[1:], 1),
+        (lambda lines: [*lines[:2], *lines[3:]], 3),
+    ],
+    ids=["undecodable-line", "manifest-missing", "evidence-missing"],
+)
+def test_trace_problems_reports_lines_the_journal_cannot_take(
+    golden_copy: Path, damage: Any, line: int
+) -> None:
+    _store_trace(golden_copy, damage(_trace_lines(golden_copy)))
+    problems = make_golden.trace_problems(golden_copy)
+    assert any(
+        problem.startswith(f"{TRACE_NAME}:{line}: not accepted by the journal") for problem in problems
+    ), problems
+    assert GOLDEN_TRACE.read_bytes() == b"".join(to_bytes(record) + b"\n" for record in samples.run_story())

@@ -28,9 +28,11 @@ import pytest
 
 from gie.contracts import (
     EntryStyle,
+    ModelStatus,
     OrderEvent,
     OrderEventType,
     OrderIntent,
+    OrderOriginator,
     OrderState,
     OrderType,
     PlanStatus,
@@ -38,6 +40,7 @@ from gie.contracts import (
     PositionState,
     RiskDecision,
     RunMode,
+    RunRole,
     Side,
     TradePlan,
     fingerprint,
@@ -46,7 +49,8 @@ from gie.contracts import (
     validate_protective_cancel,
     validate_reducing_order,
 )
-from gie.core.errors import GieError, IllegalTransitionError, StaleDataError
+from gie.contracts.authorization import EXECUTABLE_MODEL_STATUSES
+from gie.core.errors import ContractValidationError, GieError, IllegalTransitionError, StaleDataError
 from gie.core.timeutil import NS_PER_MS, NS_PER_SECOND
 from tests.gie import samples
 
@@ -57,6 +61,8 @@ T0 = samples.T0
 NOW = T0 + 2 * NS_PER_MS
 APPROVAL_EXPIRY = T0 + 30 * NS_PER_SECOND
 PLAN_EXPIRY = T0 + 120 * NS_PER_SECOND
+#: Role of the sample run (``samples.run_manifest().role``); the sample plan rests on a RESEARCH model.
+ROLE = RunRole.RESEARCH
 
 
 def _triple(**order_overrides: Any) -> tuple[TradePlan, RiskDecision, OrderEvent]:
@@ -68,7 +74,7 @@ def _refused_entry(
     plan: TradePlan, decision: RiskDecision, request: OrderEvent, now_ns: int = NOW
 ) -> IllegalTransitionError:
     with pytest.raises(IllegalTransitionError) as caught:
-        validate_entry_authorization(plan, decision, request, now_ns=now_ns)
+        validate_entry_authorization(plan, decision, request, now_ns=now_ns, role=ROLE)
     assert caught.value.code == "GIE.STATE.ILLEGAL_TRANSITION"
     assert caught.value.details.get("client_order_id") == request.client_order_id
     assert caught.value.details.get("rule")
@@ -77,7 +83,7 @@ def _refused_entry(
 
 def _stale_entry(plan: TradePlan, decision: RiskDecision, request: OrderEvent, now_ns: int) -> StaleDataError:
     with pytest.raises(StaleDataError) as caught:
-        validate_entry_authorization(plan, decision, request, now_ns=now_ns)
+        validate_entry_authorization(plan, decision, request, now_ns=now_ns, role=ROLE)
     assert caught.value.code == "GIE.TIME.STALE"
     return caught.value
 
@@ -108,7 +114,11 @@ def _child(
         "volume_lots": position.volume_lots if position.volume_lots > 0 else D("0.50"),
         "limit_price": D(price) if price is not None and order_type is OrderType.LIMIT else None,
         "trigger_price": D(price) if price is not None and order_type is OrderType.STOP else None,
-        "reference_price": None,
+        # OEV-16: a MARKET order carries the price it was requested against (the mark; a closed
+        # position has none, so its entry price stands in).
+        "reference_price": (position.mark_price or position.average_entry_price)
+        if order_type is OrderType.MARKET
+        else None,
         "attached_stop_price": None,
         "valid_until_ns": None,
         "plan_id": None,
@@ -178,7 +188,7 @@ def test_the_consistent_sample_triple_is_authorised() -> None:
     assert decision.approved is True
     assert decision.plan_fingerprint == fingerprint(plan)
     assert (order.plan_id, order.risk_decision_id) == (plan.plan_id, decision.decision_id)
-    assert validate_entry_authorization(plan, decision, order, now_ns=NOW) is None
+    assert validate_entry_authorization(plan, decision, order, now_ns=NOW, role=ROLE) is None
 
 
 def test_a_consistent_market_entry_is_authorised() -> None:
@@ -193,14 +203,14 @@ def test_a_consistent_market_entry_is_authorised() -> None:
         plan_id=plan.plan_id,
         risk_decision_id=decision.decision_id,
     )
-    validate_entry_authorization(plan, decision, order, now_ns=NOW)
+    validate_entry_authorization(plan, decision, order, now_ns=NOW, role=ROLE)
 
 
 def test_a_consistent_paper_triple_is_authorised() -> None:
     plan = samples.trade_plan(mode=RunMode.PAPER)
     decision = samples.risk_decision(plan, mode=RunMode.PAPER)
     order = samples.order_event(mode=RunMode.PAPER)
-    validate_entry_authorization(plan, decision, order, now_ns=NOW)
+    validate_entry_authorization(plan, decision, order, now_ns=NOW, role=ROLE)
 
 
 @pytest.mark.parametrize("status", [status for status in PlanStatus if status is not PlanStatus.SELECTED])
@@ -239,7 +249,7 @@ def test_the_order_must_cite_exactly_this_approval() -> None:
     second_approval = samples.risk_decision(plan, attempt=1, seq=1)
     assert second_approval.decision_id != decision.decision_id
     order_of_second = samples.order_event(risk_decision_id=second_approval.decision_id)
-    validate_entry_authorization(plan, second_approval, order_of_second, now_ns=NOW)
+    validate_entry_authorization(plan, second_approval, order_of_second, now_ns=NOW, role=ROLE)
     _refused_entry(plan, decision, order_of_second)
     _refused_entry(plan, second_approval, samples.order_event())
 
@@ -272,7 +282,9 @@ def test_a_plan_with_another_stop_under_the_same_id_does_not_inherit_the_approva
         order = samples.order_event(attached_stop_price=D(stop))
         _refused_entry(moved_plan, decision, order)
         # With an approval of its own the moved plan is a consistent triple again.
-        validate_entry_authorization(moved_plan, samples.risk_decision(moved_plan), order, now_ns=NOW)
+        validate_entry_authorization(
+            moved_plan, samples.risk_decision(moved_plan), order, now_ns=NOW, role=ROLE
+        )
 
 
 @pytest.mark.parametrize("wrong", ["f" * 64, "0" * 64])
@@ -295,8 +307,14 @@ def test_plan_approval_and_order_must_be_in_the_same_alternative_group() -> None
 @pytest.mark.parametrize(
     "deviation",
     [
-        {"side": Side.SELL, "attached_stop_price": D("2651.80"), "reference_price": D("2650.10")},
-        {"order_type": OrderType.STOP, "limit_price": None, "trigger_price": D("2649.80")},
+        # OEV-17: a SELL LIMIT rests at or above its reference bid, a BUY STOP at or above the ask.
+        {"side": Side.SELL, "attached_stop_price": D("2651.80"), "reference_price": D("2649.50")},
+        {
+            "order_type": OrderType.STOP,
+            "limit_price": None,
+            "trigger_price": D("2649.80"),
+            "reference_price": D("2649.50"),
+        },
         {"order_type": OrderType.MARKET, "limit_price": None},
         {"limit_price": D("2649.81")},
         {"limit_price": D("2649.79")},
@@ -332,7 +350,7 @@ def test_the_order_volume_may_reach_but_not_exceed_the_granted_volume(volume: st
     assert decision.volume_lots == D("0.50")
     order = samples.order_event(volume_lots=D(volume))
     if allowed:
-        validate_entry_authorization(plan, decision, order, now_ns=NOW)
+        validate_entry_authorization(plan, decision, order, now_ns=NOW, role=ROLE)
     else:
         error = _refused_entry(plan, decision, order)
         assert "volume" in str(error.details["rule"])
@@ -343,7 +361,7 @@ def test_the_reduced_grant_of_an_approved_reduced_decision_is_the_limit() -> Non
     reduced = samples.variants()["RiskDecision"]["approved_reduced_defensive"]
     assert reduced.volume_lots == D("0.25")
     half = samples.order_event(volume_lots=D("0.25"), risk_decision_id=reduced.decision_id)
-    validate_entry_authorization(plan, reduced, half, now_ns=NOW)
+    validate_entry_authorization(plan, reduced, half, now_ns=NOW, role=ROLE)
     full = samples.order_event(volume_lots=D("0.50"), risk_decision_id=reduced.decision_id)
     _refused_entry(plan, reduced, full)
 
@@ -352,7 +370,7 @@ def test_the_reduced_grant_of_an_approved_reduced_decision_is_the_limit() -> Non
 def test_the_approval_is_usable_until_just_before_its_expiry() -> None:
     plan, decision, order = _triple()
     assert (decision.valid_until_ns, plan.valid_until_ns) == (APPROVAL_EXPIRY, PLAN_EXPIRY)
-    validate_entry_authorization(plan, decision, order, now_ns=APPROVAL_EXPIRY - 1)
+    validate_entry_authorization(plan, decision, order, now_ns=APPROVAL_EXPIRY - 1, role=ROLE)
 
 
 @pytest.mark.parametrize("late_ns", [0, 1, NS_PER_SECOND, 3600 * NS_PER_SECOND])
@@ -369,18 +387,32 @@ def test_an_expired_plan_is_stale_from_the_expiry_instant_on() -> None:
     decision = samples.risk_decision(plan)
     assert decision.valid_until_ns == APPROVAL_EXPIRY > plan_expiry
     order = samples.order_event(valid_until_ns=plan_expiry)
-    validate_entry_authorization(plan, decision, order, now_ns=plan_expiry - 1)
+    validate_entry_authorization(plan, decision, order, now_ns=plan_expiry - 1, role=ROLE)
     _stale_entry(plan, decision, order, plan_expiry)
     _stale_entry(plan, decision, order, plan_expiry + 1)
 
 
-def test_a_request_created_at_or_after_the_expiry_is_stale_whatever_the_clock_says() -> None:
+def test_a_request_created_at_or_after_the_expiry_is_stale() -> None:
     plan, decision, _order = _triple()
     for moment in (APPROVAL_EXPIRY, APPROVAL_EXPIRY + NS_PER_MS):
         late_request = samples.order_event(
             event_time_ns=moment, receive_time_ns=moment, valid_until_ns=moment + NS_PER_SECOND
         )
-        _stale_entry(plan, decision, late_request, NOW)
+        # The request time decides even when the clock is exactly at the request.
+        _stale_entry(plan, decision, late_request, moment)
+        _stale_entry(plan, decision, late_request, moment + NS_PER_SECOND)
+        # A clock reading before the request does not make it fresh: such a request comes from the
+        # future and is refused outright (fail closed, never authorised).
+        error = _refused_entry(plan, decision, late_request, NOW)
+        assert "not after now" in str(error.details["rule"])
+
+
+def test_an_entry_request_may_not_lie_after_the_clock_reading() -> None:
+    plan, decision, order = _triple()
+    assert order.event_time_ns == T0 + NS_PER_MS
+    validate_entry_authorization(plan, decision, order, now_ns=order.event_time_ns, role=ROLE)
+    error = _refused_entry(plan, decision, order, order.event_time_ns - 1)
+    assert "not after now" in str(error.details["rule"])
 
 
 @pytest.mark.parametrize(
@@ -398,7 +430,7 @@ def test_the_order_may_not_outlive_its_approval(order_expiry: int, allowed: bool
     plan, decision, _order = _triple()
     order = samples.order_event(valid_until_ns=order_expiry)
     if allowed:
-        validate_entry_authorization(plan, decision, order, now_ns=NOW)
+        validate_entry_authorization(plan, decision, order, now_ns=NOW, role=ROLE)
     else:
         error = _refused_entry(plan, decision, order)
         assert "outlive" in str(error.details["rule"])
@@ -408,7 +440,9 @@ def test_the_order_may_not_outlive_its_plan() -> None:
     plan_expiry = T0 + 10 * NS_PER_SECOND
     plan = samples.trade_plan(valid_until_ns=plan_expiry)
     decision = samples.risk_decision(plan)
-    validate_entry_authorization(plan, decision, samples.order_event(valid_until_ns=plan_expiry), now_ns=NOW)
+    validate_entry_authorization(
+        plan, decision, samples.order_event(valid_until_ns=plan_expiry), now_ns=NOW, role=ROLE
+    )
     _refused_entry(plan, decision, samples.order_event(valid_until_ns=plan_expiry + 1))
     _refused_entry(plan, decision, samples.order_event(valid_until_ns=APPROVAL_EXPIRY))
 
@@ -416,7 +450,7 @@ def test_the_order_may_not_outlive_its_plan() -> None:
 # --------------------------------------------------------------------------- run, mode, shape
 def test_plan_approval_and_order_must_belong_to_the_same_run() -> None:
     plan, decision, _order = _triple()
-    other_run = identity.run_id("REPLAY", "1" * 64, "other-fixture")
+    other_run = identity.run_id("REPLAY", "1" * 64)
     foreign_order = samples.order_event(run_id=other_run)
     assert foreign_order.run_id != plan.run_id
     _refused_entry(plan, decision, foreign_order)
@@ -480,8 +514,31 @@ def test_the_sample_protective_stop_is_authorised_for_its_position() -> None:
     held = samples.position()
     submit, _working, replace, _replaced = samples.protective_stop_lifecycle()
     assert (submit.side, held.side) == (Side.SELL, Side.BUY)
-    assert validate_reducing_order(held, submit) is None
+    # The sample stop was created by the simulated broker; the execution engine may ask to tighten it.
+    assert (submit.originator, replace.originator) == (OrderOriginator.BROKER, OrderOriginator.BROKER)
     assert validate_reducing_order(held, replace) is None
+    # The same stop submitted by the execution engine is authorised as well.
+    own = _child(held, OrderIntent.PROTECTIVE_STOP, OrderType.STOP, price="2647.80")
+    assert own.originator is OrderOriginator.EXECUTION
+    assert validate_reducing_order(held, own) is None
+
+
+@pytest.mark.requirement("G04-12")
+def test_a_broker_created_order_is_never_submitted_through_the_authorisation_of_the_engine() -> None:
+    # Change notice section 6: an order of the simulated broker enters through poll(); the gateway's
+    # submit accepts EXECUTION only, and validate_reducing_order refuses a BROKER SUBMIT_REQUESTED.
+    held = samples.position()
+    broker_submit = samples.protective_stop_lifecycle()[0]
+    assert broker_submit.event_type is OrderEventType.SUBMIT_REQUESTED
+    error = _refused_reducing(held, broker_submit)
+    assert "execution engine" in str(error.details["rule"])
+    for intent, order_type, price in (
+        (OrderIntent.TAKE_PROFIT, OrderType.LIMIT, "2652.80"),
+        (OrderIntent.EXIT, OrderType.MARKET, None),
+    ):
+        by_broker = _child(held, intent, order_type, price=price, originator=OrderOriginator.BROKER)
+        validate_reducing_order(held, _child(held, intent, order_type, price=price))
+        assert "execution engine" in str(_refused_reducing(held, by_broker).details["rule"])
 
 
 def test_take_profit_and_exit_orders_of_the_open_position_are_authorised() -> None:
@@ -695,7 +752,9 @@ def test_an_entry_is_never_authorised_by_a_position() -> None:
     held = samples.position()
     error = _refused_reducing(held, samples.order_event())
     assert error.details.get("intent") == "ENTRY"
-    sell_entry = samples.order_event(side=Side.SELL, attached_stop_price=D("2651.80"))
+    sell_entry = samples.order_event(
+        side=Side.SELL, attached_stop_price=D("2651.80"), reference_price=D("2649.50")
+    )
     _refused_reducing(held, sell_entry)
 
 
@@ -713,7 +772,7 @@ def test_a_reducing_order_must_name_exactly_this_position() -> None:
 def test_a_reducing_order_belongs_to_the_run_and_mode_of_its_position() -> None:
     held = samples.position()
     _refused_reducing(held, _child(held, OrderIntent.EXIT, OrderType.MARKET, mode=RunMode.PAPER))
-    other_run = identity.run_id("REPLAY", "1" * 64, "other-fixture")
+    other_run = identity.run_id("REPLAY", "1" * 64)
     _refused_reducing(held, _child(held, OrderIntent.EXIT, OrderType.MARKET, run_id=other_run))
 
 
@@ -751,8 +810,9 @@ def test_a_closed_position_does_not_release_the_stop_of_another_position() -> No
     closed_other = Position(**closed_other_fields)
     cancel = _cancel_request(samples.protective_stop_lifecycle()[0])
     assert cancel.position_id == held.position_id != closed_other.position_id
-    with pytest.raises(IllegalTransitionError):
+    with pytest.raises(IllegalTransitionError) as caught:
         validate_protective_cancel(closed_other, cancel)
+    assert "names this position" in str(caught.value.details["rule"])
 
 
 def test_cancelling_other_orders_only_reduces_risk_and_is_not_restricted_here() -> None:
@@ -762,3 +822,168 @@ def test_cancelling_other_orders_only_reduces_risk_and_is_not_restricted_here() 
     exit_order = _child(held, OrderIntent.EXIT, OrderType.LIMIT, price="2651.00")
     assert validate_protective_cancel(held, _cancel_request(exit_order)) is None
     assert validate_protective_cancel(held, _cancel_request(samples.order_event())) is None
+
+
+# =========================================================================== rework 2: model status per role
+#: Change notice section 5 / D-026, written out independently of the implementation.
+DOCUMENTED_EXECUTABLE = {
+    RunRole.PRIMARY: {ModelStatus.ACTIVE},
+    RunRole.SHADOW: {ModelStatus.ACTIVE, ModelStatus.SHADOW},
+    RunRole.RESEARCH: {ModelStatus.ACTIVE, ModelStatus.SHADOW, ModelStatus.RESEARCH},
+}
+
+
+@pytest.mark.requirement("S08-ACC-06")
+def test_the_executable_model_statuses_per_run_role_are_the_documented_ones() -> None:
+    assert set(EXECUTABLE_MODEL_STATUSES) == set(RunRole)
+    assert {role: set(statuses) for role, statuses in EXECUTABLE_MODEL_STATUSES.items()} == (
+        DOCUMENTED_EXECUTABLE
+    )
+    never = {ModelStatus.REJECTED, ModelStatus.ROLLED_BACK, ModelStatus.RETIRED}
+    assert all(not (statuses & never) for statuses in EXECUTABLE_MODEL_STATUSES.values())
+    assert all(isinstance(statuses, frozenset) for statuses in EXECUTABLE_MODEL_STATUSES.values())
+
+
+@pytest.mark.requirement("S08-ACC-06")
+@pytest.mark.parametrize("status", list(ModelStatus), ids=lambda status: status.value)
+@pytest.mark.parametrize("role", list(RunRole), ids=lambda role: role.value)
+def test_an_entry_rests_only_on_a_model_status_the_run_role_executes(
+    role: RunRole, status: ModelStatus
+) -> None:
+    plan = samples.trade_plan(model_status=status)
+    decision = samples.risk_decision(plan)
+    order = samples.order_event()
+    if status in DOCUMENTED_EXECUTABLE[role]:
+        assert validate_entry_authorization(plan, decision, order, now_ns=NOW, role=role) is None
+    else:
+        with pytest.raises(IllegalTransitionError) as caught:
+            validate_entry_authorization(plan, decision, order, now_ns=NOW, role=role)
+        assert "model with status" in str(caught.value.details["rule"])
+        assert role.value in str(caught.value.details["rule"])
+
+
+# =========================================================================== rework 2: slippage limit
+@pytest.mark.requirement("G04-12")
+@pytest.mark.parametrize(
+    ("planned", "ordered", "allowed"),
+    [
+        ("0.10", "0.10", True),
+        (None, None, True),
+        ("0", "0", True),
+        ("0.10", "0.100000000001", False),
+        ("0.10", "0.09", False),
+        ("0.10", None, False),
+        (None, "0.10", False),
+        ("0", None, False),
+    ],
+    ids=[
+        "same",
+        "no_limit_planned_none_ordered",
+        "zero",
+        "one_ulp_wider",
+        "narrower",
+        "limit_dropped",
+        "limit_invented",
+        "zero_dropped",
+    ],
+)
+def test_the_slippage_limit_of_an_entry_is_exactly_the_plans(
+    planned: str | None, ordered: str | None, allowed: bool
+) -> None:
+    plan = samples.trade_plan(max_entry_slippage=None if planned is None else D(planned))
+    decision = samples.risk_decision(plan)
+    order = samples.order_event(max_slippage=None if ordered is None else D(ordered))
+    if allowed:
+        validate_entry_authorization(plan, decision, order, now_ns=NOW, role=ROLE)
+    else:
+        error = _refused_entry(plan, decision, order)
+        assert "slippage" in str(error.details["rule"])
+
+
+# =========================================================================== rework 2: argument types
+class _NotARecord:
+    """SYNTHETIC FIXTURE: an object that is not a contract record."""
+
+
+@pytest.mark.parametrize("position", ["plan", "decision", "request", "role"])
+def test_entry_authorisation_refuses_arguments_of_the_wrong_type(position: str) -> None:
+    plan, decision, order = _triple()
+    arguments: dict[str, Any] = {"plan": plan, "decision": decision, "request": order, "role": ROLE}
+    arguments[position] = "RESEARCH" if position == "role" else _NotARecord()
+    with pytest.raises(ContractValidationError):
+        validate_entry_authorization(
+            arguments["plan"], arguments["decision"], arguments["request"], now_ns=NOW, role=arguments["role"]
+        )
+    # Records in the wrong position are refused the same way (no duck typing).
+    with pytest.raises(ContractValidationError):
+        validate_entry_authorization(decision, plan, order, now_ns=NOW, role=ROLE)  # type: ignore[arg-type]
+
+
+def test_reducing_and_cancel_checks_refuse_arguments_of_the_wrong_type() -> None:
+    held = samples.position()
+    stop = samples.protective_stop_lifecycle()[2]
+    cancel = _cancel_request(samples.protective_stop_lifecycle()[0])
+    for function, request in ((validate_reducing_order, stop), (validate_protective_cancel, cancel)):
+        with pytest.raises(ContractValidationError):
+            function(_NotARecord(), request)  # type: ignore[arg-type]
+        with pytest.raises(ContractValidationError):
+            function(held, _NotARecord())  # type: ignore[arg-type]
+        with pytest.raises(ContractValidationError):
+            function(request, held)  # type: ignore[arg-type]
+
+
+# =========================================================================== rework 2: working orders
+@pytest.mark.requirement("G04-12")
+def test_a_position_has_at_most_one_working_protective_stop() -> None:
+    held = samples.position()
+    working = samples.protective_stop_lifecycle()[1]
+    assert working.position_id == held.position_id
+    # The working stop itself may be tightened ...
+    validate_reducing_order(held, samples.protective_stop_lifecycle()[2], protective=working)
+    # ... a second stop for the same position is refused.
+    second = _child(held, OrderIntent.PROTECTIVE_STOP, OrderType.STOP, price="2648.00", attempt=1)
+    assert second.client_order_id != working.client_order_id
+    validate_reducing_order(held, second)
+    error = _refused_reducing_with(held, second, protective=working)
+    assert "at most one" in str(error.details["rule"])
+
+
+@pytest.mark.requirement("G04-09", "G04-10")
+@pytest.mark.parametrize(
+    ("others", "volume", "allowed"),
+    [
+        ("0", "0.50", True),
+        ("0.25", "0.25", True),
+        ("0.49", "0.01", True),
+        ("0.25", "0.250000000001", False),
+        ("0.000000000001", "0.50", False),
+        ("0.50", "0.01", False),
+    ],
+)
+def test_reducing_orders_together_do_not_exceed_the_open_volume(
+    others: str, volume: str, allowed: bool
+) -> None:
+    held = samples.position()
+    for request in (
+        _child(held, OrderIntent.EXIT, OrderType.MARKET, volume_lots=D(volume)),
+        _child(held, OrderIntent.TAKE_PROFIT, OrderType.LIMIT, price="2652.80", volume_lots=D(volume)),
+    ):
+        if allowed:
+            validate_reducing_order(held, request, other_reducing_lots=D(others))
+        else:
+            error = _refused_reducing_with(held, request, other_reducing_lots=D(others))
+            assert "together" in str(error.details["rule"])
+
+
+def test_the_protective_stop_does_not_count_against_the_exit_and_take_profit_volume() -> None:
+    # The stop always covers the whole position; other working reducing orders do not shrink it.
+    held = samples.position()
+    stop = _child(held, OrderIntent.PROTECTIVE_STOP, OrderType.STOP, price="2647.80")
+    validate_reducing_order(held, stop, other_reducing_lots=D("0.50"))
+
+
+def _refused_reducing_with(position: Position, request: OrderEvent, **context: Any) -> IllegalTransitionError:
+    with pytest.raises(IllegalTransitionError) as caught:
+        validate_reducing_order(position, request, **context)
+    assert caught.value.details.get("client_order_id") == request.client_order_id
+    return caught.value

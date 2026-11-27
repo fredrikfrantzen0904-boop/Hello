@@ -1,9 +1,11 @@
-"""Architecture, ownership and determinism rules of the dependency graph (rules AR000-AR007).
+"""Architecture, ownership and determinism rules of the dependency graph (rules AR000-AR009).
 
 Requirements: S00-ASG-10 / S00-DEL-03 (dependency graph), S00-ASG-08 (repository and worktrees),
 S00-ASG-09 (ownership), COM-06 (shared contracts are not redefined unilaterally: subsystems import
 only ``gie.core`` and ``gie.contracts``), G03-05 (nothing but the standard library can enter the
-foundation packages, so no network or LLM client can be imported into the critical path there).
+foundation packages, so no network or LLM client can be imported into the critical path there),
+S00-ASG-23 / G03-12 / G06-04 (freshness is judged against the clock of the run, so no look-ahead),
+S11-ASG-16 (the dashboard is read-only: it never submits, cancels or replaces orders).
 
 Source of truth: ``specifications/dependency_graph.yaml``.  The file is read, never written.  Keys
 this tool does not know (``gates``, ``contract_extensions``, ``integrates_later``, ``ongoing``,
@@ -24,9 +26,10 @@ How it works
 Python files are parsed with :mod:`ast` only.  Scanned code is never imported or executed and no
 regular expression is run over code.  Paths are POSIX and relative to the scanned root; line 0
 means "the file as a whole".  Names are resolved through the import table of each file
-(``import x as y``, ``from x import y as z``, ``from x import *`` and plain re-assignments such as
-``now = datetime.now``); the resolution is flow-insensitive and ignores scopes, so it
-over-approximates: a name counts as everything it is bound to anywhere in the file.
+(``import x as y``, ``from x import y as z``, ``from x import *``, relative imports resolved
+against the package of the file, and plain re-assignments such as ``now = datetime.now``); the
+resolution is flow-insensitive and ignores scopes, so it over-approximates: a name counts as
+everything it is bound to anywhere in the file.
 
 Rules
 -----
@@ -65,6 +68,30 @@ AR007  Ownership coverage: every file tracked by git is owned by a session (long
        ``owns`` prefix; an entry without a trailing slash is one exact file) or is listed under
        ``protected_paths``.  The file list comes from ``git ls-files`` (read-only).  Without git, or
        when the root is not the top level of a work tree, the rule is skipped with a note.
+AR008  Look-ahead tolerance: below ``gie/`` outside ``gie/core/`` the plain freshness helpers
+       :data:`PLAIN_FRESHNESS_NAMES` (``gie.core.freshness.age_ns``, ``is_fresh``,
+       ``require_fresh``) are not referenced - imported, called, passed on or fetched with a
+       literal ``getattr``.  They take a caller-chosen ``now_ns`` and future tolerance, so a
+       component could judge data against an instant of its own choosing or accept data from
+       the future in replay.  Components use ``is_fresh_now`` / ``require_fresh_now`` /
+       ``is_expired_now`` / ``require_not_expired_now``, which take the clock of the run and
+       allow a tolerance only for a system clock.  Also reported: the keyword argument
+       ``future_tolerance_ns`` passed with anything but the literal ``0`` in any call below
+       ``gie/`` outside ``gie/core/``.
+AR009  Read-only package: a package declared with ``read_only: true`` in the graph (today
+       ``dashboard.gie``) does not reference :data:`WRITE_CAPABLE_NAMES` (``OrderGateway``,
+       ``GuardedExecutionAdapter``, ``ExecutionAdapter``, ``ProtectionPort``, ``RecordSink``,
+       ``MemoryJournal``, ``FileJournal``, ``RoutingGuard``, ``register_simulated_adapter``) from
+       ``gie.contracts`` / ``gie.core``, and contains no call of an attribute named in
+       :data:`READ_ONLY_FORBIDDEN_CALLS` (``submit``, ``cancel``, ``replace``, ``publish``,
+       ``commit``, ``tighten_stop``, ``exit``) on anything.  ``JournalReader`` and
+       ``RecordSource`` are what such a package uses.  The scan has no types, so the call part is
+       a **naming rule**: an object of any type with a method of one of these names is reported.
+       Provably harmless and therefore not reported: ``sys.exit(...)`` on the imported module
+       ``sys``, and ``.replace`` under the ``str.replace`` heuristic of ``tools/check_live_lock.py``
+       (LL012): the receiver is a string literal or f-string, or the call has two literal string
+       arguments optionally followed by a third literal (a string or the integer count), or the
+       receiver is the built-in ``str`` / ``bytes`` class.
 
 Stricter than the minimum rule text (each covered by a test)
 -------------------------------------------------------------
@@ -81,7 +108,11 @@ Stricter than the minimum rule text (each covered by a test)
   constructors of ``numpy.random`` (``RandomState()``, ``SeedSequence()``, bit generators).
 * AR006 also reports duplicate keys, malformed owned paths, a ``may_import`` entry that names no
   declared package, a ``third_party`` entry for an undeclared package, a package whose directory
-  is not owned by the session it names, and a protected path that a session claims to own.
+  is not owned by the session it names, a protected path that a session claims to own, and a
+  ``read_only`` value that is not ``true`` or ``false`` (the package is then treated as read-only:
+  fail closed).
+* AR009 also reports a literal ``getattr(x, "submit")`` (and the other forbidden call names) and
+  plain references of the write-capable names in annotations.
 
 Deliberate reading of the rule text
 -----------------------------------
@@ -100,6 +131,14 @@ attributes; dynamic imports with a computed name and ``getattr`` with a computed
 here (``tools/check_live_lock.py`` reports dynamic code in GIE trees).  ``datetime.now`` called on
 an object whose type the scan cannot see, and the built-in ``hash`` passed around under another
 name, go undetected.  AR007 only sees files that git already tracks.
+
+AR008 sees the plain helpers only under their own name: a wrapper function written in
+``gie/contracts`` that forwards to them, or a tolerance handed over in ``**options``, is not seen.
+AR009 knows names, not types: ``submit(...)`` called as a plain name, a method reached through
+``getattr`` with a computed name and a write-capable name that appears only inside a string
+annotation are not seen; and every object that happens to have a method named ``commit`` or
+``publish`` (a database connection, a message bus) is reported - that is deliberately not relaxed
+here; a narrower rule is a decision for the coordinator.
 """
 
 from __future__ import annotations
@@ -133,6 +172,8 @@ RULES: Final[Mapping[str, str]] = MappingProxyType(
         "AR005": "non-deterministic identity or randomness",
         "AR006": "dependency graph is invalid",
         "AR007": "tracked file is not owned by any session",
+        "AR008": "plain freshness helper or future tolerance outside gie/core (look-ahead)",
+        "AR009": "write capability in a read-only package",
     }
 )
 
@@ -205,6 +246,43 @@ RANDOM_TYPE_NAMES: Final[frozenset[str]] = frozenset({"numpy.random.Generator", 
 #: AR005 - the built-in ``hash`` under its qualified name.
 BUILTIN_HASH: Final = "builtins.hash"
 
+#: AR008 - the freshness helpers that take a caller-chosen ``now_ns`` and future tolerance.
+PLAIN_FRESHNESS_NAMES: Final[frozenset[str]] = frozenset(
+    {"gie.core.freshness.age_ns", "gie.core.freshness.is_fresh", "gie.core.freshness.require_fresh"}
+)
+#: AR008 - the keyword that sets a future tolerance; only the literal 0 is allowed outside gie/core/.
+FUTURE_TOLERANCE_KEYWORD: Final = "future_tolerance_ns"
+#: AR008 - the tree that defines the helpers and may use them.
+FRESHNESS_EXEMPT_PREFIX: Final = "gie/core/"
+#: AR009 - names of gie.contracts / gie.core that can write records or reach an order.
+WRITE_CAPABLE_NAMES: Final[frozenset[str]] = frozenset(
+    {
+        "OrderGateway",
+        "GuardedExecutionAdapter",
+        "ExecutionAdapter",
+        "ProtectionPort",
+        "RecordSink",
+        "MemoryJournal",
+        "FileJournal",
+        "RoutingGuard",
+        "register_simulated_adapter",
+    }
+)
+#: AR009 - the packages whose write-capable names are meant.
+WRITE_CAPABLE_PACKAGES: Final[tuple[str, ...]] = ("gie.contracts", "gie.core")
+#: AR009 - attribute calls that submit, cancel or replace an order, publish or commit a record,
+#: move a stop or exit a position (a naming rule: the scan has no types).
+READ_ONLY_FORBIDDEN_CALLS: Final[frozenset[str]] = frozenset(
+    {"submit", "cancel", "replace", "publish", "commit", "tighten_stop", "exit"}
+)
+_TEXT_CLASSES: Final[frozenset[str]] = frozenset({"str", "bytes"})
+
+_LOOK_AHEAD_ADVICE: Final = (
+    "it takes a caller-chosen now and future tolerance; components use is_fresh_now / require_fresh_now / "
+    "is_expired_now / require_not_expired_now with the clock of the run"
+)
+_READ_ONLY_ADVICE: Final = "a read-only package only consumes records (JournalReader, RecordSource)"
+
 _CLOCK_ADVICE: Final = (
     "time comes from the injected gie.core.clock.Clock / Scheduler; only gie/core/clock.py may touch "
     "the system clock"
@@ -270,6 +348,8 @@ class _Session:
 class _Package:
     session: str | None
     may_import: tuple[str, ...]
+    #: ``read_only: true`` in the graph (AR009); an unreadable value counts as true (fail closed).
+    read_only: bool = False
 
 
 @dataclass(frozen=True)
@@ -562,7 +642,16 @@ class _GraphReader:
             may_import = _string_list(raw.get("may_import"))
             if may_import is None:
                 self._bad(f"package {name}: 'may_import' must be a list of strings", "packages", name)
-            packages[name] = _Package(session=session, may_import=may_import or ())
+            read_only = raw.get("read_only", False)
+            if type(read_only) is not bool:
+                self._bad(
+                    f"package {name}: 'read_only' must be true or false, found {read_only!r}; the package "
+                    "is treated as read-only",
+                    "packages",
+                    name,
+                )
+                read_only = True
+            packages[name] = _Package(session=session, may_import=may_import or (), read_only=read_only)
         for name, package in packages.items():
             for entry in package.may_import:
                 target = entry.removesuffix(".*")
@@ -706,7 +795,7 @@ def _load(root: Path, path: str) -> _Source | Violation:
 class _Names:
     """What each name of a file may refer to, as dotted qualified names (flow-insensitive)."""
 
-    def __init__(self, tree: ast.Module) -> None:
+    def __init__(self, tree: ast.Module, context: Sequence[str] = ()) -> None:
         self._table: dict[str, set[str]] = {}
         self._stars: set[str] = set()
         #: Names the file binds itself (assignment, parameter, definition): they shadow built-ins.
@@ -717,12 +806,13 @@ class _Names:
                 for alias in node.names:
                     bound = alias.asname or alias.name.split(".")[0]
                     self._table.setdefault(bound, set()).add(alias.name if alias.asname else bound)
-            elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
-                for alias in node.names:
+            elif isinstance(node, ast.ImportFrom):
+                module = _absolute_module(node, context)
+                for alias in node.names if module else ():
                     if alias.name == "*":
-                        self._stars.add(node.module)
+                        self._stars.add(module)
                     else:
-                        qualified = f"{node.module}.{alias.name}"
+                        qualified = f"{module}.{alias.name}"
                         self._table.setdefault(alias.asname or alias.name, set()).add(qualified)
             elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
                 self.local.add(node.id)
@@ -754,6 +844,18 @@ class _Names:
         if isinstance(node, ast.Attribute):
             return frozenset(f"{base}.{node.attr}" for base in self.qualify(node.value))
         return frozenset()
+
+
+def _absolute_module(node: ast.ImportFrom, context: Sequence[str]) -> str:
+    """The absolute module of a ``from`` import ("" when a relative import leaves the top package)."""
+    if node.level == 0:
+        return node.module or ""
+    climb = node.level - 1
+    if climb >= len(context):
+        return ""
+    return ".".join(
+        (*context[: len(context) - climb], *((node.module or "").split(".") if node.module else ()))
+    )
 
 
 def _literal_str(node: ast.expr | None) -> str | None:
@@ -1049,6 +1151,130 @@ def _determinism(source: _Source, names: _Names) -> list[Violation]:
     return sorted(visitor.found, key=_order)
 
 
+# ============================================================================== AR008 look-ahead tolerance
+def _imported_names(source: _Source, node: ast.ImportFrom) -> Iterator[str]:
+    module = _absolute_module(node, source.context)
+    for alias in node.names if module else ():
+        if alias.name != "*":
+            yield f"{module}.{alias.name}"
+
+
+def _references(source: _Source, names: _Names) -> Iterator[tuple[ast.AST, str]]:
+    """``(node, qualified name)`` of every import, name, attribute chain and literal ``getattr``."""
+    for node in ast.walk(source.tree):
+        if isinstance(node, ast.ImportFrom):
+            for qualified in _imported_names(source, node):
+                yield node, qualified
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                yield node, alias.name
+        elif isinstance(node, ast.Name | ast.Attribute) and isinstance(node.ctx, ast.Load):
+            for qualified in sorted(names.qualify(node)):
+                yield node, qualified
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "getattr":
+            attribute = _literal_str(node.args[1]) if len(node.args) >= 2 else None
+            for base in sorted(names.qualify(node.args[0])) if attribute else ():
+                yield node, f"{base}.{attribute}"
+
+
+def _is_literal_zero(node: ast.expr) -> bool:
+    return isinstance(node, ast.Constant) and type(node.value) is int and node.value == 0
+
+
+def _look_ahead(source: _Source, names: _Names) -> Iterator[Violation]:
+    if not source.path.startswith(f"{GIE_TREE}/") or source.path.startswith(FRESHNESS_EXEMPT_PREFIX):
+        return
+    for node, qualified in _references(source, names):
+        if qualified in PLAIN_FRESHNESS_NAMES:
+            yield Violation(
+                "AR008", source.path, int(getattr(node, "lineno", 0)), f"{qualified}: {_LOOK_AHEAD_ADVICE}"
+            )
+    for node in ast.walk(source.tree):
+        if not isinstance(node, ast.Call):
+            continue
+        for keyword in node.keywords:
+            if keyword.arg == FUTURE_TOLERANCE_KEYWORD and not _is_literal_zero(keyword.value):
+                yield Violation(
+                    "AR008",
+                    source.path,
+                    node.lineno,
+                    f"{FUTURE_TOLERANCE_KEYWORD} other than the literal 0: a future tolerance is look-ahead "
+                    "in replay; only gie/core decides it from the clock of the run",
+                )
+
+
+# ============================================================================== AR009 read-only packages
+def _is_write_capable(qualified: str) -> bool:
+    for package in WRITE_CAPABLE_PACKAGES:
+        if qualified.startswith(package + "."):
+            return any(part in WRITE_CAPABLE_NAMES for part in qualified[len(package) + 1 :].split("."))
+    return False
+
+
+def _is_text_literal(node: ast.expr) -> bool:
+    return isinstance(node, ast.Constant) and isinstance(node.value, str | bytes)
+
+
+def _is_text_replace(call: ast.Call, receiver: ast.expr, names: _Names) -> bool:
+    """The ``str.replace`` heuristic of LL012 (``tools/check_live_lock.py``): no order can be carried."""
+    if _is_text_literal(receiver) or isinstance(receiver, ast.JoinedStr):
+        return True
+    if isinstance(receiver, ast.Name) and receiver.id in _TEXT_CLASSES:
+        return receiver.id not in names.imported and receiver.id not in names.local
+    arguments = call.args
+    if any(keyword.arg != "count" for keyword in call.keywords) or len(arguments) not in (2, 3):
+        return False
+    if not all(_is_text_literal(argument) for argument in arguments[:2]):
+        return False
+    if len(arguments) == 2:
+        return True
+    third = arguments[2]
+    return _is_text_literal(third) or (isinstance(third, ast.Constant) and type(third.value) is int)
+
+
+def _is_sys_exit(function: ast.Attribute, names: _Names) -> bool:
+    qualified = names.qualify(function)
+    receiver = function.value
+    rebound = isinstance(receiver, ast.Name) and receiver.id in names.local
+    return bool(qualified) and qualified == {"sys.exit"} and not rebound
+
+
+def _read_only(source: _Source, names: _Names, graph: _Graph) -> Iterator[Violation]:
+    package = graph.packages.get(source.package)
+    if package is None or not package.read_only:
+        return
+    for node, qualified in _references(source, names):
+        if _is_write_capable(qualified):
+            yield Violation(
+                "AR009",
+                source.path,
+                int(getattr(node, "lineno", 0)),
+                f"{source.package} is read-only and may not reference {qualified}: {_READ_ONLY_ADVICE}",
+            )
+    for node in ast.walk(source.tree):
+        if not isinstance(node, ast.Call):
+            continue
+        function = node.func
+        called: str | None = None
+        if isinstance(function, ast.Attribute) and function.attr in READ_ONLY_FORBIDDEN_CALLS:
+            harmless = (function.attr == "exit" and _is_sys_exit(function, names)) or (
+                function.attr == "replace" and _is_text_replace(node, function.value, names)
+            )
+            called = None if harmless else f"call of '.{function.attr}(...)'"
+        elif isinstance(function, ast.Name) and function.id == "getattr" and len(node.args) >= 2:
+            attribute = _literal_str(node.args[1])
+            if attribute in READ_ONLY_FORBIDDEN_CALLS:
+                called = f"reflective access to '{attribute}'"
+        if called is not None:
+            yield Violation(
+                "AR009",
+                source.path,
+                node.lineno,
+                f"{source.package} is read-only: {called} (naming rule: submit, cancel, replace, publish, "
+                f"commit, tighten_stop and exit are never called there); {_READ_ONLY_ADVICE}",
+            )
+
+
 # ============================================================================== AR007 ownership
 def _git(root: Path, *arguments: str) -> tuple[int, str] | None:
     """Run one read-only git command in *root*; ``None`` when git cannot be started."""
@@ -1126,14 +1352,17 @@ def scan(repo_root: Path, *, tracked: Iterable[str] | None = None, use_git: bool
             if isinstance(loaded, Violation):
                 violations.append(loaded)
                 continue
-            names = _Names(loaded.tree)
+            names = _Names(loaded.tree, loaded.context)
             declared = loaded.package in {GIE_TREE, DASHBOARD_PACKAGE} or (
                 graph is not None and loaded.package in graph.packages
             )
             if graph is not None and declared:
                 violations.extend(_import_rules(loaded, names, repo_root, graph))
+            if graph is not None:
+                violations.extend(_read_only(loaded, names, graph))
             if top == GIE_TREE:
                 violations.extend(_determinism(loaded, names))
+                violations.extend(_look_ahead(loaded, names))
 
     tracked_count: int | None = None
     if graph is not None:
@@ -1166,7 +1395,7 @@ def check(repo_root: Path, *, tracked: Iterable[str] | None = None, use_git: boo
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m tools.check_architecture",
-        description="Architecture, ownership and determinism rules of the dependency graph (AR000-AR007).",
+        description="Architecture, ownership and determinism rules of the dependency graph (AR000-AR009).",
     )
     parser.add_argument(
         "--root", type=Path, default=REPO_ROOT, help="repository root (default: this repository)"
