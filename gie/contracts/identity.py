@@ -9,25 +9,37 @@ numbers or unpersisted counters; that is what makes a replay reproduce the
 same identifiers byte for byte.
 
 ==================  ====================================================  ==============
-identifier          identity parts                                        unique within
+identifier          identity parts                                        names one ... in
 ==================  ====================================================  ==============
-run_id              mode, configuration SHA-256, label                    everything
-market_event_id     kind, symbol, timeframe, anchor time, identity levels everything
-evaluation_slot_id  engine, kind, symbol, timeframe, anchor time          everything
-evidence_id         engine, market event (or slot), revision              everything
-opportunity_id      setup type, side, horizon, market events              everything
-candidate_id        opportunity, scoring model (or none), revision        everything
-alternative_group   opportunity                                           everything
-plan_id             candidate, entry style, variant, revision             everything
-risk_decision_id    run, plan, attempt                                    everything
-reservation_id      risk decision                                         everything
-client_order_id     run, origin (risk decision or position), intent,      everything
+run_id              mode, SHA-256 of every other manifest field           run, everywhere
+market_event_id     kind, symbol, timeframe, anchor time, identity levels event, everywhere
+evaluation_slot_id  engine, kind, symbol, timeframe, anchor time          slot, everywhere
+evidence_id         engine, market event (or slot), revision              record, one run
+opportunity_id      setup type, side, horizon, market events              opportunity, one run
+candidate_id        opportunity, scoring model (or none), revision        record, one run
+alternative_group   opportunity                                           group, one run
+plan_id             candidate, entry style, variant, revision             record, one run
+risk_decision_id    run, plan, attempt                                    record, everywhere
+reservation_id      risk decision                                         record, everywhere
+client_order_id     run, origin (risk decision or position), intent,      order, everywhere
                     attempt
-broker_order_id     client order                                          everything
-order_event_id      client order, order sequence                          everything
-position_id         run, opening client order (or account alias, ticket)  everything
-model_version_id    model name, version, artifact SHA-256                 everything
+broker_order_id     client order                                          order, everywhere
+order_event_id      client order, order sequence                          record, everywhere
+position_id         run, opening client order (or account alias, ticket)  position, everywhere
+model_version_id    model name, version, artifact SHA-256                 model, everywhere
 ==================  ====================================================  ==============
+
+Scope.  An identifier that contains the run names one thing among all runs.  The
+identifiers of market events, slots and models are derived from what they
+describe, so the same event observed in two runs has the same identifier in
+both - that is their purpose.  The identifiers of evidence, opportunities,
+candidates, alternative groups and plans contain no run: two runs over the
+same data produce the same identifiers, with content that may differ when the
+configuration differs.  Such a record is therefore named by ``(run_id, id)``;
+a store that holds more than one run must key it that way.
+
+Every part is validated here, so that no function can return an identifier for
+malformed input and none can fail with anything but a ``GieError``.
 """
 
 from __future__ import annotations
@@ -37,25 +49,40 @@ from collections.abc import Iterable
 from decimal import Decimal
 from typing import Final
 
-from gie.core.canonical import decimal_to_str
-from gie.core.errors import CanonicalEncodingError, ContractValidationError
+from gie.core.canonical import INT64_MAX, decimal_to_str
+from gie.core.errors import CanonicalEncodingError, ContractValidationError, describe
 from gie.core.ids import make_id, require_id
 from gie.core.routing_lock import parse_run_mode
+from gie.core.timeutil import MAX_TIME_NS
 
 _SHA256_RE: Final[re.Pattern[str]] = re.compile(r"[0-9a-f]{64}")
-_LABEL_RE: Final[re.Pattern[str]] = re.compile(r"[a-z0-9][a-z0-9_.-]{0,63}")
 _REFERENCE_RE: Final[re.Pattern[str]] = re.compile(r"[A-Za-z0-9._:-]{1,64}")
+#: The same vocabularies as the record fields (gie.contracts.common): an identifier can only be
+#: derived from parts that a valid record could carry.
+_CODE_RE: Final[re.Pattern[str]] = re.compile(r"[a-z][a-z0-9_]{1,47}")
+_ENGINE_RE: Final[re.Pattern[str]] = re.compile(r"[a-z][a-z0-9_]{1,31}")
+_SYMBOL_RE: Final[re.Pattern[str]] = re.compile(r"[A-Z0-9][A-Z0-9._-]{0,23}")
+#: Value of an enumeration (side, horizon, timeframe, entry style, order intent).
+_TERM_RE: Final[re.Pattern[str]] = re.compile(r"[A-Z][A-Z0-9_]{0,47}")
+_SEMVER_RE: Final[re.Pattern[str]] = re.compile(
+    r"(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})"
+)
+#: An account alias must not be, or contain, an account number (it is written to journals).
+_DIGIT_RUN_RE: Final[re.Pattern[str]] = re.compile(r"[0-9]{5}")
 
 
-def _text(value: object, what: str) -> str:
-    if not isinstance(value, str) or not value or not value.isprintable():
-        raise ContractValidationError(f"{what} must be non-empty printable text", value=repr(value)[:64])
+def _part(value: object, what: str, pattern: re.Pattern[str]) -> str:
+    """*value* as an identity part of the given vocabulary, or a contract error."""
+    if not isinstance(value, str) or not pattern.fullmatch(value):
+        raise ContractValidationError(
+            f"{what} is not a valid identity part", value=describe(value), pattern=pattern.pattern
+        )
     return value
 
 
-def _count(value: object, what: str) -> int:
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-        raise ContractValidationError(f"{what} must be an int >= 0", value=repr(value)[:64])
+def _count(value: object, what: str, maximum: int = INT64_MAX) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= maximum:
+        raise ContractValidationError(f"{what} must be an int in 0..{maximum}", value=describe(value))
     return value
 
 
@@ -91,10 +118,10 @@ def market_event_id(
     """
     return make_id(
         "mev",
-        _text(kind, "kind"),
-        _text(symbol, "symbol"),
-        _text(timeframe, "timeframe"),
-        _count(anchor_time_ns, "anchor_time_ns"),
+        _part(kind, "kind", _CODE_RE),
+        _part(symbol, "symbol", _SYMBOL_RE),
+        _part(timeframe, "timeframe", _TERM_RE),
+        _count(anchor_time_ns, "anchor_time_ns", MAX_TIME_NS),
         _price_set(identity_prices),
     )
 
@@ -133,17 +160,20 @@ def evaluation_slot_id(engine: str, kind: str, symbol: str, timeframe: str, anch
     return make_id(
         "mev",
         "slot",
-        _text(engine, "engine"),
-        _text(kind, "kind"),
-        _text(symbol, "symbol"),
-        _text(timeframe, "timeframe"),
-        _count(anchor_time_ns, "anchor_time_ns"),
+        _part(engine, "engine", _ENGINE_RE),
+        _part(kind, "kind", _CODE_RE),
+        _part(symbol, "symbol", _SYMBOL_RE),
+        _part(timeframe, "timeframe", _TERM_RE),
+        _count(anchor_time_ns, "anchor_time_ns", MAX_TIME_NS),
     )
 
 
 def evidence_id(engine: str, market_event: str, revision: int) -> str:
     return make_id(
-        "evd", _text(engine, "engine"), require_id(market_event, "mev"), _count(revision, "revision")
+        "evd",
+        _part(engine, "engine", _ENGINE_RE),
+        require_id(market_event, "mev"),
+        _count(revision, "revision"),
     )
 
 
@@ -153,11 +183,19 @@ def opportunity_id(setup_type: str, side: str, horizon: str, market_event_ids: I
     It does not change when evidence or the candidate is revised, when another
     engine confirms the same market event, or when another model scores it.
     """
-    events = sorted({require_id(item, "mev") for item in market_event_ids})
+    try:
+        items = list(market_event_ids)
+    except TypeError as exc:
+        raise ContractValidationError("market_event_ids must be an iterable of market event ids") from exc
+    events = sorted({require_id(item, "mev") for item in items})
     if not events:
         raise ContractValidationError("an opportunity needs at least one market event")
     return make_id(
-        "opp", _text(setup_type, "setup_type"), _text(side, "side"), _text(horizon, "horizon"), events
+        "opp",
+        _part(setup_type, "setup_type", _CODE_RE),
+        _part(side, "side", _TERM_RE),
+        _part(horizon, "horizon", _TERM_RE),
+        events,
     )
 
 
@@ -176,7 +214,7 @@ def plan_id(candidate: str, entry_style: str, variant: int, revision: int) -> st
     return make_id(
         "pln",
         require_id(candidate, "cnd"),
-        _text(entry_style, "entry_style"),
+        _part(entry_style, "entry_style", _TERM_RE),
         _count(variant, "variant"),
         _count(revision, "revision"),
     )
@@ -203,7 +241,11 @@ def client_order_id(run: str, origin_id: str, intent: str, attempt: int) -> str:
         raise ContractValidationError("order origin must be a risk decision id or a position id")
     require_id(origin_id, origin_id[:3])
     return make_id(
-        "ord", require_id(run, "run"), origin_id, _text(intent, "intent"), _count(attempt, "attempt")
+        "ord",
+        require_id(run, "run"),
+        origin_id,
+        _part(intent, "intent", _TERM_RE),
+        _count(attempt, "attempt"),
     )
 
 
@@ -225,14 +267,23 @@ def external_position_id(account_alias: str, external_ref: str) -> str:
 
     ``account_alias`` MUST be a locally configured alias, never the broker login
     or account number: the identifier is written to journals and evidence files.
+    An alias that consists of digits, or contains five or more digits in a row,
+    looks like an account number and is refused.
     """
     for value, what in ((account_alias, "account_alias"), (external_ref, "external_ref")):
         if not isinstance(value, str) or not _REFERENCE_RE.fullmatch(value):
             raise ContractValidationError(f"{what} must match [A-Za-z0-9._:-]{{1,64}}")
+    if account_alias.isdigit() or _DIGIT_RUN_RE.search(account_alias):
+        raise ContractValidationError(
+            "account_alias must be a configured alias, not an account number "
+            "(digits only, or five or more digits in a row)"
+        )
     return make_id("pos", "external", account_alias, external_ref)
 
 
 def model_version_id(model_name: str, semver: str, artifact_sha256: str) -> str:
     if not isinstance(artifact_sha256, str) or not _SHA256_RE.fullmatch(artifact_sha256):
         raise ContractValidationError("artifact_sha256 must be 64 lower-case hex characters")
-    return make_id("mdl", _text(model_name, "model_name"), _text(semver, "semver"), artifact_sha256)
+    return make_id(
+        "mdl", _part(model_name, "model_name", _CODE_RE), _part(semver, "semver", _SEMVER_RE), artifact_sha256
+    )

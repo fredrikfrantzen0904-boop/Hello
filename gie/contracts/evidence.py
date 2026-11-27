@@ -376,6 +376,9 @@ class Evidence(Produced):
     )
 
 
+#: Progress order of a setup (anticipate -> prepare -> react): the order of the enumeration.
+_STAGE_ORDER: Final[dict[EvidenceStage, int]] = {stage: index for index, stage in enumerate(EvidenceStage)}
+
 _EVIDENCE_IMMUTABLE: Final[tuple[str, ...]] = (
     "run_id",
     "mode",
@@ -395,7 +398,8 @@ def validate_evidence_transition(previous: Evidence | None, revision: Evidence) 
     """Check that *revision* may follow *previous* in the chain of one observation.
 
     The identity of the market event (and with it every identity level) is fixed
-    at revision 0; INVALIDATED and EXPIRED are final.
+    at revision 0; INVALIDATED and EXPIRED are final; the stage never goes back
+    (NONE < ANTICIPATED < FORMING < ARMED < TRIGGERED < CONFIRMED < COMPLETED).
     """
 
     def fail(rule: str) -> IllegalTransitionError:
@@ -428,6 +432,11 @@ def validate_evidence_transition(previous: Evidence | None, revision: Evidence) 
     for name in ("decision_time_ns", "as_of_time_ns", "seq"):
         if getattr(revision, name) < getattr(previous, name):
             raise fail(f"{name} may not decrease")
+    if _STAGE_ORDER[revision.stage] < _STAGE_ORDER[previous.stage]:
+        raise fail(
+            f"stage may not go back ({previous.stage.value} -> {revision.stage.value}); a setup that "
+            "falls back is INVALIDATED and a new observation starts"
+        )
 
 
 @dataclass(frozen=True, slots=True)

@@ -121,6 +121,12 @@ class Target(Record):
     """
 
     label: str = fld(Str(pattern=CODE_PATTERN, max_len=48, label="code"), "Destination name.")
+    scenario: str | None = fld(
+        Opt(Str(pattern=CODE_PATTERN, max_len=48, label="code")),
+        "Scenario of the candidate's destination this target is: the destination (scenario, label) "
+        "of the plan's candidate, with the same price.  Null when the target is not one of the "
+        "candidate's predicted destinations.",
+    )
     price: Decimal = fld(PRICE, "Target price.", unit="USD per troy ounce")
     close_frac: Decimal = fld(
         Dec(ge="0", le="1", label="fraction"),
@@ -179,6 +185,23 @@ def _targets_on_winning_side(plan: TradePlan) -> bool:
     if plan.side is Side.BUY:
         return all(target.price > entry for target in plan.targets)
     return all(target.price < entry for target in plan.targets)
+
+
+def _resting_entry_beyond_market(plan: TradePlan) -> bool:
+    """A resting entry order of a usable plan is not marketable at the price it was planned against."""
+    if plan.status not in _USABLE or plan.entry_price is None:
+        return True
+    buy = plan.side is Side.BUY
+    if plan.entry_order_type is OrderType.LIMIT:
+        return plan.entry_price <= plan.reference_price if buy else plan.entry_price >= plan.reference_price
+    if plan.entry_order_type is OrderType.STOP:
+        return plan.entry_price >= plan.reference_price if buy else plan.entry_price <= plan.reference_price
+    return True
+
+
+def _targets_named_once(plan: TradePlan) -> bool:
+    keys = [(target.scenario, target.label) for target in plan.targets]
+    return len(keys) == len(set(keys))
 
 
 def _condition_prices_positive(plan: TradePlan) -> bool:
@@ -388,6 +411,19 @@ class TradePlan(Produced):
             "PLN-13",
             "entry_trigger and every invalidation of a plan are prices greater than zero",
             _condition_prices_positive,
+        ),
+        inv(
+            "PLN-14",
+            "while the plan is PREPARED, ARMED or SELECTED its resting entry lies beyond the market it "
+            "was planned against: with order type LIMIT a BUY entry_price <= reference_price and a SELL "
+            "entry_price >= reference_price; with order type STOP a BUY entry_price >= reference_price "
+            "and a SELL entry_price <= reference_price",
+            _resting_entry_beyond_market,
+        ),
+        inv(
+            "PLN-15",
+            "no two targets have the same (scenario, label)",
+            _targets_named_once,
         ),
     )
 

@@ -369,6 +369,8 @@ Invariants (checked whenever a record is constructed or decoded):
 - **PLN-11** - an ARMED or SELECTED plan has expected_net_r > 0 (positive expectancy gate)
 - **PLN-12** - the plan states its uncertainty: net_r_stdev or expected_net_r_stderr
 - **PLN-13** - entry_trigger and every invalidation of a plan are prices greater than zero
+- **PLN-14** - while the plan is PREPARED, ARMED or SELECTED its resting entry lies beyond the market it was planned against: with order type LIMIT a BUY entry_price <= reference_price and a SELL entry_price >= reference_price; with order type STOP a BUY entry_price >= reference_price and a SELL entry_price <= reference_price
+- **PLN-15** - no two targets have the same (scenario, label)
 
 ## Candidate 1.0.0
 
@@ -615,6 +617,7 @@ A profit destination of the plan. ``close_frac`` is the share of the initial vol
 | field | type | required | unit | meaning |
 |---|---|---|---|---|
 | `label` | code | yes |  | Destination name. |
+| `scenario` | code \| null | no |  | Scenario of the candidate's destination this target is: the destination (scenario, label) of the plan's candidate, with the same price.  Null when the target is not one of the candidate's predicted destinations. |
 | `price` | price > 0 | yes | USD per troy ounce | Target price. |
 | `close_frac` | fraction >= 0, <= 1 | yes | fraction of initial volume | Share of the initial volume to close at this target (0 = no scheduled close). |
 

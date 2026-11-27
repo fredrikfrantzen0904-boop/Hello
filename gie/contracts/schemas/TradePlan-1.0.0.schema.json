@@ -123,7 +123,7 @@
     "Target": {
       "additionalProperties": false,
       "description": "A profit destination of the plan.",
-      "minProperties": 3,
+      "minProperties": 4,
       "properties": {
         "close_frac": {
           "description": "Share of the initial volume to close at this target (0 = no scheduled close).",
@@ -148,6 +148,20 @@
           "x-gie-exclusiveMinimum": "0",
           "x-gie-type": "decimal",
           "x-gie-unit": "USD per troy ounce"
+        },
+        "scenario": {
+          "anyOf": [
+            {
+              "maxLength": 48,
+              "minLength": 1,
+              "pattern": "^[a-z][a-z0-9_]{1,47}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Scenario of the candidate's destination this target is: the destination (scenario, label) of the plan's candidate, with the same price.  Null when the target is not one of the candidate's predicted destinations."
         }
       },
       "required": [
@@ -711,6 +725,14 @@
     {
       "id": "PLN-13",
       "rule": "entry_trigger and every invalidation of a plan are prices greater than zero"
+    },
+    {
+      "id": "PLN-14",
+      "rule": "while the plan is PREPARED, ARMED or SELECTED its resting entry lies beyond the market it was planned against: with order type LIMIT a BUY entry_price <= reference_price and a SELL entry_price >= reference_price; with order type STOP a BUY entry_price >= reference_price and a SELL entry_price <= reference_price"
+    },
+    {
+      "id": "PLN-15",
+      "rule": "no two targets have the same (scenario, label)"
     }
   ]
 }

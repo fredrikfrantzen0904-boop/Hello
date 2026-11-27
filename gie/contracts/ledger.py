@@ -311,8 +311,21 @@ class LifecycleLedger:
                     evidence_id=missing[0],
                 )
         elif isinstance(record, TradePlan):
-            if record.candidate_id not in self._candidate_ids:
+            candidate = self._candidate_ids.get(record.candidate_id)
+            if candidate is None:
                 raise _fail("a plan refers to a candidate that is part of the run", plan_id=record.plan_id)
+            predicted = {(item.scenario, item.label): item.price for item in candidate.destinations}
+            for target in record.targets:
+                if (
+                    target.scenario is not None
+                    and predicted.get((target.scenario, target.label)) != target.price
+                ):
+                    raise _fail(
+                        "a target that names a scenario is that destination of the plan's candidate, "
+                        "with the same price",
+                        plan_id=record.plan_id,
+                        target=f"{target.scenario}/{target.label}",
+                    )
         elif isinstance(record, RiskDecision) and record.plan_id not in self._plan_ids:
             raise _fail(
                 "a risk decision refers to a plan that is part of the run", decision_id=record.decision_id

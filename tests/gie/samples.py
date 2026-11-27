@@ -397,7 +397,8 @@ def trade_plan(**overrides: Any) -> TradePlan:
         "stop_price": D("2647.80"),
         "targets": (
             Target(label="first", price=D("2652.80"), close_frac=D("0.5")),
-            Target(label="prior_high", price=D("2655.00"), close_frac=D("0.5")),
+            # the candidate's predicted destination "reversal / prior_high"
+            Target(label="prior_high", scenario="reversal", price=D("2655.00"), close_frac=D("0.5")),
         ),
         "expected_net_r": 0.25,
         "net_r_stdev": 1.1,
@@ -1295,6 +1296,13 @@ def variants() -> dict[str, dict[str, Record]]:
                 ),
                 status=PlanStatus.ARMED,
                 net_r_stdev=None,
+            ),
+            # Codec edge values, not a plausible estimate: a double beyond 2^63 and one between 2^53
+            # and 2^63 whose shortest digits are not its exact integer value.
+            "float_edge_values": trade_plan(
+                variant=3,
+                net_r_stdev=1e19,
+                expected_net_r_stderr=float(1234567890123456768),
             ),
             "rejected_stale": trade_plan(
                 variant=2,
