@@ -441,8 +441,8 @@ appended it MUST pass, in this order:
 3. **provenance against the manifest** - the data origin of a record is not better than the run's;
    a tick comes from a declared source and, in a replay, lies inside the declared data period; a
    candidate or plan is scored by a model that the manifest pins for that instant, with exactly
-   the pinned status; a fill names a quote that is part of the journal, where the run journals
-   that tick stream.  The pins themselves are the run's configuration: they are built from the
+   the pinned status; a fill names a quote of a declared data source and, where the run journals
+   that tick stream, a quote that is part of the journal.  The pins themselves are the run's configuration: they are built from the
    model registry by the composition root when the run starts (extension CX-10), and the journal
    does not compare them with registry entries that happen to be journaled in the same run - a
    correct comparison needs the registry status *at the pinned period*
@@ -642,9 +642,15 @@ change in a replacement; the volume of an entry never grows.  The rules hold for
 for reports of the simulated broker alike, because the simulated broker is GIE code (run ledger,
 every event of a reduce-only order): its volume never exceeds what the entry order has filled;
 the reduce-only orders of a position together never fill more than the entry order has filled;
-and while volume is still open, a report can neither cancel the working protective stop (unless
-an authorised cancel request is pending) nor change its volume so that it no longer covers the
-open volume.  A report that breaks one of these is refused and returned in `PollResult.errors`.
+and while volume is still open, a report can neither take the working protective stop out of the
+book (cancelled, rejected or expired by whatever route - only the answer to a pending cancel
+request and the refusal of a stop that never worked are accepted) nor change its volume so that it
+no longer covers the open volume.  A report that breaks one of these is refused and returned in
+`PollResult.errors`.  Limit: the ledger judges reports; *requests* are authorised by the gateway
+(section 9.3).  A cancel request for the protective stop of an open position is refused by the
+gateway, but a component that published such a request directly to the journal would not be
+stopped by the ledger - order events are written by the execution engine through the gateway
+only (single writer, D-025), which is checked at the integration of session 07.
 The trigger side is normative: a
 protective stop of a long position triggers at or below its trigger price on the bid, of a short
 position at or above it on the ask.

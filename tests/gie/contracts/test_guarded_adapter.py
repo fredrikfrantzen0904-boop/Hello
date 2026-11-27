@@ -52,6 +52,7 @@ from gie.contracts import (
     OrderType,
     PlanStatus,
     Position,
+    PositionState,
     Record,
     ReplayClock,
     RiskDecision,
@@ -286,6 +287,19 @@ class _Rig:
         }
         fields.update(overrides)
         return _next(previous, event_type, order_state, **fields)
+
+    def quote(self, seq: int) -> Tick:
+        """Deliver quote *seq* of the story (the quote a sample fill names) at its receive instant.
+
+        A fill names the quote it was matched against, and the run journals its tick stream, so the
+        quote is journaled before the fill (SHARED_CONTRACTS.md section 6.2, provenance).
+        """
+        (tick,) = (record for record in _story() if isinstance(record, Tick) and record.seq == seq)
+        if tick.receive_time_ns > self.clock.now_ns():
+            self.clock.advance_to(tick.receive_time_ns)
+        self.journal.publish(tick)
+        self.gateway.on_tick(tick)
+        return tick
 
     def report(self, *reports: object) -> PollResult:
         self.adapter.reports.extend(reports)
@@ -674,11 +688,13 @@ def test_reports_of_the_adapter_are_journaled_one_by_one_and_returned_in_order()
     empty = rig.gateway.poll()
     assert empty == PollResult((), 0, ())
     assert empty.clean
+    rig.quote(1)  # the quote the first fill names
     rig.clock.advance_to(partial.receive_time_ns)
     result = rig.report(accepted, partial)
     assert result.events == (accepted, partial)
     assert result.clean
     assert rig.ledger.order(submit.client_order_id) is partial
+    rig.quote(2)
     rig.clock.advance_to(filled.receive_time_ns)
     assert rig.report(filled).events == (filled,)
     assert rig.ledger.order(submit.client_order_id) is filled
@@ -1289,6 +1305,7 @@ def test_requests_of_another_run_mode_than_the_guards_are_refused() -> None:
 def test_a_non_order_event_from_poll_lands_in_errors_and_hides_nothing(junk: object) -> None:
     rig, submit = _entry_rig()
     _submit, accepted, partial, _filled = samples.order_lifecycle()
+    rig.quote(1)
     rig.clock.advance_to(partial.receive_time_ns)
     result = rig.report(accepted, junk, partial)
     assert result.events == (accepted, partial)
@@ -1382,6 +1399,8 @@ def test_a_report_that_breaks_the_order_rules_is_refused_and_does_not_hide_the_f
 ) -> None:
     rig, _order = _entry_rig()
     _submit, accepted, partial, filled = samples.order_lifecycle()
+    rig.quote(1)
+    rig.quote(2)
     rig.clock.advance_to(filled.receive_time_ns + NS_PER_SECOND)
     admitted: list[OrderEvent] = [accepted]
     if fault == "skips_a_sequence_number":
@@ -1418,6 +1437,7 @@ def test_a_report_that_breaks_the_order_rules_is_refused_and_does_not_hide_the_f
 def test_a_report_delivered_again_is_counted_as_a_duplicate() -> None:
     rig, submit = _entry_rig()
     _submit, accepted, partial, _filled = samples.order_lifecycle()
+    rig.quote(1)
     rig.clock.advance_to(partial.receive_time_ns)
     assert rig.report(accepted).events == (accepted,)
     result = rig.report(accepted, partial, partial, accepted)
@@ -1524,6 +1544,8 @@ def test_repeated_cancel_and_replace_requests_are_journaled_once() -> None:
 def test_a_request_re_sent_after_the_order_progressed_never_creates_a_second_order() -> None:
     rig, submit = _entry_rig()
     for report in samples.order_lifecycle()[1:]:
+        if report.fill_tick_seq is not None:
+            rig.quote(report.fill_tick_seq)
         rig.clock.advance_to(report.receive_time_ns)
         assert rig.report(report).events == (report,)
         length = len(rig.journal)
@@ -1543,3 +1565,169 @@ def test_a_changed_request_under_a_journaled_identity_is_refused() -> None:
     with _Unchanged(rig), pytest.raises(GieError):
         rig.gateway.submit(changed)
     assert rig.requests() == [("submit", order)]
+
+
+# =========================================================================== reports of reduce-only orders
+# SHARED_CONTRACTS.md section 9.2 "Reduce-only orders": the simulated broker is GIE code, so its
+# reports are held to the reduce-only rules like requests; a report that breaks one is refused,
+# returned in PollResult.errors and hides none of the reports behind it.
+_EXCEEDS = "a reduce-only order does not exceed what the entry order has filled"
+_OVERFILL = "reduce-only orders together never fill more than the entry order has filled"
+_NO_CANCEL = "the simulated broker does not cancel the protective stop of volume that is still open"
+_COVERS = "a protective stop whose volume changes still covers the whole open volume"
+_FILL_QUOTE_RULE = "a fill names a quote of a journaled tick stream that is part of the journal"
+
+
+def _exit_filled(rig: _Rig, held: Position, volume: str) -> OrderEvent:
+    """An exit of the execution engine for *volume* lots, submitted and completely filled at quote 3."""
+    lots = D(volume)
+    exit_order = _child(rig, held, OrderIntent.EXIT, OrderType.MARKET, volume_lots=lots)
+    rig.gateway.submit(exit_order)
+    filled = rig.next(
+        exit_order,
+        E.FILLED,
+        S.FILLED,
+        cumulative_filled_lots=lots,
+        last_fill_lots=lots,
+        last_fill_price=D("2650.60"),
+        average_fill_price=D("2650.60"),
+        last_fill_cost_amount=D("1.00"),
+        fill_tick_source="fixture",
+        fill_tick_seq=3,  # the bid of quote 3 (journaled by the story) is the position's mark
+    )
+    result = rig.report(filled)
+    assert result.clean, result.errors
+    assert result.events == (filled,)
+    return filled
+
+
+@pytest.mark.requirement("G04-09", "G04-10", "G04-12", "S07-ASG-09")
+@pytest.mark.parametrize(
+    ("fault", "rule"),
+    [
+        ("cancel_while_open", _NO_CANCEL),
+        ("reconciled_cancel_while_open", _NO_CANCEL),
+        ("enlarge_beyond_the_entry_fill", _EXCEEDS),
+        ("shrink_below_the_open_volume", _COVERS),
+        ("fill_more_than_is_open", _OVERFILL),
+    ],
+)
+def test_a_report_that_strips_or_overfills_the_protection_lands_in_errors_and_hides_nothing(
+    fault: str, rule: str
+) -> None:
+    rig, held, stop = _holding_rig()  # 0.50 lots open, the broker's stop of 0.50 lots working
+    if fault == "fill_more_than_is_open":
+        _exit_filled(rig, held, "0.25")  # 0.25 lots left open
+    faulty = {
+        "cancel_while_open": lambda: rig.next(stop, E.CANCELED, S.CANCELED),
+        "reconciled_cancel_while_open": lambda: rig.next(stop, E.RECONCILED, S.CANCELED),
+        "enlarge_beyond_the_entry_fill": lambda: rig.next(
+            stop, E.RECONCILED, S.WORKING, volume_lots=D("0.51")
+        ),
+        "shrink_below_the_open_volume": lambda: rig.next(
+            stop, E.RECONCILED, S.WORKING, volume_lots=D("0.30")
+        ),
+        "fill_more_than_is_open": lambda: rig.next(
+            stop,
+            E.FILLED,
+            S.FILLED,
+            cumulative_filled_lots=D("0.50"),
+            last_fill_lots=D("0.50"),
+            last_fill_price=D("2650.60"),
+            average_fill_price=D("2650.60"),
+            last_fill_cost_amount=D("2.00"),
+            fill_tick_source="fixture",
+            fill_tick_seq=3,
+        ),
+    }[fault]()
+    # A valid report behind it: the broker confirms the stop as it is (volume unchanged).
+    follower = rig.next(stop, E.RECONCILED, S.WORKING, seq=faulty.seq)
+    assert follower.order_seq == faulty.order_seq
+    result = rig.report(faulty, follower)
+    assert result.events == (follower,)
+    assert result.duplicates == 0
+    assert len(result.errors) == 1
+    error = result.errors[0]
+    assert isinstance(error, IllegalTransitionError)
+    assert error.details.get("rule") == rule
+    assert error.details.get("client_order_id") == stop.client_order_id
+    assert faulty not in rig.journaled()
+    assert rig.ledger.protective_order(held.position_id) is follower
+
+
+@pytest.mark.requirement("G04-12", "S07-ASG-09")
+def test_the_broker_cancels_the_protective_stop_through_poll_once_the_position_is_flat() -> None:
+    rig, held, stop = _holding_rig()
+    _exit_filled(rig, held, "0.50")
+    canceled = rig.next(stop, E.CANCELED, S.CANCELED)
+    result = rig.report(canceled)
+    assert result.clean, result.errors
+    assert result.events == (canceled,)
+    assert rig.ledger.protective_order(held.position_id) is None
+    assert rig.ledger.open_orders() == ()
+
+
+@pytest.mark.requirement("G04-12", "S07-ASG-09")
+def test_the_broker_cancels_the_protective_stop_after_an_authorised_cancel_request() -> None:
+    rig, held, stop = _holding_rig()
+    _exit_filled(rig, held, "0.50")
+    moment = rig.step()
+    closed = dataclasses.replace(
+        held,
+        seq=held.seq + 1,
+        revision=held.revision + 1,
+        decision_time_ns=moment,
+        state=PositionState.CLOSED,
+        volume_lots=D("0"),
+        mark_price=None,
+        realized_net_pnl_amount=D("36.00"),
+        unrealized_net_pnl_amount=D("0"),
+        costs_amount=D("3.00"),
+        closed_time_ns=moment,
+        close_reason="EXIT",
+        protective_client_order_id=None,
+    )
+    rig.journal.publish(closed)
+    # The gateway authorises the cancel of the stop only for a position that is no longer open.
+    cancel = rig.next(stop, E.CANCEL_REQUESTED, S.PENDING_CANCEL)
+    rig.gateway.cancel(cancel)
+    assert rig.requests()[-1] == ("cancel", cancel)
+    canceled = rig.next(cancel, E.CANCELED, S.CANCELED)
+    result = rig.report(canceled)
+    assert result.clean, result.errors
+    assert rig.ledger.order(stop.client_order_id) is canceled
+
+
+@pytest.mark.requirement("S10-ACC-02", "S00-ASG-16")
+def test_a_fill_report_naming_a_quote_missing_from_the_journal_lands_in_errors_and_hides_nothing() -> None:
+    rig, submit = _entry_rig()
+    _submit, accepted, partial, _filled = samples.order_lifecycle()
+    quote = rig.quote(1)
+    rig.clock.advance_to(partial.receive_time_ns)
+    unknown_quote = dataclasses.replace(partial, fill_tick_seq=9)  # quote 9 was never delivered
+    result = rig.report(accepted, unknown_quote, partial)
+    assert result.events == (accepted, partial)
+    assert len(result.errors) == 1
+    error = result.errors[0]
+    assert type(error) is ContractValidationError
+    assert error.details.get("rule") == _FILL_QUOTE_RULE
+    assert error.details.get("stream") == quote.stream
+    assert error.details.get("fill_tick_seq") == 9
+    assert unknown_quote not in rig.journaled()
+    assert rig.ledger.order(submit.client_order_id) is partial
+
+
+@pytest.mark.requirement("S10-ACC-02", "S00-ASG-16")
+def test_a_fill_report_of_a_run_that_journals_no_tick_of_its_stream_is_accepted() -> None:
+    # Documented limit: a run whose ticks are not in this journal cannot have its fills checked here.
+    story = _story()
+    inputs = [story[0], samples.clock_reading(), *story[2:_STORY_ENTRY_INPUTS]]
+    assert not [record for record in inputs if isinstance(record, Tick)]
+    rig = _rig(records=inputs)
+    order = samples.order_event()
+    rig.gateway.submit(order)
+    _submit, accepted, partial, _filled = samples.order_lifecycle()
+    rig.clock.advance_to(partial.receive_time_ns)
+    result = rig.report(accepted, partial)
+    assert result.clean, result.errors
+    assert result.events == (accepted, partial)

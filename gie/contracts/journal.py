@@ -230,6 +230,12 @@ class MemoryJournal:
             # stream, the quote must be part of the journal; a run that keeps its ticks elsewhere
             # (tick store, extension CX-19) cannot be checked here.
             assert record.fill_tick_seq is not None
+            if record.fill_tick_source not in manifest.data_sources:
+                raise _refuse(
+                    "a fill names a quote of a data source the run manifest declares",
+                    record,
+                    fill_tick_source=record.fill_tick_source,
+                )
             quotes = f"tick/{record.fill_tick_source}/{record.symbol}"
             if (
                 quotes in self._journaled_tick_streams

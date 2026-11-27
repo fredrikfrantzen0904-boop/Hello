@@ -135,6 +135,13 @@ STOP_REPLACED_LINE = 28
 LAST_LINE = RUN_LENGTH - 1
 
 
+def _story_quote(seq: int) -> Tick:
+    """The quote with stream position *seq* of ``samples.run_story()`` (the quote a sample fill names)."""
+    quotes = [record for record in samples.run_story() if isinstance(record, Tick) and record.seq == seq]
+    assert len(quotes) == 1
+    return quotes[0]
+
+
 def _record(line: int) -> Record:
     return _run_records()[line]
 
@@ -730,7 +737,23 @@ def test_sample_order_and_stop_chains_form_one_publishable_stream() -> None:
     # The entry order rests on a plan and its approval (rework 2: the ledger is referential).
     journal = _journal_before(ENTRY_SUBMIT_LINE)
     first = len(journal)
-    assert [journal.publish(event) for event in events] == list(range(first, first + 8))
+    # A fill names the quote it was matched against; the run journals that tick stream, so the quote
+    # is journaled before the fill (SHARED_CONTRACTS.md section 6.2, provenance).
+    published = []
+    for event in events:
+        if event.fill_tick_seq is not None:
+            journal.publish(_story_quote(event.fill_tick_seq))
+        published.append(journal.publish(event))
+    assert published == [first, first + 1, first + 3, *range(first + 5, first + 10)]
+    assert [entry.record for entry in journal.read(first)] == [
+        events[0],
+        events[1],
+        _story_quote(1),
+        events[2],
+        _story_quote(2),
+        events[3],
+        *events[4:],
+    ]
 
 
 @pytest.mark.requirement("S00-ASG-25")
@@ -1013,10 +1036,17 @@ def test_records_that_are_not_derived_from_market_data_are_not_look_ahead() -> N
         seq=3, semver="0.9.0", artifact_sha256="99" * 32, status_time_ns=T0 + 900 * SEC
     )
     for record in (*samples.order_lifecycle(), later_model):
+        if isinstance(record, OrderEvent) and record.fill_tick_seq is not None:
+            # The quote a fill names is journaled first (it moves the watermark; the fill does not).
+            quote = _story_quote(record.fill_tick_seq)
+            journal.publish(quote)
+            watermark = journal.input_watermark_ns
+            assert watermark == quote.receive_time_ns
+        assert watermark is not None
         assert ordering_time_ns(record) > watermark
         journal.publish(record)
-    assert len(journal) == ENTRY_SUBMIT_LINE + 5
-    assert journal.input_watermark_ns == watermark  # and they do not move the watermark
+        assert journal.input_watermark_ns == watermark  # and they do not move the watermark
+    assert len(journal) == ENTRY_SUBMIT_LINE + 7
 
 
 # =========================================================================== reading
@@ -2251,7 +2281,11 @@ def test_the_sample_run_story_is_accepted_in_order() -> None:
         pytest.param(3, 4, IllegalTransitionError, id="candidate-then-plan"),
         pytest.param(4, 5, IllegalTransitionError, id="plan-then-approval"),
         pytest.param(5, 6, IllegalTransitionError, id="approval-then-entry-order"),
-        pytest.param(8, 12, FutureDataError, id="second-tick-then-position"),
+        # Without the second quote the first fill, which names it, is refused (provenance) - before
+        # the position snapshot that depends on it could be published as look-ahead.
+        pytest.param(8, 9, ContractValidationError, id="second-tick-then-fill"),
+        # The fourth quote is named by no fill: the position valued at it is look-ahead without it.
+        pytest.param(17, 18, FutureDataError, id="fourth-tick-then-position"),
     ],
 )
 def test_the_run_story_is_refused_when_a_record_others_depend_on_is_left_out(
@@ -2268,3 +2302,64 @@ def test_the_run_story_is_refused_when_a_record_others_depend_on_is_left_out(
     assert type(excinfo.value) is error
     assert _state(journal) == before
     assert len(journal) == refused - 1
+
+
+# =========================================================================== a fill names a journaled quote
+# SHARED_CONTRACTS.md section 6.2 step 3 and ``MemoryJournal._check_provenance``: a fill names the
+# quote it was matched against (fill_tick_source, fill_tick_seq).  Where the run journals that tick
+# stream, the quote must be part of the journal.  A run that journals no tick of the stream cannot
+# be checked (documented limit).
+_FILL_QUOTE_RULE = "a fill names a quote of a journaled tick stream that is part of the journal"
+PARTIAL_FILL_LINE = 13  # the first fill of the entry in ``_run_records`` (names quote 1)
+SECOND_QUOTE_LINE = 12  # quote 1, journaled right before it
+
+
+@pytest.mark.requirement("S10-ACC-02", "S00-ASG-16")
+def test_a_fill_that_names_a_journaled_quote_is_accepted() -> None:
+    partial, quote = _record(PARTIAL_FILL_LINE), _record(SECOND_QUOTE_LINE)
+    assert isinstance(partial, OrderEvent)
+    assert isinstance(quote, Tick)
+    assert (partial.fill_tick_source, partial.fill_tick_seq) == (quote.source, quote.seq)
+    journal = _journal_before(PARTIAL_FILL_LINE)
+    assert journal.publish(partial) == PARTIAL_FILL_LINE
+    assert journal.ledger.order(ENTRY_ORDER_ID) == partial
+
+
+@pytest.mark.requirement("S10-ACC-02", "S00-ASG-16")
+@pytest.mark.parametrize(
+    "fault",
+    ["quote_never_journaled", "quote_left_out"],
+)
+def test_a_fill_that_names_a_quote_missing_from_a_journaled_stream_is_refused(fault: str) -> None:
+    partial = _record(PARTIAL_FILL_LINE)
+    assert isinstance(partial, OrderEvent)
+    if fault == "quote_never_journaled":
+        journal = _journal_before(PARTIAL_FILL_LINE)
+        faulty = dataclasses.replace(partial, fill_tick_seq=7)
+    else:
+        journal = _journal_before(SECOND_QUOTE_LINE)  # entry accepted, quote 1 not delivered
+        faulty = partial
+    assert "tick/fixture/XAUUSD" in journal.streams()  # the run journals the stream
+    before = _state(journal)
+    with pytest.raises(ContractValidationError) as excinfo:
+        journal.publish(faulty)
+    assert excinfo.value.code == "GIE.CONTRACT.INVALID"
+    assert excinfo.value.details.get("rule") == _FILL_QUOTE_RULE
+    assert excinfo.value.details.get("stream") == "tick/fixture/XAUUSD"
+    assert excinfo.value.details.get("fill_tick_seq") == faulty.fill_tick_seq
+    assert _state(journal) == before  # a refused record leaves the journal unchanged
+
+
+@pytest.mark.requirement("S10-ACC-02", "S00-ASG-16")
+def test_a_fill_of_a_run_that_journals_no_tick_of_its_stream_cannot_be_checked_and_is_accepted() -> None:
+    # Documented limit: the run's market data is not in this journal (the watermark comes from the
+    # clock reading), so the quote a fill names cannot be looked up here.
+    records = [record for record in _prefix(ENTRY_SUBMIT_LINE) if not isinstance(record, Tick)]
+    journal = _journal(*records)
+    assert not [stream for stream in journal.streams() if stream.startswith("tick/")]
+    lifecycle = samples.order_lifecycle()
+    first = len(journal)  # one line less than the run: its tick was not journaled
+    assert first == ENTRY_SUBMIT_LINE - 1
+    assert [journal.publish(event) for event in lifecycle] == list(range(first, first + 4))
+    assert [event.fill_tick_seq for event in lifecycle] == [None, None, 1, 2]
+    assert journal.ledger.order(ENTRY_ORDER_ID) == lifecycle[-1]

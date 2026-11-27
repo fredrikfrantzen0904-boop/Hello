@@ -30,6 +30,7 @@ evidence of any trading performance.
 
 from __future__ import annotations
 
+import dataclasses
 from decimal import Decimal as D
 from typing import Any
 
@@ -262,7 +263,16 @@ def test_open_orders_lists_exactly_the_orders_that_are_not_terminal() -> None:
     assert ledger.open_orders() == (stop[1],)
     _admit_all(ledger, [stop[2], stop[3]])
     assert ledger.open_orders() == (stop[3],)
-    assert ledger.admit(_next(stop[3], E.CANCELED, S.CANCELED)) is True
+    # The simulated broker may cancel the stop only once nothing is left open by fills (section 9.2):
+    # an exit of the whole volume is working, then filled, and only then the stop is cancelled.
+    canceled = _next(stop[3], E.CANCELED, S.CANCELED)
+    assert _rule_of(ledger, canceled) == _NO_CANCEL
+    exit_all, exit_done = _exit_all_of_the_position()
+    _admit_all(ledger, [exit_all])
+    assert ledger.open_orders() == (stop[3], exit_all)
+    _admit_all(ledger, [exit_done])
+    assert ledger.open_orders() == (stop[3],)
+    assert ledger.admit(canceled) is True
     assert ledger.open_orders() == ()
 
 
@@ -340,8 +350,9 @@ def test_orders_are_separate_chains_keyed_by_client_order_id() -> None:
     _admit_all(ledger, [entry[3], stop[0], stop[1], stop[2], stop[3]])
     assert ledger.order(entry[0].client_order_id) is entry[3]
     assert ledger.order(stop[0].client_order_id) is stop[3]
-    # A further event of the stop order extends the stop's chain only.
-    assert ledger.admit(_next(stop[3], E.CANCELED, S.CANCELED)) is True
+    # A further event of the stop order (it fills the whole open volume) extends the stop's chain only.
+    assert ledger.admit(_fill(stop[3], "0.50")) is True
+    assert ledger.order(stop[0].client_order_id) == _fill(stop[3], "0.50")
     assert ledger.order(entry[0].client_order_id) is entry[3]
     assert ledger.open_orders() == ()
 
@@ -1119,3 +1130,150 @@ def test_the_registry_rules_hold_in_the_run_ledger_one_active_version_per_family
     assert rule == "the currently ACTIVE version must be RETIRED or ROLLED_BACK first"
     assert ledger.model(promoted.model_version_id) is shadow
     assert ledger.model(samples.MODEL_ID) is active
+
+
+# =========================================================================== reduce-only orders (9.2)
+# SHARED_CONTRACTS.md section 9.2 "Reduce-only orders" and the docstring of
+# ``LifecycleLedger._check_reducing_order_event``: the rules hold for requests and for reports of the
+# simulated broker alike, because the simulated broker is GIE code.  Every later event of a
+# reduce-only order never exceeds what the entry order has filled; the reduce-only orders of a
+# position together never fill more than that; while volume is still open (by fills) a report can
+# neither cancel the working protective stop (unless a cancel request is pending) nor change its
+# volume so that it no longer covers the open volume.
+_EXCEEDS = "a reduce-only order does not exceed what the entry order has filled"
+_OVERFILL = "reduce-only orders together never fill more than the entry order has filled"
+_NO_CANCEL = "the simulated broker does not cancel the protective stop of volume that is still open"
+_COVERS = "a protective stop whose volume changes still covers the whole open volume"
+
+
+def _exit_all_of_the_position() -> tuple[OrderEvent, OrderEvent]:
+    """The story's exit order, for the whole 0.50 lots of the position: request and complete fill."""
+    whole = D("0.50")
+    request = dataclasses.replace(EXIT_SUBMIT, volume_lots=whole)
+    filled = dataclasses.replace(
+        EXIT_FILLED,
+        volume_lots=whole,
+        cumulative_filled_lots=whole,
+        last_fill_lots=whole,
+        last_fill_cost_amount=D("2.00"),
+    )
+    return request, filled
+
+
+@pytest.mark.requirement("G04-09", "G04-12", "S07-ASG-09")
+@pytest.mark.parametrize("referential", [True, False], ids=["run", "fragment"])
+def test_a_report_never_enlarges_a_reduce_only_order_beyond_what_the_entry_has_filled(
+    referential: bool,
+) -> None:
+    ledger = _ledger_through(STOP_ACCEPTED, referential=referential)  # the entry has filled 0.20
+    # A RECONCILED report of the simulated broker that grows the stop to the full plan volume while
+    # only 0.20 lots are filled is refused - a report is held to the rule like a request.
+    early_growth = dataclasses.replace(STOP_GROWN, seq=5)
+    assert early_growth.event_type is E.RECONCILED
+    assert early_growth.volume_lots == D("0.50") > ENTRY_PARTIAL.cumulative_filled_lots
+    assert _rule_of(ledger, early_growth) == _EXCEEDS
+    assert ledger.protective_order(POSITION_ID) is STOP_ACCEPTED
+    # Once the entry has filled 0.50 lots the same growth is admitted; one fraction more is not.
+    _admit_all(ledger, [ENTRY_FILLED])
+    beyond = dataclasses.replace(STOP_GROWN, volume_lots=D("0.500000000001"))
+    assert _rule_of(ledger, beyond) == _EXCEEDS
+    assert ledger.admit(STOP_GROWN) is True
+    assert ledger.protective_order(POSITION_ID) is STOP_GROWN
+
+
+@pytest.mark.requirement("G04-09", "G04-10", "S07-ASG-09")
+def test_reduce_only_orders_together_never_fill_more_than_the_entry_has_filled() -> None:
+    ledger = _ledger_through(EXIT_FILLED)  # entry 0.50 filled, exit 0.25 filled, stop 0.50 working
+    assert ledger.protective_order(POSITION_ID) is STOP_GROWN
+    # The stop's own volume (0.50) is within the entry's fill, but filling it completely would close
+    # 0.75 lots of a 0.50 lot position.
+    overfill = _fill(STOP_GROWN, "0.50")
+    assert overfill.volume_lots <= ENTRY_FILLED.cumulative_filled_lots
+    assert _rule_of(ledger, overfill) == _OVERFILL
+    assert ledger.order(STOP_SUBMIT.client_order_id) is STOP_GROWN
+    # Filling exactly what is open is admitted (flat by fills) ...
+    rest = _fill(STOP_GROWN, "0.25")
+    assert rest.order_state is S.PARTIALLY_FILLED
+    assert ledger.admit(rest) is True
+    # ... and nothing more can be filled afterwards.
+    assert _rule_of(ledger, _fill(rest, "0.25")) == _OVERFILL
+    assert ledger.order(STOP_SUBMIT.client_order_id) is rest
+
+
+@pytest.mark.requirement("G04-12", "S07-ASG-09")
+@pytest.mark.parametrize("through", ["valued", "exit_filled"], ids=["all_open", "half_open"])
+@pytest.mark.parametrize("referential", [True, False], ids=["run", "fragment"])
+def test_the_broker_cannot_cancel_the_protective_stop_of_volume_that_is_still_open(
+    through: str, referential: bool
+) -> None:
+    last = POSITION_VALUED if through == "valued" else EXIT_FILLED
+    ledger = _ledger_through(last, referential=referential)
+    before = _state(ledger)
+    for report in (_next(STOP_GROWN, E.CANCELED, S.CANCELED), _next(STOP_GROWN, E.RECONCILED, S.CANCELED)):
+        assert not report.is_request
+        error = _refused(ledger, report)
+        assert error.details.get("rule") == _NO_CANCEL
+        assert error.details.get("client_order_id") == STOP_SUBMIT.client_order_id
+        assert error.details.get("position_id") == POSITION_ID
+        assert _state(ledger) == before
+    assert ledger.protective_order(POSITION_ID) is STOP_GROWN
+
+
+@pytest.mark.requirement("G04-12", "S07-ASG-09")
+def test_the_broker_may_cancel_the_protective_stop_once_the_position_is_flat_by_fills() -> None:
+    ledger = _ledger_through(POSITION_VALUED)
+    exit_all, exit_done = _exit_all_of_the_position()
+    _admit_all(ledger, [exit_all])
+    # Working is not enough: the exit has to have filled.
+    canceled = _next(STOP_GROWN, E.CANCELED, S.CANCELED)
+    assert _rule_of(ledger, canceled) == _NO_CANCEL
+    _admit_all(ledger, [exit_done])
+    assert ledger.admit(canceled) is True
+    assert ledger.protective_order(POSITION_ID) is None
+    assert ledger.open_orders() == ()
+
+
+@pytest.mark.requirement("G04-12", "S07-ASG-09")
+def test_the_broker_may_cancel_the_protective_stop_after_a_cancel_request() -> None:
+    # The run ledger sees a pending cancel request; whether it was authorised is decided by the order
+    # gateway (validate_protective_cancel, SHARED_CONTRACTS.md section 9.3), not by the ledger.
+    ledger = _ledger_through(POSITION_VALUED)
+    cancel = _next(STOP_GROWN, E.CANCEL_REQUESTED, S.PENDING_CANCEL)
+    assert ledger.admit(cancel) is True
+    canceled = _next(cancel, E.CANCELED, S.CANCELED)
+    assert ledger.admit(canceled) is True
+    assert ledger.order(STOP_SUBMIT.client_order_id) is canceled
+    assert ledger.protective_order(POSITION_ID) is None
+
+
+@pytest.mark.requirement("G04-12", "S07-ASG-09")
+def test_a_report_that_shrinks_the_protective_stop_below_the_open_volume_is_refused() -> None:
+    ledger = _ledger_through(POSITION_VALUED)  # 0.50 lots open, stop of 0.50 working
+    shrunk = _next(STOP_GROWN, E.RECONCILED, S.WORKING, volume_lots=D("0.30"))
+    assert _rule_of(ledger, shrunk) == _COVERS
+    assert ledger.protective_order(POSITION_ID) is STOP_GROWN
+    # After half was closed by the exit, the stop may follow the open volume down - exactly to it.
+    _admit_all(ledger, [EXIT_SUBMIT, EXIT_FILLED])
+    too_small = _next(STOP_GROWN, E.RECONCILED, S.WORKING, volume_lots=D("0.24"))
+    error = _refused(ledger, too_small)
+    assert error.details.get("rule") == _COVERS
+    assert error.details.get("position_id") == POSITION_ID
+    following = _next(STOP_GROWN, E.RECONCILED, S.WORKING, volume_lots=D("0.25"))
+    assert ledger.admit(following) is True
+    assert ledger.protective_order(POSITION_ID) is following
+
+
+@pytest.mark.requirement("G04-12", "S07-ASG-09")
+def test_the_protective_stop_follows_a_growing_entry_fill_upward() -> None:
+    # The stop was created for the first fill (0.20); the entry fills completely before the broker
+    # has acknowledged the stop.
+    ledger = _ledger_through(STOP_SUBMIT)
+    _admit_all(ledger, [ENTRY_FILLED])
+    # A late acknowledgement that does not change the stop's volume is not judged.
+    assert STOP_ACCEPTED.volume_lots == D("0.20") < ENTRY_FILLED.cumulative_filled_lots
+    assert ledger.admit(STOP_ACCEPTED) is True
+    # A report that grows it, but not to the whole open volume, is refused; the full growth is admitted.
+    partly = dataclasses.replace(STOP_GROWN, volume_lots=D("0.40"))
+    assert _rule_of(ledger, partly) == _COVERS
+    assert ledger.admit(STOP_GROWN) is True
+    assert ledger.protective_order(POSITION_ID) is STOP_GROWN

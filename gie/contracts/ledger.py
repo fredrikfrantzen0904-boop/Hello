@@ -295,12 +295,24 @@ class LifecycleLedger:
             )
         if event.intent is not OrderIntent.PROTECTIVE_STOP or event.is_request or still_open == _ZERO:
             return
-        if event.order_state is OrderState.CANCELED and previous.order_state is not OrderState.PENDING_CANCEL:
-            raise _fail(
-                "the simulated broker does not cancel the protective stop of volume that is still open",
-                client_order_id=order_id,
-                position_id=event.position_id,
+        if event.order_state in TERMINAL_ORDER_STATES and event.order_state is not OrderState.FILLED:
+            # A stop that leaves the book without having filled.  Two cases are not a loss of
+            # protection that the broker decided on its own: the answer to a pending cancel request
+            # (requests are authorised by the gateway), and the refusal of a stop that never worked
+            # (the position then states why it has no protective order, POS-9).
+            cancel_answered = (
+                previous.order_state is OrderState.PENDING_CANCEL and event.order_state is OrderState.CANCELED
             )
+            never_worked = (
+                previous.order_state is OrderState.PENDING_SUBMIT and event.order_state is OrderState.REJECTED
+            )
+            if not (cancel_answered or never_worked):
+                raise _fail(
+                    "the simulated broker does not cancel the protective stop of volume that is still open",
+                    client_order_id=order_id,
+                    position_id=event.position_id,
+                    order_state=event.order_state.value,
+                )
         if (
             event.order_state not in TERMINAL_ORDER_STATES
             and event.volume_lots != previous.volume_lots

@@ -1427,6 +1427,91 @@
    ]
   },
   {
+   "author": "maintain:protection-rules",
+   "defects_found": [
+    {
+     "description": "R1c only refuses a report that takes the protective stop to CANCELED. A broker RECONCILED report that takes the working stop to REJECTED or EXPIRED, while all 0.50 lots are still open by fills, is admitted. The position is then left with no working protective stop (protective_order() returns None). The docstring of _check_reducing_order_event says a report that would 'take the protection away from volume that is still open is refused', and SHARED_CONTRACTS.md 9.2 says a report cannot cancel the working stop. A direct EXPIRED event is refused ('a protective stop never expires') and a direct REJECTED is an illegal transition, but the RECONCILED route gets around both. In _check_reducing_order_event the check `event.order_state is OrderState.CANCELED` probably needs to cover every terminal state other than FILLED.",
+     "failing_tests": "none in the suite (reproducer only; I did not add a red test)",
+     "file": "gie/contracts/ledger.py",
+     "reproducer": "from gie.contracts import MemoryJournal, OrderEventType as E, OrderState as S\nfrom tests.gie import samples\nfrom tests.gie.contracts.test_ledger import _next\nstory = samples.run_story(); j = MemoryJournal()\nfor r in story[:19]: j.publish(r)   # position valued, 0.50 open, stop STOP_GROWN (0.50) working\nj.publish(_next(story[15], E.RECONCILED, S.REJECTED, seq=7))   # accepted (same with S.EXPIRED)\nassert j.ledger.protective_order(story[15].position_id) is None",
+     "resolution": "fix",
+     "resolution_note": "a broker report that takes the working protective stop of open volume out of the book by any route (cancelled, rejected or expired, also through RECONCILED) is refused; only the answer to a pending cancel request and the refusal of a stop that never worked are accepted.  The reporter's reproducer is refused.  No test was added for this last correction by a test author; it is covered by the neighbouring tests of the rule only",
+     "severity": "major"
+    },
+    {
+     "description": "R2 can be bypassed by naming a feed the run does not journal. A fill whose fill_tick_source is a source the run manifest does not declare (e.g. 'elsewhere') is accepted, even though the run journals the declared 'fixture' stream. The 'run journals no tick of that stream' limit is meant for runs whose ticks live elsewhere, but here it lets the simulated broker cite any quote. Ticks from undeclared sources are refused, while fills naming them are not. A check that fill_tick_source is in manifest.data_sources would close this.",
+     "failing_tests": "none in the suite (reproducer only)",
+     "file": "gie/contracts/journal.py",
+     "reproducer": "import dataclasses; from gie.contracts import MemoryJournal; from tests.gie import samples\nstory = samples.run_story(); j = MemoryJournal()\nfor r in story[:9]: j.publish(r)\nj.publish(dataclasses.replace(story[9], fill_tick_source='elsewhere', fill_tick_seq=77))  # accepted; manifest.data_sources == ('fixture',)",
+     "resolution": "fix",
+     "resolution_note": "a fill must name a quote of a data source the run manifest declares; the reporter's reproducer is refused.  No dedicated test was added by a test author for this last correction",
+     "severity": "minor"
+    },
+    {
+     "description": "R1c treats any pending cancel request as authorised. A CANCEL_REQUESTED of the protective stop of an OPEN position, published straight to the run journal rather than through the gateway, is admitted (requests are not judged). The broker's CANCELED then passes R1c because the previous state is PENDING_CANCEL. The gateway would refuse that cancel (validate_protective_cancel), but the journal does not, so a component that publishes to the RecordSink can open the exemption. This is possibly intended because authorisation lives in the gateway (spec 9.3), but SHARED_CONTRACTS 9.2 says 'unless an authorised cancel request is pending'. Needs a decision or a documented limit.",
+     "failing_tests": "none in the suite (reproducer only)",
+     "file": "gie/contracts/ledger.py",
+     "reproducer": "from gie.contracts import MemoryJournal, OrderEventType as E, OrderState as S\nfrom tests.gie import samples\nfrom tests.gie.contracts.test_ledger import _next\nstory = samples.run_story(); j = MemoryJournal()\nfor r in story[:19]: j.publish(r)\nc = _next(story[15], E.CANCEL_REQUESTED, S.PENDING_CANCEL, seq=7); j.publish(c)   # accepted, position OPEN\nj.publish(_next(c, E.CANCELED, S.CANCELED, seq=8))   # accepted; protection gone with 0.50 lots open",
+     "resolution": "record",
+     "resolution_note": "stated as a limit in specifications/SHARED_CONTRACTS.md 9.2: the ledger judges reports, requests are authorised by the gateway; order events are written by the execution engine through the gateway only (single writer, D-025), which is checked at the integration of session 07",
+     "severity": "minor"
+    }
+   ],
+   "files": [
+    {
+     "failed": 0,
+     "file": "tests/gie/contracts/test_guarded_adapter.py",
+     "passed": 109,
+     "tests": 109
+    },
+    {
+     "failed": 0,
+     "file": "tests/gie/contracts/test_journal.py",
+     "passed": 230,
+     "tests": 230
+    },
+    {
+     "failed": 0,
+     "file": "tests/gie/contracts/test_ledger.py",
+     "passed": 76,
+     "tests": 76
+    }
+   ],
+   "generation": "maintenance after rework 2",
+   "limitations": [
+    "I did not add red tests for the three defects; they are documented here with reproducers only, so the suite stays green while still recording them.",
+    "mypy could not be run on these files in this environment: it stops on a syntax error in the installed numpy stub (/usr/local/lib/python3.13/site-packages/numpy/__init__.pyi, 'type statement only supported in 3.12+'), which has nothing to do with these files.",
+    "The ledger test of 'cancel after a cancel request' shows only the ledger-level exemption (any PENDING_CANCEL). Authorisation is exercised only through the gateway test, on a CLOSED position, where the position is already flat, so R1c is not actually judged there.",
+    "I did not run the full repository suite or python -m tools.ci; only the three assigned files were run (alone, together and in reverse order)."
+   ],
+   "summary": "I fixed all 18 failing tests by making their fixtures follow the new rules; no assertion was loosened. I added tests for R1a, R1b, R1c and R2, each with accepted and refused cases and the exact rule text, and each also run through gateway.poll(). Final run of the requested command: 415 passed, 0 failed (guarded_adapter 109, journal 230, ledger 76). The suite is also green per file, all three together, and in reverse file order. ruff check and ruff format --check (line length 110) are clean. I found three gaps in the new rules, listed in defects_found; I did not change the tests to accommodate them.\n\nHow the fixtures were adapted:\n- **test_guarded_adapter.py**: I added a `_Rig.quote(seq)` helper. It journals the story quote that a sample fill names, at its receive instant, and passes it to gateway.on_tick. The five affected tests now deliver quote 1 or 2 before the fill that names it.\n- **test_journal.py**: two tests now journal the story quote right before each fill (new helper `_story_quote`). The look-ahead test now checks, fill by fill, that order events never move the input watermark; the expected journal length is ENTRY_SUBMIT_LINE + 7.\n  - The parameter 'second-tick-then-position' became two cases. 'second-tick-then-fill' (8 -> 9, ContractValidationError): leaving out quote 1 now refuses the fill that names it. 'fourth-tick-then-position' (17 -> 18, FutureDataError): quote 4 is named by no fill, so this keeps the original idea that a position valued at a missing quote is look-ahead.\n- **test_ledger.py**:\n  - The open-orders test now first asserts that the broker's CANCELED is refused while volume is open. An exit of the whole 0.50 lots is then admitted and filled, and only after that is the cancel admitted.\n  - The separate-chains test now extends the stop's chain with a fill of the whole open volume instead of a broker cancel.\n\nNew tests:\n- **Ledger, R1a**: a RECONCILED report that enlarges the stop beyond the entry's fill is refused; after the entry fills 0.50 it is accepted, and 0.500000000001 is refused. Run in both the run ledger and fragment mode.\n- **Ledger, R1b**: the stop filling 0.50 when only 0.25 is open is refused; filling exactly 0.25 is accepted; any further fill is refused.\n- **Ledger, R1c**:\n  - A broker CANCELED of the working stop is refused, both as CANCELED and as RECONCILED-to-CANCELED, with all volume open and with half open, in run and fragment mode.\n  - The cancel is accepted once the position is flat by fills, and after a cancel request.\n  - A RECONCILED report shrinking the stop to 0.30 while 0.50 is open is refused. After the exit, 0.24 is refused and exactly 0.25 is accepted.\n  - The stop following a growing entry fill upward: a late ACCEPTED with unchanged volume is accepted, growth to 0.40 is refused, growth to 0.50 is accepted.\n- **Journal, R2**:\n  - A fill naming a journaled quote is accepted.\n  - A fill naming a quote that was never journaled, or one that was left out, is refused with ContractValidationError, the rule text, the stream and fill_tick_seq, and the journal state is unchanged.\n  - In a journal holding no tick of the stream, the fill is accepted (the documented limit).\n- **Gateway, via poll()**:\n  - All five R1 refusals land in PollResult.errors with the rule text, and a valid report behind each one is still admitted.\n  - The broker cancels the stop once the position is flat, and after an authorised gateway.cancel on a CLOSED position.\n  - R2 refusal in errors, with the valid fill behind it admitted.\n  - R2 limit with no ticks journaled: accepted.",
+   "tests_added": [
+    "tests/gie/contracts/test_journal.py::test_the_run_story_is_refused_when_a_record_others_depend_on_is_left_out[second-tick-then-fill]",
+    "tests/gie/contracts/test_journal.py::test_the_run_story_is_refused_when_a_record_others_depend_on_is_left_out[fourth-tick-then-position]",
+    "tests/gie/contracts/test_journal.py::test_a_fill_that_names_a_journaled_quote_is_accepted",
+    "tests/gie/contracts/test_journal.py::test_a_fill_that_names_a_quote_missing_from_a_journaled_stream_is_refused[quote_never_journaled|quote_left_out]",
+    "tests/gie/contracts/test_journal.py::test_a_fill_of_a_run_that_journals_no_tick_of_its_stream_cannot_be_checked_and_is_accepted",
+    "tests/gie/contracts/test_ledger.py::test_a_report_never_enlarges_a_reduce_only_order_beyond_what_the_entry_has_filled[run|fragment]",
+    "tests/gie/contracts/test_ledger.py::test_reduce_only_orders_together_never_fill_more_than_the_entry_has_filled",
+    "tests/gie/contracts/test_ledger.py::test_the_broker_cannot_cancel_the_protective_stop_of_volume_that_is_still_open[4 params]",
+    "tests/gie/contracts/test_ledger.py::test_the_broker_may_cancel_the_protective_stop_once_the_position_is_flat_by_fills",
+    "tests/gie/contracts/test_ledger.py::test_the_broker_may_cancel_the_protective_stop_after_a_cancel_request",
+    "tests/gie/contracts/test_ledger.py::test_a_report_that_shrinks_the_protective_stop_below_the_open_volume_is_refused",
+    "tests/gie/contracts/test_ledger.py::test_the_protective_stop_follows_a_growing_entry_fill_upward",
+    "tests/gie/contracts/test_guarded_adapter.py::test_a_report_that_strips_or_overfills_the_protection_lands_in_errors_and_hides_nothing[5 params]",
+    "tests/gie/contracts/test_guarded_adapter.py::test_the_broker_cancels_the_protective_stop_through_poll_once_the_position_is_flat",
+    "tests/gie/contracts/test_guarded_adapter.py::test_the_broker_cancels_the_protective_stop_after_an_authorised_cancel_request",
+    "tests/gie/contracts/test_guarded_adapter.py::test_a_fill_report_naming_a_quote_missing_from_the_journal_lands_in_errors_and_hides_nothing",
+    "tests/gie/contracts/test_guarded_adapter.py::test_a_fill_report_of_a_run_that_journals_no_tick_of_its_stream_is_accepted"
+   ],
+   "tests_removed": [
+    {
+     "reason": "Under R2, leaving out quote 1 now refuses the fill that names it (record 9) before the position (record 12) can be reached. Replaced by [second-tick-then-fill] (8 -> 9, ContractValidationError), which keeps that refusal. The look-ahead idea moved to [fourth-tick-then-position] (17 -> 18, FutureDataError), whose quote no fill names.",
+     "test": "tests/gie/contracts/test_journal.py::test_the_run_story_is_refused_when_a_record_others_depend_on_is_left_out[second-tick-then-position]"
+    }
+   ]
+  },
+  {
    "author": "maintain:risk",
    "defects_found": [],
    "files": [
