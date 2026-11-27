@@ -39,10 +39,23 @@ Rules worth knowing (the complete list is the code of :func:`check_registers`):
 * ``verified`` needs a contribution with an existing evidence path; ``blocked`` needs a blocker id
   that exists as a heading in the Markdown logs;
 * an acceptance test is never ``passing`` without recorded evidence (``passed > 0``, nothing failed,
-  nothing skipped), and an expected failure (``xfailed``) is not a pass.
+  nothing skipped), and an expected failure (``xfailed``) is not a pass;
+* once any requirement has a status, every requirement named by an OPEN blocker must be ``blocked``
+  or ``partial`` (before that the blocker is only announced in a ``NOTE:`` line).
 
-Nothing here reads a clock, the network or the environment: the same registers always give the
-same output.
+Interpretations made where the task left a choice (each is covered by a test):
+
+* ``sync-evidence`` records the ``evidence`` mapping only for entries that have marked tests in the
+  evidence file and removes a stale one; an entry without tests is ``planned``, or ``blocked`` when
+  it lists blockers.  A test that did not run (``not_run``) counts as skipped and is reported.
+* "Equal session" of an acceptance entry and its requirement is exact: the requirement must list
+  that one session.
+* ``apply`` validates the complete result, so it also refuses when the registers were already
+  invalid for a reason the patch does not repair.
+* Unknown keys, an extracted specification text without a recorded hash, a log entry that names an
+  unknown requirement id and a second contribution of the same session are reported as problems.
+
+Nothing here reads a clock or the network: the same registers always give the same output.
 """
 
 from __future__ import annotations
@@ -206,7 +219,8 @@ def dump_yaml(document: Any) -> str:
     Key order is preserved, lines wrap at 110 columns, Unicode is written as is, no anchors or
     aliases are produced, and the lists named in :data:`FLOW_STYLE_KEYS` use flow style.  Loading
     a register and dumping it again reproduces the file byte for byte, so that updates made by
-    this tool show up as small diffs.
+    this tool show up as small diffs.  YAML comments cannot be kept (PyYAML drops them); the
+    registers therefore hold their explanations in ``description`` / ``notes`` fields.
     """
     return yaml.dump(
         _with_flow_lists(document),
@@ -351,12 +365,12 @@ def parse_log(text: str, file: str) -> tuple[list[LogEntry], list[str]]:
         allowed = ", ".join(spec.statuses)
         where = f"{file}:{line}: {entry_id}"
         if not statuses:
-            problems.append(f"{where} has no '- Status:' line (allowed for a {spec.name}: {allowed})")
+            problems.append(f"{where} has no '- Status:' line (allowed {spec.name} statuses: {allowed})")
         elif len(statuses) > 1:
             problems.append(f"{where} has {len(statuses)} '- Status:' lines; exactly one is required")
         elif statuses[0] not in spec.statuses:
             problems.append(
-                f"{where} has status {statuses[0]!r}; allowed for a {spec.name}: {allowed} "
+                f"{where} has status {statuses[0]!r}; allowed {spec.name} statuses: {allowed} "
                 "(the line must hold the status word only)"
             )
         requirements = tuple(
@@ -440,9 +454,7 @@ def load_logs(root: Path) -> Logs:
         for entry in parsed:
             spec = LOG_KINDS[entry.kind]
             if spec.file != file:
-                problems.append(
-                    f"{file}:{entry.line}: {entry.id} is a {spec.name}; {spec.name}s belong in {spec.file}"
-                )
+                problems.append(f"{file}:{entry.line}: {entry.id} ({spec.name}) belongs in {spec.file}")
             earlier = first.get(entry.id)
             if earlier is not None:
                 problems.append(
@@ -461,37 +473,45 @@ class Registers:
     """Everything the checks and the renderers read, loaded once."""
 
     root: Path
-    #: Parsed documents, or None when the file is missing or unreadable.
+    #: Parsed documents (whatever the YAML holds; an empty file parses as None).
     matrix: Any
     acceptance: Any
     logs: Logs
-    #: File contents as read (None when missing), to detect whether an update changes anything.
+    #: File contents as read (None when missing), to detect whether the file is in the tool's format.
     matrix_text: str | None = None
     acceptance_text: str | None = None
+    #: Register files that are missing or unreadable; the reason is in the report of the loader.
+    unloaded: tuple[str, ...] = ()
 
 
-def _load_document(root: Path, file: str, report: Report) -> tuple[Any, str | None]:
+def _load_document(root: Path, file: str, report: Report) -> tuple[Any, str | None, bool]:
+    """Parsed document, raw text and whether the file could be loaded at all."""
     path = root / file
     if not path.is_file():
         report.structural(f"{file}: the register file does not exist")
-        return None, None
+        return None, None, False
     try:
         text = _read_text(path)
     except UnicodeDecodeError as exc:
         report.structural(f"{file}: not UTF-8 text ({exc.reason})")
-        return None, None
+        return None, None, False
     try:
-        return parse_yaml(text, file), text
+        return parse_yaml(text, file), text, True
     except RegisterError as exc:
         report.structural(str(exc))
-        return None, text
+        return None, text, False
 
 
 def load_registers(root: Path) -> tuple[Registers, Report]:
     """Load the registers below ``root``; the report holds what could not be loaded."""
     report = Report()
-    matrix, matrix_text = _load_document(root, MATRIX_FILE, report)
-    acceptance, acceptance_text = _load_document(root, ACCEPTANCE_FILE, report)
+    matrix, matrix_text, matrix_loaded = _load_document(root, MATRIX_FILE, report)
+    acceptance, acceptance_text, acceptance_loaded = _load_document(root, ACCEPTANCE_FILE, report)
+    unloaded = [
+        file
+        for file, loaded in ((MATRIX_FILE, matrix_loaded), (ACCEPTANCE_FILE, acceptance_loaded))
+        if not loaded
+    ]
     registers = Registers(
         root=root,
         matrix=matrix,
@@ -499,6 +519,7 @@ def load_registers(root: Path) -> tuple[Registers, Report]:
         logs=load_logs(root),
         matrix_text=matrix_text,
         acceptance_text=acceptance_text,
+        unloaded=tuple(unloaded),
     )
     return registers, report
 
@@ -596,7 +617,7 @@ def _check_contribution(
     if "evidence" in contribution and not _is_str_list(contribution["evidence"]):
         report.structural(f"{where}: 'evidence' must be a list of repository-relative paths")
     blockers = contribution.get("blockers", [])
-    if not _is_str_list(blockers) or any(not _BLOCKER_ID_RE.match(item) for item in blockers):
+    if not _is_str_list(blockers) or any(not _BLOCKER_ID_RE.fullmatch(item) for item in blockers):
         report.structural(
             f"{where}: 'blockers' must be a list of blocker / change request ids (B-nnn, CR-nnn)"
         )
@@ -654,7 +675,7 @@ def _check_requirement(
     if "notes" in entry and not isinstance(entry["notes"], str):
         report.structural(f"{where}: 'notes' must be a string")
     blockers = entry.get("blockers", [])
-    if not _is_str_list(blockers) or any(not _REFERENCE_ID_RE.match(item) for item in blockers):
+    if not _is_str_list(blockers) or any(not _REFERENCE_ID_RE.fullmatch(item) for item in blockers):
         report.structural(f"{where}: 'blockers' must be a list of ids (B-nnn, CR-nnn, D-nnn, U-nn)")
     contributions = entry.get("contributions", [])
     if not isinstance(contributions, list):
@@ -691,7 +712,7 @@ def _check_requirement(
 
 def _check_reference(reference: str, where: str, logs: Logs, report: Report) -> None:
     """A referenced B-/CR-/D-/U- id must exist as a heading in the Markdown logs."""
-    match = _REFERENCE_ID_RE.match(reference)
+    match = _REFERENCE_ID_RE.fullmatch(reference)
     if match is None:
         return
     if reference in logs.by_id():
@@ -725,7 +746,7 @@ def _check_specification(root: Path, specification: object, report: Report) -> N
         if not isinstance(name, str) or not name or name != Path(name).name or "\\" in name or name == "..":
             report.structural(f"{where}: {name!r} is not a plain file name in {EXTRACTED_DIR}/")
             continue
-        if not isinstance(digest, str) or not _SHA256_RE.match(digest):
+        if not isinstance(digest, str) or not _SHA256_RE.fullmatch(digest):
             report.structural(
                 f"{where}: the value recorded for {name} is not a lower-case SHA-256 hex digest"
             )
@@ -755,7 +776,7 @@ def _check_specification(root: Path, specification: object, report: Report) -> N
 def _check_matrix(registers: Registers, report: Report) -> _MatrixInfo:
     info = _MatrixInfo()
     matrix = registers.matrix
-    if matrix is None:
+    if MATRIX_FILE in registers.unloaded:
         return info
     if not isinstance(matrix, dict):
         report.structural(f"{MATRIX_FILE}: the top level must be a mapping")
@@ -900,7 +921,7 @@ def _check_acceptance_entry(
             f"{where}: status {entry['status']!r} is not one of {', '.join(state.status_values)}"
         )
     blockers = entry.get("blockers", [])
-    if not _is_str_list(blockers) or any(not _REFERENCE_ID_RE.match(item) for item in blockers):
+    if not _is_str_list(blockers) or any(not _REFERENCE_ID_RE.fullmatch(item) for item in blockers):
         report.structural(f"{where}: 'blockers' must be a list of ids (B-nnn, CR-nnn, D-nnn, U-nn)")
     if "notes" in entry and not isinstance(entry["notes"], str):
         report.structural(f"{where}: 'notes' must be a string")
@@ -974,7 +995,7 @@ def _check_acceptance_entry(
 
 def _check_acceptance(registers: Registers, info: _MatrixInfo, report: Report) -> None:
     document = registers.acceptance
-    if document is None:
+    if ACCEPTANCE_FILE in registers.unloaded:
         return
     if not isinstance(document, dict):
         report.structural(f"{ACCEPTANCE_FILE}: the top level must be a mapping")
@@ -1031,17 +1052,25 @@ def validate(root: Path = REPO_ROOT) -> Report:
     """Check the registers below ``root``; ``report.problems`` is empty when they are valid."""
     registers, loaded = load_registers(root)
     report = check_registers(registers, loaded)
+    for file, document, text in (
+        (MATRIX_FILE, registers.matrix, registers.matrix_text),
+        (ACCEPTANCE_FILE, registers.acceptance, registers.acceptance_text),
+    ):
+        if file not in registers.unloaded and isinstance(document, dict) and dump_yaml(document) != text:
+            report.note(
+                f"{file} is not in the formatting written by this tool (edited by hand?): the next "
+                "'apply' / 'sync-evidence' rewrites the whole file and drops YAML comments"
+            )
     if report.ok:
         report.messages.append(_summary(registers))
     return report
 
 
 def _summary(registers: Registers) -> str:
+    log_counts = ", ".join(f"{kind} {len(registers.logs.of_kind(kind))}" for kind in LOG_KINDS)
     return (
         f"registers valid: {len(registers.matrix['requirements'])} requirements, "
-        f"{len(registers.acceptance['acceptance_tests'])} acceptance tests, "
-        f"{len(registers.logs.of_kind('D'))} decisions, {len(registers.logs.of_kind('U'))} open items, "
-        f"{len(registers.logs.of_kind('B'))} blockers, {len(registers.logs.of_kind('CR'))} change requests"
+        f"{len(registers.acceptance['acceptance_tests'])} acceptance tests (log entries: {log_counts})"
     )
 
 
@@ -1159,7 +1188,7 @@ def render_matrix_md(matrix: Mapping[str, Any]) -> str:
     for (source, section), members in sections.items():
         lines += [f"## {_inline(source)} - {_inline(section)}", ""]
         lines += [
-            "| id | requirement | sessions | status | review | contributions / notes |",
+            "| id | requirement | sessions | status | review | contributions/notes |",
             "|---|---|---|---|---|---|",
         ]
         for requirement in members:
@@ -1563,7 +1592,8 @@ def _check_update(
     if "notes" in update and not isinstance(update["notes"], str):
         report.problem(f"{where}: 'notes' must be a string")
     if "blockers" in update and (
-        not _is_str_list(update["blockers"]) or any(not _REFERENCE_ID_RE.match(i) for i in update["blockers"])
+        not _is_str_list(update["blockers"])
+        or any(not _REFERENCE_ID_RE.fullmatch(i) for i in update["blockers"])
     ):
         report.problem(f"{where}: 'blockers' must be a list of ids (B-nnn, CR-nnn, D-nnn, U-nn)")
     if "contribution" in update:
@@ -1667,13 +1697,14 @@ def apply_patch(root: Path, patch: Path) -> Report:
 
     matrix = copy.deepcopy(registers.matrix)
     by_id: dict[str, dict[str, Any]] = {entry["id"]: entry for entry in matrix["requirements"]}
-    changed: list[str] = []
     for selected, update in selections:
         for requirement_id in selected:
-            before = copy.deepcopy(by_id[requirement_id])
             _apply_update(by_id[requirement_id], update)
-            if by_id[requirement_id] != before and requirement_id not in changed:
-                changed.append(requirement_id)
+    changed = [
+        old["id"]
+        for old, new in zip(registers.matrix["requirements"], matrix["requirements"], strict=True)
+        if old != new
+    ]
 
     result = check_registers(replace(registers, matrix=matrix))
     before_ids = [entry["id"] for entry in registers.matrix["requirements"]]
@@ -1740,6 +1771,32 @@ def stats(root: Path = REPO_ROOT) -> dict[str, Any]:
 
 
 # --------------------------------------------------------------------------- command line
+_PATCH_HELP = """\
+Patch file (YAML). Updates are applied in order; any error means nothing is written.
+
+  updates:
+    - ids: [S00-ASG-27, 'S00-DEL-*']    # requirement ids or shell-style globs
+      status: verified                   # optional
+      review_status: unverified          # optional
+      notes: replaces the notes          # optional
+      blockers: [B-001]                  # optional, requirement-level blocker ids
+      contribution:                      # optional, replaces the contribution of the same session
+        session: S00
+        summary: what the session delivered
+        status: verified
+        evidence: [docs/DECISION_LOG.md]
+        blockers: [B-001]                # optional
+"""
+
+
+def _make_output_robust() -> None:
+    """Never crash on a console that cannot encode a character (for example cp1252 on Windows)."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            reconfigure(errors="backslashreplace")
+
+
 def _emit(report: Report) -> int:
     for line in report.messages:
         print(line)
@@ -1773,11 +1830,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--evidence", type=Path, required=True, help="file written by pytest --gie-evidence"
     )
     apply_parser = commands.add_parser(
-        "apply", parents=[common], help="apply status updates from a YAML patch"
+        "apply",
+        parents=[common],
+        help="apply status updates from a YAML patch",
+        description=_PATCH_HELP,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     apply_parser.add_argument("--patch", type=Path, required=True, help="YAML patch file")
     commands.add_parser("stats", parents=[common], help="print totals as JSON")
     arguments = parser.parse_args(argv)
+    _make_output_robust()
 
     root: Path = arguments.root
     if arguments.command == "validate":

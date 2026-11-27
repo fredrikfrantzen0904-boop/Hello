@@ -5,18 +5,29 @@ and listed in ``specifications/contracts/FIELDS.md`` ("Error codes").  The codes
 shared contract surface ("changing or removing a code is a breaking change"), so they are pinned
 here literally: a renamed or re-coded error must fail this file.
 
-All messages and details used here are synthetic fixtures.
+Revision 2 of the contracts (after the independent review) added ``JournalCorruptError`` and the
+rule that an error can *always* be journaled: a detail that has no canonical JSON form (an integer
+beyond 64 bits, a non-finite float, a value that is not a JSON scalar) is carried as text, so
+``canonical_dumps(error.to_dict())`` never fails because of a detail.
+
+All messages and details used here are synthetic fixtures; none is market data.
 """
 
 from __future__ import annotations
 
 import ast
+import datetime as dt
 import inspect
 import json
+import math
 import re
-from pathlib import Path
+from decimal import Decimal
+from pathlib import Path, PurePosixPath
+from typing import Any
 
 import pytest
+from hypothesis import HealthCheck, example, given, settings
+from hypothesis import strategies as st
 
 from gie.core import errors as errors_module
 from gie.core.canonical import canonical_dumps, strict_loads
@@ -32,6 +43,7 @@ from gie.core.errors import (
     FutureDataError,
     GieError,
     IllegalTransitionError,
+    JournalCorruptError,
     LiveRoutingLockedError,
     OutOfOrderError,
     SequenceConflictError,
@@ -64,6 +76,7 @@ DOCUMENTED: dict[type[GieError], tuple[str, type[BaseException]]] = {
     SequenceConflictError: ("GIE.SEQ.CONFLICT", SequenceError),
     SequenceGapError: ("GIE.SEQ.GAP", SequenceError),
     IllegalTransitionError: ("GIE.STATE.ILLEGAL_TRANSITION", GieError),
+    JournalCorruptError: ("GIE.JOURNAL.CORRUPT", GieError),
     LiveRoutingLockedError: ("GIE.ROUTING.LIVE_LOCKED", GieError),
     ConfigError: ("GIE.CONFIG.INVALID", GieError),
 }
@@ -75,8 +88,32 @@ _ALL = pytest.mark.parametrize("error_type", ALL_ERROR_TYPES, ids=lambda error_t
 @pytest.mark.requirement("S00-ASG-24")
 def test_all_error_types_is_exactly_the_documented_taxonomy() -> None:
     assert isinstance(ALL_ERROR_TYPES, tuple)
-    assert len(ALL_ERROR_TYPES) == len(set(ALL_ERROR_TYPES)) == 17
+    assert len(ALL_ERROR_TYPES) == len(set(ALL_ERROR_TYPES)) == 18
     assert set(ALL_ERROR_TYPES) == set(DOCUMENTED)
+    assert all(type(error_type) is type and issubclass(error_type, GieError) for error_type in ALL_ERROR_TYPES)
+    assert ALL_ERROR_TYPES[0] is GieError
+
+
+@pytest.mark.requirement("S00-ASG-24")
+def test_journal_corrupt_error_is_registered_with_its_documented_code() -> None:
+    """Revision 2: a damaged journal has its own stable code and is not a lifecycle or sequence error."""
+    assert JournalCorruptError in ALL_ERROR_TYPES
+    assert JournalCorruptError.code == "GIE.JOURNAL.CORRUPT"
+    assert ERROR_CODES["GIE.JOURNAL.CORRUPT"] is JournalCorruptError
+    assert JournalCorruptError.__bases__ == (GieError,)
+    for other in (ContractError, TimeError, SequenceError, IllegalTransitionError, ConfigError):
+        assert not issubclass(JournalCorruptError, other)
+        assert not issubclass(other, JournalCorruptError)
+    error = JournalCorruptError("synthetic: torn last line", line=7, path="synthetic.journal")
+    assert error.to_dict() == {
+        "code": "GIE.JOURNAL.CORRUPT",
+        "message": "synthetic: torn last line",
+        "details": {"line": 7, "path": "synthetic.journal"},
+    }
+    assert str(error).startswith("[GIE.JOURNAL.CORRUPT] synthetic: torn last line")
+    with pytest.raises(GieError) as caught:
+        raise error
+    assert caught.value is error
 
 
 @pytest.mark.requirement("S00-ASG-24")
@@ -182,7 +219,7 @@ def test_code_family_follows_the_hierarchy(error_type: type[GieError]) -> None:
 @pytest.mark.requirement("S00-ASG-24")
 def test_families_are_disjoint() -> None:
     families = (ContractError, TimeError, SequenceError)
-    standalone = (IllegalTransitionError, LiveRoutingLockedError, ConfigError)
+    standalone = (IllegalTransitionError, JournalCorruptError, LiveRoutingLockedError, ConfigError)
     for error_type in ALL_ERROR_TYPES:
         memberships = [family for family in families if issubclass(error_type, family)]
         assert len(memberships) <= 1
@@ -347,3 +384,334 @@ def test_instances_of_different_classes_never_share_a_code() -> None:
     assert len({instance.code for instance in instances}) == len(instances)
     assert len({instance.to_dict()["code"] for instance in instances}) == len(instances)
     assert len({str(instance) for instance in instances}) == len(instances)
+
+
+# =========================================================================== details are journalable
+# Revision 2 (SHARED_CONTRACTS.md section 5, module docstring of gie.core.errors): ``details`` only
+# carries JSON scalars and "a detail must never be the reason an error cannot be written":
+# integers outside 64 bits, non-finite floats and values of any other type are carried as text.
+INT64_MAX = 2**63 - 1
+INT64_MIN = -(2**63)
+
+PROPERTY = settings(
+    max_examples=300,
+    deadline=None,
+    derandomize=True,
+    database=None,
+    suppress_health_check=[HealthCheck.too_slow],
+)
+
+
+def _assert_journalable(error: GieError) -> dict[str, Any]:
+    """The journal form is canonical GIE JSON and survives strict parsing unchanged."""
+    journal_form = error.to_dict()
+    assert set(journal_form) == {"code", "message", "details"}
+    details = journal_form["details"]
+    assert isinstance(details, dict)
+    for key, value in details.items():
+        assert type(key) is str
+        assert value is None or isinstance(value, (str, int, float, bool)), (key, type(value))
+        if isinstance(value, float):
+            assert math.isfinite(value)
+        if isinstance(value, int) and not isinstance(value, bool):
+            assert INT64_MIN <= value <= INT64_MAX
+    text = canonical_dumps(journal_form)
+    restored = strict_loads(text)
+    assert canonical_dumps(restored) == text  # the journal line is a fixed point
+    assert restored["code"] == journal_form["code"]
+    assert restored["message"] == journal_form["message"]
+    assert set(restored["details"]) == set(details)
+    for key, value in details.items():
+        if isinstance(value, float):
+            # canonical JSON writes an integral double without a fraction; the reader then
+            # returns an int and "the field type decides" (gie.core.canonical module docstring)
+            assert float(restored["details"][key]) == value
+        else:
+            assert restored["details"][key] == value
+            assert type(restored["details"][key]) is type(value)
+    json.dumps(journal_form, allow_nan=False)  # also plain JSON without NaN/Infinity tokens
+    return details
+
+
+@pytest.mark.requirement("S00-ASG-24")
+@pytest.mark.parametrize("value", [0, 1, -1, 2**53 + 1, 1795771815123456789, INT64_MAX, INT64_MIN])
+def test_integers_within_64_bits_stay_exact_integers(value: int) -> None:
+    error = StaleDataError("synthetic", value=value)
+    assert error.details["value"] == value
+    assert type(error.details["value"]) is int
+    details = _assert_journalable(error)
+    assert details == {"value": value}
+    restored = strict_loads(canonical_dumps(error.to_dict()))["details"]["value"]
+    assert restored == value
+    assert type(restored) is int
+
+
+@pytest.mark.requirement("S00-ASG-24")
+@pytest.mark.parametrize(
+    "value",
+    [INT64_MAX + 1, INT64_MIN - 1, 2**64, -(2**64), 2**70, 10**30, -(10**30)],
+    ids=["int64max+1", "int64min-1", "2**64", "-2**64", "2**70", "1e30", "-1e30"],
+)
+def test_integers_beyond_64_bits_are_carried_as_their_decimal_text(value: int) -> None:
+    """Canonical JSON refuses such an integer, so the detail is text - never a rounded number."""
+    with pytest.raises(CanonicalEncodingError):
+        canonical_dumps({"value": value})  # positive control: the raw value is not journalable
+    error = ContractValidationError("synthetic", value=value, path="tick.receive_time_ns")
+    detail = error.details["value"]
+    assert type(detail) is str
+    assert detail == str(value)
+    assert int(detail) == value  # nothing was rounded through a double
+    assert error.details["path"] == "tick.receive_time_ns"
+    assert _assert_journalable(error) == {"value": str(value), "path": "tick.receive_time_ns"}
+
+
+@pytest.mark.requirement("S00-ASG-24")
+@pytest.mark.parametrize("value", [10**100, -(10**100), 2**4000, -(2**4000)])
+def test_very_large_integers_are_carried_as_a_prefix_of_their_digits(value: int) -> None:
+    error = GieError("synthetic", value=value)
+    detail = error.details["value"]
+    assert type(detail) is str
+    assert len(detail) >= 20
+    assert str(value).startswith(detail)
+    _assert_journalable(error)
+
+
+@pytest.mark.requirement("S00-ASG-24")
+@pytest.mark.parametrize("value", [10**5000, -(1 << 20_000)], ids=["1e5000", "-2**20000"])
+def test_an_integer_too_large_to_print_is_still_a_journalable_detail(value: int) -> None:
+    """An integer of any size is "carried as text"; constructing the error must not itself fail.
+
+    CPython refuses to convert integers of more than 4300 digits to text (``ValueError``), so
+    this is the case in which a detail *is* the reason an error cannot be written.
+    """
+    error = ContractValidationError("synthetic", value=value)
+    assert type(error.details["value"]) is str
+    _assert_journalable(error)
+    assert "GIE.CONTRACT.INVALID" in str(error)
+
+
+@pytest.mark.requirement("S00-ASG-24")
+@pytest.mark.parametrize(
+    ("value", "marker"),
+    [(float("nan"), "nan"), (float("inf"), "inf"), (float("-inf"), "-inf")],
+    ids=["nan", "inf", "-inf"],
+)
+def test_non_finite_floats_are_carried_as_text(value: float, marker: str) -> None:
+    with pytest.raises(CanonicalEncodingError):
+        canonical_dumps({"value": value})  # positive control
+    error = GieError("synthetic", value=value)
+    detail = error.details["value"]
+    assert type(detail) is str
+    assert marker in detail.lower()
+    assert detail.startswith("-") == (value < 0)
+    _assert_journalable(error)
+    # NaN in details must not make two readings of the same error differ
+    assert error.to_dict() == error.to_dict()
+
+
+@pytest.mark.requirement("S00-ASG-24")
+@pytest.mark.parametrize("value", [0.0, -0.0, 0.25, -1.5, 5e-324, 1.7976931348623157e308, 1e21, 1e-7])
+def test_finite_floats_stay_floats(value: float) -> None:
+    error = GieError("synthetic", value=value)
+    assert type(error.details["value"]) is float
+    assert error.details["value"] == value
+    assert math.copysign(1.0, error.details["value"]) == math.copysign(1.0, value)
+    _assert_journalable(error)
+
+
+@pytest.mark.requirement("S00-ASG-24")
+def test_booleans_none_and_text_are_carried_unchanged() -> None:
+    error = GieError("synthetic", yes=True, no=False, missing=None, text="zlato € \U0001f600", empty="")
+    assert error.details["yes"] is True
+    assert error.details["no"] is False
+    assert error.details["missing"] is None
+    assert error.details["text"] == "zlato € \U0001f600"
+    assert error.details["empty"] == ""
+    restored = strict_loads(canonical_dumps(error.to_dict()))["details"]
+    assert restored["yes"] is True
+    assert restored["no"] is False
+    assert restored["missing"] is None
+    assert restored["text"] == "zlato € \U0001f600"
+    _assert_journalable(error)
+
+
+_NON_SCALARS: list[tuple[str, Any, tuple[str, ...]]] = [
+    ("list", [1, 2, 3], ("1", "2", "3")),
+    ("tuple", ("XAUUSD", 5), ("XAUUSD", "5")),
+    ("dict", {"bid": 1}, ("bid", "1")),
+    ("set", {7}, ("7",)),
+    ("frozenset", frozenset({"a"}), ("a",)),
+    ("bytes", b"synthetic", ("synthetic",)),
+    ("bytearray", bytearray(b"ab"), ("ab",)),
+    ("decimal", Decimal("2650.50"), ("2650.50",)),
+    ("complex", 1 + 2j, ("1", "2")),
+    ("date", dt.date(2026, 11, 27), ("2026", "11", "27")),
+    ("path", PurePosixPath("synthetic/journal.jsonl"), ("synthetic/journal.jsonl",)),
+    ("exception", ValueError("synthetic cause"), ("synthetic cause",)),
+    ("type", dict, ("dict",)),
+    ("range", range(3), ("3",)),
+    ("nested", {"levels": [Decimal("1"), float("nan"), 2**70]}, ("levels", "nan")),
+]
+
+
+@pytest.mark.requirement("S00-ASG-24")
+@pytest.mark.parametrize(
+    ("value", "fragments"), [(case[1], case[2]) for case in _NON_SCALARS], ids=[c[0] for c in _NON_SCALARS]
+)
+def test_values_that_are_not_json_scalars_are_carried_as_text(value: Any, fragments: tuple[str, ...]) -> None:
+    with pytest.raises((CanonicalEncodingError, AssertionError)):
+        # positive control: as a raw value this is either refused or would be written as a
+        # JSON container, which is not a scalar
+        text = canonical_dumps({"value": value})
+        assert not text.startswith('{"value":[') and not text.startswith('{"value":{')
+    error = IllegalTransitionError("synthetic", value=value, order_seq=4)
+    detail = error.details["value"]
+    assert type(detail) is str
+    assert detail.strip()
+    for fragment in fragments:
+        assert fragment in detail
+    assert error.details["order_seq"] == 4
+    _assert_journalable(error)
+
+
+@pytest.mark.requirement("S00-ASG-24")
+def test_a_very_large_non_scalar_detail_is_truncated_text_not_megabytes() -> None:
+    value = list(range(100_000))
+    error = GieError("synthetic", value=value)
+    detail = error.details["value"]
+    assert type(detail) is str
+    assert 0 < len(detail) < len(repr(value))
+    assert repr(value).startswith(detail)
+    _assert_journalable(error)
+
+
+@pytest.mark.requirement("S00-ASG-24")
+@pytest.mark.parametrize(
+    "text",
+    ["lone high \ud800 surrogate", "\udfff", "reversed pair \udc00\ud800", "ok \U0001f600 then \udcff"],
+    ids=["high", "low", "reversed-pair", "astral-then-lone"],
+)
+def test_text_that_is_not_valid_unicode_is_still_a_journalable_detail(text: str) -> None:
+    with pytest.raises(CanonicalEncodingError):
+        canonical_dumps({"value": text})  # positive control
+    error = CanonicalEncodingError("synthetic", value=text)
+    detail = error.details["value"]
+    assert type(detail) is str
+    detail.encode("utf-8")  # valid Unicode now
+    assert "\U0001f600" in detail or "\U0001f600" not in text  # valid characters are kept
+    _assert_journalable(error)
+
+
+@pytest.mark.requirement("S00-ASG-24")
+def test_an_error_whose_message_is_not_valid_unicode_is_still_journalable() -> None:
+    """Errors are data and are never swallowed: the journal form must exist for every error.
+
+    ``gie.core.freshness.require_fresh(what=...)`` and ``require_not_expired(what=...)`` build
+    their message from caller text, so a message can contain the same unencodable characters that
+    a detail can.
+    """
+    error = StaleDataError("synthetic \ud800 is stale", what="synthetic \ud800")
+    journal_form = error.to_dict()
+    assert journal_form["code"] == "GIE.TIME.STALE"
+    assert strict_loads(canonical_dumps(journal_form)) == journal_form
+
+
+@pytest.mark.requirement("S00-ASG-24")
+@_ALL
+def test_every_error_type_is_journalable_with_details_of_every_kind(error_type: type[GieError]) -> None:
+    error = error_type(
+        "synthetic message",
+        beyond_int64=2**63,
+        below_int64=-(2**63) - 1,
+        not_a_number=float("nan"),
+        infinite=float("-inf"),
+        container=["a", {"b": Decimal("1.5")}],
+        binary=b"\x00\xff",
+        broken_text="\ud83d",
+        exact=INT64_MAX,
+        ratio=0.25,
+        flag=True,
+        missing=None,
+    )
+    details = _assert_journalable(error)
+    assert set(details) == {
+        "beyond_int64",
+        "below_int64",
+        "not_a_number",
+        "infinite",
+        "container",
+        "binary",
+        "broken_text",
+        "exact",
+        "ratio",
+        "flag",
+        "missing",
+    }
+    assert details["beyond_int64"] == "9223372036854775808"
+    assert details["below_int64"] == "-9223372036854775809"
+    assert details["exact"] == INT64_MAX
+    assert details["ratio"] == 0.25
+    assert details["flag"] is True
+    assert details["missing"] is None
+    restored = strict_loads(canonical_dumps(error.to_dict()))
+    assert ERROR_CODES[restored["code"]] is error_type
+    # the text form never fails either
+    rendered = str(error)
+    assert error_type.code in rendered
+    assert "synthetic message" in rendered
+
+
+@pytest.mark.requirement("S00-ASG-24")
+def test_the_instance_details_and_the_journal_form_agree() -> None:
+    """What is journaled is what ``details`` holds: sanitising happens once, at construction."""
+    error = OutOfOrderError("synthetic", seq=2**80, ratio=float("inf"), parts=(1, 2))
+    assert error.to_dict()["details"] == error.details
+    assert all(type(value) is str for value in error.details.values())
+    assert error.to_dict()["details"] is not error.details
+
+
+_DETAIL_VALUES = st.recursive(
+    st.one_of(
+        st.none(),
+        st.booleans(),
+        st.integers(min_value=-(2**200), max_value=2**200),
+        st.floats(allow_nan=True, allow_infinity=True),
+        st.text(alphabet=st.characters(), max_size=40),  # includes lone surrogates
+        st.binary(max_size=8),
+        st.decimals(allow_nan=True, allow_infinity=True, places=4),
+    ),
+    lambda children: st.one_of(
+        st.lists(children, max_size=3),
+        st.dictionaries(st.text(max_size=3), children, max_size=3),
+        st.tuples(children, children),
+    ),
+    max_leaves=6,
+)
+
+
+@pytest.mark.requirement("S00-ASG-24")
+@PROPERTY
+@example(details={"a": 2**63, "b": -(2**63) - 1, "c": float("nan"), "d": "\ud800", "e": [float("inf")]})
+@example(details={"a": INT64_MAX, "b": INT64_MIN, "c": -0.0, "d": 1e308, "e": 5e-324})
+@given(details=st.dictionaries(st.from_regex(r"[a-z_]{1,8}", fullmatch=True), _DETAIL_VALUES, max_size=5))
+def test_any_details_can_be_journaled(details: dict[str, Any]) -> None:
+    error = GieError("synthetic", **details)
+    assert set(error.details) == set(details)
+    journaled = _assert_journalable(error)
+    for key, value in details.items():
+        carried = journaled[key]
+        if value is None or isinstance(value, bool):
+            assert carried is value
+        elif isinstance(value, int):
+            if INT64_MIN <= value <= INT64_MAX:
+                assert type(carried) is int and carried == value
+            else:
+                assert type(carried) is str and str(value).startswith(carried)
+        elif isinstance(value, float):
+            if math.isfinite(value):
+                assert type(carried) is float and carried == value
+            else:
+                assert type(carried) is str
+        else:
+            assert type(carried) is str
+    assert isinstance(str(error), str)

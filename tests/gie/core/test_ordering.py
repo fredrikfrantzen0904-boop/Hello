@@ -3,13 +3,18 @@
 The expected behaviour is taken from the docstrings of ``gie/core/ordering.py`` and from
 ``specifications/SHARED_CONTRACTS.md`` section 6, not from the implementation:
 
-* all events of a run are processed in ascending ``EventKey = (time_ns, rank, stream, seq)``;
-* ``StreamRank`` breaks ties at the same instant: clock, tick, order event, position, risk
-  decision, evidence, candidate, trade plan, model version;
+* *input order*: the exogenous inputs of a run are delivered in ascending
+  ``EventKey = (time_ns, rank, stream, seq)`` where ``time_ns`` is the availability instant;
+  *journal order* (publication order) is the total order of a run, and ``EventKey`` is only the
+  causal fallback for records of different journals;
+* ``StreamRank`` breaks ties at the same instant, inputs first and then GIE's own records in
+  data-flow order: run manifest, clock, tick, order report, position, evidence, candidate, trade
+  plan, risk decision, order request, model version, other;
 * ``merge_ordered`` merges sorted streams deterministically and refuses unsorted
   (``OutOfOrderError``) or ambiguous (``SequenceConflictError``) input;
-* ``SequenceTracker`` classifies each arrival according to its documented table, and a
-  refused arrival never changes tracker state.
+* ``SequenceTracker`` classifies each arrival according to its documented table (a stream starts
+  at ``first_seq``, default 0; ``None`` joins anywhere), refuses a decreasing ordering time, can be
+  re-established after a restart with ``restore`` and never changes state on a refused arrival.
 
 SYNTHETIC FIXTURE: every key, stream name, sequence number, payload and fingerprint in this
 file is invented for testing.  Nothing here is market data or broker data.
@@ -48,18 +53,41 @@ FP_A = "a" * 64
 FP_B = "b" * 64
 FP_C = "c" * 64
 
-#: The tie-break order documented in SHARED_CONTRACTS.md section 6.2 and the module docstring.
+#: The tie-break order documented in SHARED_CONTRACTS.md section 6.1 and the ``StreamRank`` docstring:
+#: inputs first, then GIE's own records in data-flow order.
 DOCUMENTED_RANK_ORDER = [
+    "RUN_MANIFEST",
     "CLOCK",
     "TICK",
-    "ORDER_EVENT",
+    "ORDER_REPORT",
     "POSITION",
-    "RISK_DECISION",
     "EVIDENCE",
     "CANDIDATE",
     "TRADE_PLAN",
+    "RISK_DECISION",
+    "ORDER_REQUEST",
     "MODEL_VERSION",
+    "OTHER",
 ]
+
+#: The rank numbers of the table in SHARED_CONTRACTS.md section 6.1 (``OTHER`` is not in that table).
+DOCUMENTED_RANK_VALUES = {
+    "RUN_MANIFEST": 0,
+    "CLOCK": 5,
+    "TICK": 10,
+    "ORDER_REPORT": 20,
+    "POSITION": 30,
+    "EVIDENCE": 40,
+    "CANDIDATE": 50,
+    "TRADE_PLAN": 60,
+    "RISK_DECISION": 70,
+    "ORDER_REQUEST": 80,
+    "MODEL_VERSION": 90,
+}
+
+#: Exogenous inputs of a run and the records GIE derives from them, each in data-flow order.
+INPUT_RANKS = ["RUN_MANIFEST", "CLOCK", "TICK", "ORDER_REPORT", "POSITION"]
+DECISION_CHAIN_RANKS = ["EVIDENCE", "CANDIDATE", "TRADE_PLAN", "RISK_DECISION", "ORDER_REQUEST"]
 
 Pair = tuple[EventKey, Any]
 
@@ -250,15 +278,55 @@ def test_events_of_the_same_instant_sort_by_rank_whatever_their_stream_or_seq() 
 
 
 @pytest.mark.requirement("S00-ASG-25")
-def test_execution_facts_rank_before_intelligence_derived_at_the_same_instant() -> None:
-    facts = [StreamRank.ORDER_EVENT, StreamRank.POSITION]
-    derived = [StreamRank.RISK_DECISION, StreamRank.EVIDENCE, StreamRank.CANDIDATE, StreamRank.TRADE_PLAN]
-    for fact, decision in itertools.product(facts, derived):
-        assert EventKey(T0, fact, "zzz", 99) < EventKey(T0, decision, "aaa", 0)
+def test_stream_rank_has_exactly_the_documented_members_in_data_flow_order() -> None:
+    assert [rank.name for rank in sorted(StreamRank)] == DOCUMENTED_RANK_ORDER
+    assert [rank.name for rank in StreamRank] == DOCUMENTED_RANK_ORDER  # declared in that order too
+    assert set(StreamRank.__members__) == set(DOCUMENTED_RANK_ORDER)  # __members__ would reveal aliases
+    # The names of the previous revision are gone: an order event is a report or a request.
+    assert "ORDER_EVENT" not in StreamRank.__members__
+
+
+@pytest.mark.requirement("S00-ASG-25")
+def test_stream_rank_values_are_the_ranks_of_the_specification_table() -> None:
+    assert {name: int(StreamRank[name]) for name in DOCUMENTED_RANK_VALUES} == DOCUMENTED_RANK_VALUES
+    # OTHER has no row in the table; it sorts after every rank that has one.
+    assert all(StreamRank.OTHER > StreamRank[name] for name in DOCUMENTED_RANK_VALUES)
+
+
+@pytest.mark.requirement("S00-ASG-25")
+def test_inputs_rank_before_the_records_gie_derives_at_the_same_instant() -> None:
+    assert INPUT_RANKS + DECISION_CHAIN_RANKS == DOCUMENTED_RANK_ORDER[:10]
+    for input_name, derived_name in itertools.product(INPUT_RANKS, DECISION_CHAIN_RANKS):
+        # Stream names and sequence numbers point the other way; the rank decides.
+        assert EventKey(T0, StreamRank[input_name], "zzz", 99) < EventKey(T0, StreamRank[derived_name], "a", 0)
     for rank in StreamRank:
-        if rank is not StreamRank.CLOCK:
-            assert rank > StreamRank.CLOCK  # the clock comes first
-    assert StreamRank.TICK < StreamRank.ORDER_EVENT  # market data before execution facts
+        if rank is not StreamRank.RUN_MANIFEST:
+            assert rank > StreamRank.RUN_MANIFEST  # the run manifest is the first record of a run
+        if rank is not StreamRank.OTHER:
+            assert rank < StreamRank.OTHER
+    assert StreamRank.CLOCK < StreamRank.TICK  # a timer due at t fires before an input available at t
+    assert StreamRank.TICK < StreamRank.ORDER_REPORT  # market data before the broker's reports ...
+    assert StreamRank.ORDER_REPORT < StreamRank.POSITION  # ... and the position state they imply
+
+
+@pytest.mark.requirement("S00-ASG-25")
+def test_a_decision_chain_that_shares_one_instant_sorts_in_causal_order() -> None:
+    # The normal case in replay: evidence, candidate, plan, approval and order request all carry the
+    # same instant.  The fallback order must still be causal - each record after the one it was
+    # derived from - although stream names and sequence numbers are chosen to point the other way.
+    count = len(DECISION_CHAIN_RANKS)
+    chain = [
+        (EventKey(T0, StreamRank[name], f"stream-{count - position}", count - position), name)
+        for position, name in enumerate(DECISION_CHAIN_RANKS)
+    ]
+    assert [name for _, name in sorted(chain, key=lambda pair: _as_tuple(pair[0]))] == DECISION_CHAIN_RANKS
+    for arguments in itertools.permutations([[pair] for pair in chain]):
+        assert [name for _, name in _merge(*arguments)] == DECISION_CHAIN_RANKS
+    # An approval precedes the order it authorises; the broker's report of an order made at an
+    # earlier instant is an input and precedes everything GIE derives at this instant.
+    assert StreamRank.RISK_DECISION < StreamRank.ORDER_REQUEST
+    assert StreamRank.ORDER_REPORT < StreamRank.EVIDENCE
+    assert StreamRank.ORDER_REPORT != StreamRank.ORDER_REQUEST
 
 
 # =========================================================================== merge_ordered
@@ -288,8 +356,8 @@ def test_merge_interleaves_streams_in_event_key_order() -> None:
         (EventKey(T0 + 9, StreamRank.TICK, "tick/fixture/XAUUSD", 2), "tick-2"),
     ]
     orders = [
-        (EventKey(T0 + 2, StreamRank.ORDER_EVENT, "order_event/execution.sim", 0), "submit"),
-        (EventKey(T0 + 4, StreamRank.ORDER_EVENT, "order_event/execution.sim", 1), "fill"),
+        (EventKey(T0 + 2, StreamRank.ORDER_REPORT, "order_event/execution.sim", 0), "submit"),
+        (EventKey(T0 + 4, StreamRank.ORDER_REPORT, "order_event/execution.sim", 1), "fill"),
     ]
     decisions = [
         (EventKey(T0 + 4, StreamRank.RISK_DECISION, "risk_decision/risk.gate", 0), "decision"),
@@ -340,7 +408,7 @@ def test_merge_of_many_streams_matches_a_plain_sort() -> None:
     streams: list[list[Pair]] = []
     for number in range(40):
         name = f"stream-{(number * 7) % 40:02d}"
-        rank = (StreamRank.TICK, StreamRank.ORDER_EVENT, StreamRank.EVIDENCE)[number % 3]
+        rank = (StreamRank.TICK, StreamRank.ORDER_REPORT, StreamRank.EVIDENCE)[number % 3]
         streams.append(
             [
                 (EventKey(T0 + (seq * (number % 5 + 1)) // 3, rank, name, seq), (number, seq))
@@ -501,7 +569,8 @@ def test_seq_outcome_vocabulary() -> None:
 def test_the_first_event_of_a_stream_is_accepted_when_no_first_seq_is_required(
     seq: int, allow_gaps: bool
 ) -> None:
-    tracker = SequenceTracker(allow_gaps=allow_gaps)
+    # ``first_seq=None`` is the documented way to join a stream in the middle.
+    tracker = SequenceTracker(allow_gaps=allow_gaps, first_seq=None)
     result = tracker.observe("s", seq, FP_A)
     assert result.outcome is SeqOutcome.ACCEPTED
     assert result.missing == 0
@@ -563,7 +632,7 @@ def test_the_next_sequence_number_is_accepted() -> None:
 @pytest.mark.requirement("S00-ASG-25", "G08-06")
 @pytest.mark.parametrize("missing", [1, 2, 100, 10**9])
 def test_a_gap_is_refused_when_gaps_are_not_allowed(missing: int) -> None:
-    tracker = SequenceTracker()
+    tracker = SequenceTracker(first_seq=3)
     for seq in (3, 4, 5):
         tracker.observe("s", seq, f"fp-{seq}")
     late = 5 + missing + 1
@@ -597,7 +666,7 @@ def test_a_refused_gap_arrival_is_not_remembered_as_content() -> None:
 @pytest.mark.requirement("S00-ASG-25")
 @pytest.mark.parametrize("missing", [1, 2, 100, 10**9])
 def test_a_gap_is_accepted_and_reported_when_gaps_are_allowed(missing: int) -> None:
-    tracker = SequenceTracker(allow_gaps=True)
+    tracker = SequenceTracker(allow_gaps=True, first_seq=3)
     for seq in (3, 4, 5):
         assert tracker.observe("s", seq, f"fp-{seq}").missing == 0
     late = 5 + missing + 1
@@ -664,7 +733,7 @@ def test_a_late_arrival_outside_the_window_is_out_of_order_whatever_its_content(
 
 @pytest.mark.requirement("S00-ASG-25", "G08-06")
 def test_an_arrival_before_the_first_event_of_the_stream_is_out_of_order() -> None:
-    tracker = SequenceTracker()
+    tracker = SequenceTracker(first_seq=None)  # joined in the middle, at 100
     tracker.observe("s", 100, FP_A)
     for seq in (99, 50, 0):
         with pytest.raises(OutOfOrderError):
@@ -803,7 +872,7 @@ def test_no_kind_of_refusal_changes_tracker_state() -> None:
 
 @pytest.mark.requirement("S00-ASG-25")
 def test_streams_do_not_interact() -> None:
-    tracker = SequenceTracker()
+    tracker = SequenceTracker(first_seq=None)
     tracker.observe("tick/fixture/XAUUSD", 0, FP_A)
     tracker.observe("tick/fixture/XAUUSD", 1, FP_B)
     # Another stream starts wherever it starts and may reuse numbers and content.
@@ -830,8 +899,12 @@ def test_two_trackers_are_independent() -> None:
     first.observe("s", 0, FP_A)
     first.observe("s", 1, FP_A)
     assert second.last_seq("s") is None
-    assert second.observe("s", 5, FP_B).outcome is SeqOutcome.ACCEPTED
+    # The second tracker has not seen the stream: for it the stream starts now, with other content.
+    assert second.observe("s", 0, FP_B).outcome is SeqOutcome.ACCEPTED
+    assert second.last_seq("s") == 0
     assert first.last_seq("s") == 1
+    with pytest.raises(SequenceConflictError):
+        first.observe("s", 0, FP_B)
 
 
 @pytest.mark.requirement("S00-ASG-25", "G08-06")
