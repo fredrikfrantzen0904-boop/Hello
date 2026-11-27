@@ -1,23 +1,35 @@
 """Clock contract - the time-source interface and its serialisable reading.
 
-The behavioural contract is :class:`gie.core.clock.Clock` (re-exported here).
-:class:`ClockReading` is the data form used for heartbeats, run manifests and
-the dashboard's data-freshness display.
+The behavioural contract is :class:`gie.core.clock.Clock` together with
+:class:`gie.core.clock.Scheduler` (both re-exported here).
+:class:`ClockReading` is the data form used for heartbeats and for the
+dashboard's data-freshness display.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import ClassVar, final
 
-from gie.contracts._spec import EnumOf, Id, Int, TimeNs, TradingDay, fld, inv
+from gie.contracts._spec import EnumOf, Id, Int, Invariant, TimeNs, TradingDay, fld, inv
 from gie.contracts.common import RunMode, Sequenced
 from gie.contracts.registry import contract
-from gie.core.clock import Clock, ClockMode, ReplayClock, SystemClock
+from gie.core.clock import Clock, ClockMode, PollingScheduler, ReplayClock, Scheduler, SystemClock
 from gie.core.timeutil import MAX_TIME_NS, trading_day
 
-__all__ = ["Clock", "ClockMode", "ClockReading", "ReplayClock", "SystemClock", "read_clock"]
+__all__ = [
+    "Clock",
+    "ClockMode",
+    "ClockReading",
+    "PollingScheduler",
+    "ReplayClock",
+    "Scheduler",
+    "SystemClock",
+    "read_clock",
+]
 
 
+@final
 @contract("Clock", "1.0.0")
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ClockReading(Sequenced):
@@ -37,8 +49,12 @@ class ClockReading(Sequenced):
         unit="ns",
     )
     trading_day: str = fld(TradingDay(), "Europe/Prague calendar date of wall_time_ns.")
+    regressions_observed: int = fld(
+        Int(ge=0, label="count"),
+        "How often the time source was seen to step backwards so far (always 0 in replay).",
+    )
 
-    INVARIANTS = (
+    INVARIANTS: ClassVar[tuple[Invariant, ...]] = (
         inv(
             "CLK-1",
             "trading_day is the Europe/Prague calendar date of wall_time_ns",
@@ -48,6 +64,11 @@ class ClockReading(Sequenced):
             "CLK-2",
             "a REPLAY run uses a REPLAY clock and a PAPER run uses the SYSTEM clock",
             lambda r: (r.mode is RunMode.REPLAY) == (r.clock_mode is ClockMode.REPLAY),
+        ),
+        inv(
+            "CLK-3",
+            "a REPLAY clock never observes a regression",
+            lambda r: r.clock_mode is not ClockMode.REPLAY or r.regressions_observed == 0,
         ),
     )
 
@@ -64,4 +85,5 @@ def read_clock(clock: Clock, *, run_id: str, mode: RunMode, producer: str, seq: 
         wall_time_ns=now_ns,
         monotonic_ns=clock.monotonic_ns(),
         trading_day=trading_day(now_ns),
+        regressions_observed=clock.regressions_observed,
     )

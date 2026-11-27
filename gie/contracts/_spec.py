@@ -42,6 +42,15 @@ from gie.core.timeutil import MAX_TIME_NS, TRADING_DAY_PATTERN, parse_trading_da
 
 _META_KEY: Final[str] = "gie"
 
+#: Published approximation of ``str.isprintable`` for strings without their own pattern.
+PRINTABLE_PATTERN: Final[str] = "^[^\\u0000-\\u001f\\u007f-\\u009f]*$"
+
+#: Modules that may define contract records.  Subsystems may not subclass or redefine them.
+RECORD_MODULE_PREFIXES: Final[tuple[str, ...]] = ("gie.contracts.", "tests.")
+
+#: Contract version at which a field exists when ``fld(..., since=...)`` is not given.
+FIRST_VERSION: Final[tuple[int, int]] = (1, 0)
+
 
 def _fail(path: str, rule: str, **details: Any) -> ContractValidationError:
     return ContractValidationError(f"{path}: {rule}", path=path, rule=rule, **details)
@@ -54,6 +63,9 @@ class DecodeContext:
     #: True only when the message declares a newer MINOR version than the reader
     #: supports; unknown fields are then ignored instead of rejected.
     ignore_unknown_fields: bool = False
+    #: ``(major, minor)`` the message declares.  A field introduced at or before that
+    #: version must be present in the message (optional fields as explicit ``null``).
+    message_version: tuple[int, int] | None = None
 
 
 # =========================================================================== field types
@@ -125,8 +137,8 @@ class Str(FieldType):
 
     def schema(self, defs: dict[str, Any]) -> dict[str, Any]:
         out: dict[str, Any] = {"type": "string", "minLength": self.min_len, "maxLength": self.max_len}
-        if self.pattern:
-            out["pattern"] = self.pattern
+        # Free text is printable text; the published pattern excludes control characters.
+        out["pattern"] = self.pattern if self.pattern else PRINTABLE_PATTERN
         if self.choices is not None:
             out["enum"] = list(self.choices)
         return out
@@ -289,6 +301,8 @@ class Float(FieldType):
             number = float(value)
         except OverflowError as exc:
             raise _fail(path, "must be a finite number") from exc
+        if isinstance(value, int) and number != value:
+            raise _fail(path, "integer is not exactly representable as a double", value=str(value)[:32])
         if math.isnan(number) or math.isinf(number):
             raise _fail(path, "must be finite (NaN/Infinity are rejected)")
         if self.ge is not None and not number >= self.ge:
@@ -357,33 +371,44 @@ class Bool(FieldType):
 
 
 class EnumOf(FieldType):
+    """Member of a closed vocabulary.
+
+    The genuine members are captured when the field is declared and values are
+    compared with them by identity, so a member injected into the enum later
+    (or a look-alike) is never accepted.
+    """
+
     def __init__(self, enum_type: type[Enum]) -> None:
         self.enum_type = enum_type
-        self._by_value = {member.value: member for member in enum_type}
+        self._members: Final[tuple[Enum, ...]] = tuple(enum_type)
+        self._by_value: Final[dict[Any, Enum]] = {member.value: member for member in self._members}
 
     def check(self, value: Any, path: str) -> Enum:
-        if not isinstance(value, self.enum_type):
-            raise _fail(
-                path,
-                f"must be a {self.enum_type.__name__} member",
-                actual_type=type(value).__name__,
-            )
-        return value
+        for member in self._members:
+            if value is member:
+                genuine: Enum = member
+                return genuine
+        raise _fail(
+            path,
+            f"must be a {self.enum_type.__name__} member",
+            actual_type=type(value).__name__,
+        )
 
     def encode(self, value: Enum) -> Any:
         return value.value
 
     def decode(self, raw: Any, path: str, ctx: DecodeContext) -> Enum:
-        if not isinstance(raw, str) or raw not in self._by_value:
+        if type(raw) is not str or raw not in self._by_value:
             raise _fail(
                 path,
                 f"unknown {self.enum_type.__name__} value (unknown values are rejected, fail closed)",
                 value=repr(raw)[:64],
             )
-        return self._by_value[raw]
+        member: Enum = self._by_value[raw]
+        return member
 
     def schema(self, defs: dict[str, Any]) -> dict[str, Any]:
-        return {"type": "string", "enum": [member.value for member in self.enum_type]}
+        return {"type": "string", "enum": [member.value for member in self._members]}
 
     def describe(self) -> str:
         return "enum " + self.enum_type.__name__
@@ -476,6 +501,8 @@ class ListOf(FieldType):
         }
         if self.unique_key is not None:
             out["x-gie-unique"] = True
+            if not isinstance(self.inner, Obj):
+                out["uniqueItems"] = True
         if self.canonical_sort is not None:
             out["x-gie-canonical-order"] = self.sorted_label or "sorted"
         return out
@@ -498,7 +525,8 @@ class Obj(FieldType):
         self.record_type = record_type
 
     def check(self, value: Any, path: str) -> Record:
-        if not isinstance(value, self.record_type):
+        # Exact type: a subclass could skip validation and must not pass as the contract.
+        if type(value) is not self.record_type:
             raise _fail(
                 path,
                 f"must be a {self.record_type.__name__}",
@@ -534,6 +562,8 @@ class FieldSpec:
     doc: str
     unit: str | None
     required: bool
+    #: ``(major, minor)`` of the contract version that introduced the field.
+    since: tuple[int, int] = FIRST_VERSION
 
 
 @dataclass(frozen=True, slots=True)
@@ -549,11 +579,21 @@ def inv(invariant_id: str, text: str, check: Callable[[Any], bool]) -> Invariant
     return Invariant(invariant_id, text, check)
 
 
-def fld(ftype: FieldType, doc: str, *, unit: str | None = None) -> Any:
-    """Declare a contract field.  Optional (``Opt``) fields default to ``None``."""
+def fld(
+    ftype: FieldType, doc: str, *, unit: str | None = None, since: tuple[int, int] = FIRST_VERSION
+) -> Any:
+    """Declare a contract field.
+
+    Optional (``Opt``) fields default to ``None`` in memory but are always written
+    on the wire.  ``since`` is the contract version that introduced the field: a
+    message of that version or newer must contain the key, an older message may
+    omit it (only possible for optional fields added by a MINOR version).
+    """
     if not doc.strip():
         raise ValueError("every contract field needs documentation")
-    metadata = {_META_KEY: (ftype, doc, unit)}
+    if since != FIRST_VERSION and not ftype.optional:
+        raise ValueError("a field added after 1.0 must be optional (MINOR versions only add optional fields)")
+    metadata = {_META_KEY: (ftype, doc, unit, since)}
     if ftype.optional:
         return dataclasses.field(default=None, metadata=metadata)
     return dataclasses.field(metadata=metadata)
@@ -572,6 +612,14 @@ class Record:
     #: Filled by :func:`record` / :func:`contract`.
     FIELD_SPECS: ClassVar[tuple[FieldSpec, ...]] = ()
     ALL_INVARIANTS: ClassVar[tuple[Invariant, ...]] = ()
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
+        if not str(cls.__module__).startswith(RECORD_MODULE_PREFIXES):
+            raise TypeError(
+                f"{cls.__qualname__}: contract records may only be defined in gie.contracts "
+                "(shared contracts are not redefined or extended by subsystems)"
+            )
 
     def __post_init__(self) -> None:
         cls = type(self)
@@ -614,8 +662,8 @@ def record(cls: R) -> R:
         meta = item.metadata.get(_META_KEY)
         if meta is None:
             raise TypeError(f"{cls.__name__}.{item.name} is not declared with fld()")
-        ftype, doc, unit = meta
-        specs.append(FieldSpec(item.name, ftype, doc, unit, required=not ftype.optional))
+        ftype, doc, unit, since = meta
+        specs.append(FieldSpec(item.name, ftype, doc, unit, required=not ftype.optional, since=since))
     cls.FIELD_SPECS = tuple(specs)
     invariants: list[Invariant] = []
     seen: set[str] = set()
@@ -660,14 +708,19 @@ def decode_fields(
             kwargs[spec.name] = spec.ftype.decode(raw[spec.name], prefix + spec.name, ctx)
         elif spec.required:
             raise _fail(prefix + spec.name, "required field is missing")
+        elif ctx.message_version is None or ctx.message_version >= spec.since:
+            # Writers always write optional fields as explicit null.  A key missing from a
+            # message whose version already has the field is corruption, not "null".
+            raise _fail(prefix + spec.name, "field is missing (optional fields are written as explicit null)")
     try:
         return record_type(**kwargs)
     except ContractValidationError as exc:
-        if path:
-            details = dict(exc.details)
-            details["parent_path"] = path
-            raise ContractValidationError(exc.message, **details) from exc
-        raise
+        if not path:
+            raise
+        details = dict(exc.details)
+        inner = details.get("path")
+        details["path"] = f"{path}.{inner}" if isinstance(inner, str) else path
+        raise ContractValidationError(f"{path}: {exc.message}", **details) from exc
 
 
 def object_schema(record_type: type[Record], defs: dict[str, Any]) -> dict[str, Any]:
@@ -688,6 +741,9 @@ def object_schema(record_type: type[Record], defs: dict[str, Any]) -> dict[str, 
         "required": required,
         "additionalProperties": False,
     }
+    since = {spec.name: f"{spec.since[0]}.{spec.since[1]}" for spec in record_type.FIELD_SPECS}
+    if any(value != "1.0" for value in since.values()):
+        out["x-gie-since"] = since
     if record_type.ALL_INVARIANTS:
         out["x-gie-invariants"] = [{"id": rule.id, "rule": rule.text} for rule in record_type.ALL_INVARIANTS]
     return out

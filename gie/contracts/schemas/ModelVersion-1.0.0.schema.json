@@ -1,4 +1,5 @@
 {
+  "$comment": "Necessary but not sufficient: decimal bounds (x-gie-*), canonical order, cross-field invariants (x-gie-invariants), lifecycle rules (x-gie-behaviour), exact 64-bit integer tokens and printable-text rules are enforced by the reference implementation gie.contracts.",
   "$defs": {
     "ContractRef": {
       "additionalProperties": false,
@@ -15,7 +16,7 @@
           "description": "Contract version.",
           "maxLength": 32,
           "minLength": 1,
-          "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+          "pattern": "^(0|[1-9][0-9]{0,8})\\.(0|[1-9][0-9]{0,8})\\.(0|[1-9][0-9]{0,8})$",
           "type": "string"
         }
       },
@@ -27,7 +28,7 @@
     },
     "NamedValue": {
       "additionalProperties": false,
-      "description": "A named finite number (feature value or metric).",
+      "description": "A named number (feature value or metric).  ``null`` means unknown, never 0.",
       "properties": {
         "name": {
           "description": "Name from the owning dictionary.",
@@ -37,13 +38,19 @@
           "type": "string"
         },
         "value": {
-          "description": "Finite numeric value.",
-          "type": "number"
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Finite numeric value; null when the value is unknown."
         }
       },
       "required": [
-        "name",
-        "value"
+        "name"
       ],
       "type": "object"
     }
@@ -71,7 +78,8 @@
       "anyOf": [
         {
           "maxLength": 64,
-          "minLength": 1,
+          "minLength": 2,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9 ._@-]{0,62}[A-Za-z0-9.]$",
           "type": "string"
         },
         {
@@ -101,6 +109,21 @@
       "pattern": "^[0-9a-f]{40}$",
       "type": "string"
     },
+    "component_model_version_ids": {
+      "description": "Component versions of a COMPOSITE model; empty otherwise.",
+      "items": {
+        "maxLength": 36,
+        "minLength": 36,
+        "pattern": "^mdl_[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "maxItems": 32,
+      "minItems": 0,
+      "type": "array",
+      "uniqueItems": true,
+      "x-gie-canonical-order": "sorted ascending",
+      "x-gie-unique": true
+    },
     "contract": {
       "const": "ModelVersion",
       "description": "Contract name."
@@ -117,11 +140,67 @@
       "x-gie-unique": true
     },
     "created_time_ns": {
-      "description": "When the artifact was frozen.",
+      "description": "When the artifact was frozen (system clock).",
       "maximum": 9223372036854775807,
       "minimum": 0,
       "type": "integer",
       "x-gie-unit": "ns since epoch, UTC"
+    },
+    "derived_from_model_version_id": {
+      "anyOf": [
+        {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^mdl_[0-9a-f]{32}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Lineage: the version this one was derived from, if any."
+    },
+    "embargo_ns": {
+      "anyOf": [
+        {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Embargo applied after training_information_end_ns.",
+      "x-gie-unit": "ns"
+    },
+    "evaluation_report_sha256": {
+      "anyOf": [
+        {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "SHA-256 of that report; mandatory for ACTIVE."
+    },
+    "evaluation_report_uri": {
+      "anyOf": [
+        {
+          "maxLength": 200,
+          "minLength": 1,
+          "pattern": "^(?!/)(?!.*\\.\\.)(?!.*//)[A-Za-z0-9._/-]{1,200}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Model card / shadow report this status rests on; mandatory for ACTIVE."
     },
     "feature_schema_sha256": {
       "anyOf": [
@@ -150,7 +229,7 @@
       "type": "string"
     },
     "metrics": {
-      "description": "Headline validation metrics (full results live in the model card).",
+      "description": "Headline validation metrics (the full results are in the evaluation report).",
       "items": {
         "$ref": "#/$defs/NamedValue"
       },
@@ -174,7 +253,28 @@
       "pattern": "^mdl_[0-9a-f]{32}$",
       "type": "string"
     },
-    "parent_model_version_id": {
+    "producer": {
+      "description": "Component instance that emitted the record; together with the contract name it names the stream.",
+      "maxLength": 96,
+      "minLength": 1,
+      "pattern": "^[a-z][a-z0-9_]*(\\.[a-z0-9_]+){0,4}$",
+      "type": "string"
+    },
+    "promotion_criteria_sha256": {
+      "anyOf": [
+        {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Hash of the promotion criteria the report was judged against; mandatory for ACTIVE."
+    },
+    "replaces_model_version_id": {
       "anyOf": [
         {
           "maxLength": 36,
@@ -186,14 +286,7 @@
           "type": "null"
         }
       ],
-      "description": "Version this one was derived from, and the rollback target."
-    },
-    "producer": {
-      "description": "Component instance that emitted the record; together with the contract name it names the stream.",
-      "maxLength": 96,
-      "minLength": 1,
-      "pattern": "^[a-z][a-z0-9_]*(\\.[a-z0-9_]+){0,4}$",
-      "type": "string"
+      "description": "On an ACTIVE entry: the version that was ACTIVE before it (null if none was)."
     },
     "revision": {
       "description": "Status revision of this model version: 0, 1, 2, ...",
@@ -201,9 +294,23 @@
       "minimum": 0,
       "type": "integer"
     },
+    "rollback_of_model_version_id": {
+      "anyOf": [
+        {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^mdl_[0-9a-f]{32}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "On a re-activation by rollback: the version that was rolled back; null on a first activation."
+    },
     "schema_version": {
       "description": "Version of the contract the message was written with.",
-      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+      "pattern": "^(0|[1-9][0-9]{0,8})\\.(0|[1-9][0-9]{0,8})\\.(0|[1-9][0-9]{0,8})$",
       "type": "string"
     },
     "seed": {
@@ -223,7 +330,7 @@
       "description": "Version of the model.",
       "maxLength": 32,
       "minLength": 1,
-      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+      "pattern": "^(0|[1-9][0-9]{0,8})\\.(0|[1-9][0-9]{0,8})\\.(0|[1-9][0-9]{0,8})$",
       "type": "string"
     },
     "seq": {
@@ -231,6 +338,35 @@
       "maximum": 9223372036854775807,
       "minimum": 0,
       "type": "integer"
+    },
+    "shadow_run_ids": {
+      "description": "Runs in which the version was shadow-validated; at least one for ACTIVE.",
+      "items": {
+        "maxLength": 36,
+        "minLength": 36,
+        "pattern": "^run_[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "maxItems": 64,
+      "minItems": 0,
+      "type": "array",
+      "uniqueItems": true,
+      "x-gie-canonical-order": "sorted ascending",
+      "x-gie-unique": true
+    },
+    "split_spec_sha256": {
+      "anyOf": [
+        {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Hash of the purged walk-forward split specification the model was validated with."
     },
     "status": {
       "description": "Promotion status.",
@@ -244,26 +380,71 @@
       ],
       "type": "string"
     },
+    "status_reasons": {
+      "description": "Why the status was set; mandatory for REJECTED, ROLLED_BACK and RETIRED.",
+      "items": {
+        "maxLength": 48,
+        "minLength": 1,
+        "pattern": "^[A-Z][A-Z0-9_]{1,47}$",
+        "type": "string"
+      },
+      "maxItems": 32,
+      "minItems": 0,
+      "type": "array",
+      "uniqueItems": true,
+      "x-gie-canonical-order": "sorted ascending",
+      "x-gie-unique": true
+    },
     "status_time_ns": {
-      "description": "When this status was recorded.",
+      "description": "When this status was recorded (system clock).",
       "maximum": 9223372036854775807,
       "minimum": 0,
       "type": "integer",
       "x-gie-unit": "ns since epoch, UTC"
     },
-    "training_data_end_ns": {
+    "training_config_sha256": {
       "anyOf": [
         {
-          "maximum": 9223372036854775807,
-          "minimum": 0,
-          "type": "integer"
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
         },
         {
           "type": "null"
         }
       ],
-      "description": "Latest event time used for fitting; predictions for earlier instants are in-sample.",
-      "x-gie-unit": "ns since epoch, UTC"
+      "description": "Hash of the complete training configuration (hyper-parameters, seeds, environment)."
+    },
+    "training_data_origin": {
+      "anyOf": [
+        {
+          "enum": [
+            "BROKER_FEED",
+            "HISTORICAL",
+            "SYNTHETIC_FIXTURE"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Least trustworthy origin of the data used to produce the artifact; null only when no data was used.  A model fitted on SYNTHETIC_FIXTURE data is never validated."
+    },
+    "training_data_sha256": {
+      "anyOf": [
+        {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Hash of the manifest of the data set used; null only when no data was used."
     },
     "training_data_start_ns": {
       "anyOf": [
@@ -276,7 +457,21 @@
           "type": "null"
         }
       ],
-      "description": "Earliest event time used for fitting; null for rule sets.",
+      "description": "Earliest event time used; null when no data was used.",
+      "x-gie-unit": "ns since epoch, UTC"
+    },
+    "training_information_end_ns": {
+      "anyOf": [
+        {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Latest availability instant of ANY information used to produce the artifact: features, labels (including the end of their outcome windows), transforms, feature and hyper-parameter selection.  A prediction is out of sample only after this instant plus the embargo.",
       "x-gie-unit": "ns since epoch, UTC"
     }
   },
@@ -291,16 +486,95 @@
     "semver",
     "kind",
     "status",
+    "status_reasons",
     "status_time_ns",
     "created_time_ns",
     "artifact_sha256",
     "artifact_uri",
     "code_commit",
     "contract_versions",
-    "metrics"
+    "component_model_version_ids",
+    "metrics",
+    "shadow_run_ids"
   ],
   "title": "ModelVersion 1.0.0",
   "type": "object",
+  "x-gie-behaviour": {
+    "identity": {
+      "model_version_id": "model_version_id(model_name, semver, artifact_sha256)"
+    },
+    "immutable_fields": [
+      "model_version_id",
+      "model_name",
+      "semver",
+      "kind",
+      "created_time_ns",
+      "artifact_sha256",
+      "artifact_uri",
+      "code_commit",
+      "training_data_origin",
+      "training_data_sha256",
+      "training_config_sha256",
+      "training_data_start_ns",
+      "training_information_end_ns",
+      "embargo_ns",
+      "split_spec_sha256",
+      "feature_schema_sha256",
+      "contract_versions",
+      "derived_from_model_version_id",
+      "component_model_version_ids",
+      "seed"
+    ],
+    "ordering_time": "status_time_ns",
+    "rank": {
+      "name": "MODEL_VERSION",
+      "value": 90
+    },
+    "stream": "model_version/<producer>",
+    "transitions": [
+      {
+        "from": null,
+        "to": [
+          "RESEARCH"
+        ]
+      },
+      {
+        "from": "ACTIVE",
+        "to": [
+          "RETIRED",
+          "ROLLED_BACK"
+        ]
+      },
+      {
+        "from": "REJECTED",
+        "to": []
+      },
+      {
+        "from": "RESEARCH",
+        "to": [
+          "REJECTED",
+          "SHADOW"
+        ]
+      },
+      {
+        "from": "RETIRED",
+        "to": [
+          "ACTIVE"
+        ]
+      },
+      {
+        "from": "ROLLED_BACK",
+        "to": []
+      },
+      {
+        "from": "SHADOW",
+        "to": [
+          "ACTIVE",
+          "REJECTED"
+        ]
+      }
+    ]
+  },
   "x-gie-invariants": [
     {
       "id": "MDL-1",
@@ -312,7 +586,7 @@
     },
     {
       "id": "MDL-3",
-      "rule": "training_data_start_ns and training_data_end_ns are both null or both set with start <= end <= created_time_ns"
+      "rule": "training_data_start_ns, training_information_end_ns, training_data_origin and training_data_sha256 are all set (with start <= information end <= created_time_ns) or all null; embargo_ns needs them"
     },
     {
       "id": "MDL-4",
@@ -320,11 +594,23 @@
     },
     {
       "id": "MDL-5",
-      "rule": "revision 0 has status RESEARCH"
+      "rule": "the revision is consistent with the path to the status: RESEARCH is revision 0, SHADOW and REJECTED need revision >= 1, ACTIVE >= 2, RETIRED and ROLLED_BACK >= 3"
     },
     {
       "id": "MDL-6",
-      "rule": "status ROLLED_BACK requires parent_model_version_id (the version rolled back to)"
+      "rule": "status_reasons is non-empty for REJECTED, ROLLED_BACK and RETIRED"
+    },
+    {
+      "id": "MDL-7",
+      "rule": "ACTIVE cites its evidence: evaluation report with hash, promotion criteria hash and at least one shadow run"
+    },
+    {
+      "id": "MDL-8",
+      "rule": "replaces_model_version_id and rollback_of_model_version_id appear only on ACTIVE entries and never name the version itself"
+    },
+    {
+      "id": "MDL-9",
+      "rule": "component_model_version_ids is non-empty if and only if kind is COMPOSITE, and never contains the version itself"
     }
   ]
 }

@@ -36,6 +36,7 @@ IdPart = str | int | Decimal | None | Sequence["IdPart"]
 ID_PREFIXES: Final[dict[str, str]] = {
     "run": "one replay or paper run",
     "mev": "market event (shared identity used for evidence de-duplication)",
+    "opp": "opportunity (stable identity of a setup in one direction and horizon)",
     "evd": "evidence record",
     "cnd": "candidate",
     "grp": "group of alternative trade plans",

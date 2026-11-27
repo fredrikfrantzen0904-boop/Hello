@@ -6,7 +6,10 @@ change      required version bump
 PATCH       documentation only (``description`` text)
 MINOR       new *optional* field; new enum value
 MAJOR       anything else: removed or renamed field, new required field,
-            changed type, bound, pattern, unit, optionality or invariant
+            changed type, bound, pattern, unit, optionality, invariant or
+            behaviour (x-gie-behaviour: transitions, identity rules, immutable
+            fields, stream, rank); any change of the run-mode or venue
+            vocabulary (the routing lock)
 ==========  ==================================================================
 
 A new enum value is MINOR although older readers refuse it (unknown enum values
@@ -81,7 +84,11 @@ def _diff(old: Any, new: Any, path: str, reasons: list[str]) -> Change:
                 continue
             if key == "enum":
                 old_values, new_values = list(old[key]), list(new[key])
-                if set(old_values) == set(new_values):
+                if path.endswith(("/properties/mode", "/properties/venue")) and old_values != new_values:
+                    # The run-mode and venue vocabularies are the routing lock: never additive.
+                    reasons.append(f"{here}: routing-lock vocabulary changed {old_values} -> {new_values}")
+                    level = max(level, Change.MAJOR)
+                elif set(old_values) == set(new_values):
                     level = max(level, Change.PATCH)
                 elif set(old_values) < set(new_values):
                     reasons.append(f"{here}: enum values added {sorted(set(new_values) - set(old_values))}")

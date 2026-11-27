@@ -152,6 +152,12 @@ class IllegalTransitionError(GieError):
     code = "GIE.STATE.ILLEGAL_TRANSITION"
 
 
+class JournalCorruptError(GieError):
+    """A journal is damaged, incomplete or does not reproduce its own history."""
+
+    code = "GIE.JOURNAL.CORRUPT"
+
+
 class LiveRoutingLockedError(GieError):
     """Real order routing was requested.  It is locked for the whole project phase."""
 
@@ -180,6 +186,7 @@ ALL_ERROR_TYPES: Final[tuple[type[GieError], ...]] = (
     SequenceConflictError,
     SequenceGapError,
     IllegalTransitionError,
+    JournalCorruptError,
     LiveRoutingLockedError,
     ConfigError,
 )

@@ -63,6 +63,15 @@ class Clock(Protocol):
         """Nanoseconds on a monotonic scale with an arbitrary origin.  Never decreases."""
         ...
 
+    @property
+    def regressions_observed(self) -> int:
+        """How often the underlying time source was seen to step backwards (0 for replay).
+
+        A step is a health event: freshness and expiry stay correct (time keeps
+        moving), but the wall-clock reading is suspect until it is re-synchronised.
+        """
+        ...
+
 
 TimerCallback = Callable[[int], None]
 
@@ -77,7 +86,17 @@ class Scheduler(Protocol):
     """
 
     def call_at(self, due_ns: int, callback: TimerCallback) -> int:
-        """Schedule ``callback(due_ns)``; returns a handle usable with :meth:`cancel`."""
+        """Schedule ``callback(due_ns)`` at an absolute instant; returns a handle.
+
+        In replay a due time in the past is an error (an effect without a cause).
+        In paper it fires at the next poll, because real time may have moved on
+        between reading the clock and scheduling.  Code that must behave the same
+        in both uses :meth:`call_after`.
+        """
+        ...
+
+    def call_after(self, delay_ns: int, callback: TimerCallback) -> int:
+        """Schedule ``callback(due_ns)`` *delay_ns* (>= 0) after now; returns a handle."""
         ...
 
     def cancel(self, handle: int) -> None:
@@ -90,6 +109,13 @@ def _require_instant(value: int, what: str) -> None:
         raise ContractValidationError(f"{what} must be an int of nanoseconds", value=repr(value)[:64])
     if not 0 <= value <= MAX_TIME_NS:
         raise ContractValidationError(f"{what} outside the supported range", value=value)
+
+
+def _require_delay(delay_ns: int) -> None:
+    if isinstance(delay_ns, bool) or not isinstance(delay_ns, int):
+        raise ContractValidationError("delay_ns must be an int of nanoseconds", value=repr(delay_ns)[:64])
+    if delay_ns < 0:
+        raise ClockRegressionError("a timer cannot be scheduled with a negative delay", delay_ns=delay_ns)
 
 
 class _TimerQueue:
@@ -175,6 +201,10 @@ class ReplayClock:
     def monotonic_ns(self) -> int:
         return self._now_ns - self._start_ns
 
+    @property
+    def regressions_observed(self) -> int:
+        return 0
+
     def call_at(self, due_ns: int, callback: TimerCallback) -> int:
         """Schedule ``callback(due_ns)``; returns a handle usable with :meth:`cancel`.
 
@@ -184,6 +214,11 @@ class ReplayClock:
         if due_ns < self._now_ns:
             raise ClockRegressionError("timer scheduled in the past", due_ns=due_ns, now_ns=self._now_ns)
         return self._timers.add(due_ns, callback)
+
+    def call_after(self, delay_ns: int, callback: TimerCallback) -> int:
+        """Schedule ``callback`` *delay_ns* after the current virtual instant."""
+        _require_delay(delay_ns)
+        return self.call_at(self._now_ns + delay_ns, callback)
 
     def cancel(self, handle: int) -> None:
         """Cancel a pending timer.
@@ -236,10 +271,12 @@ class ReplayClock:
 class SystemClock:
     """UTC wall clock for paper mode.
 
-    ``now_ns`` is clamped so that it never decreases: if the operating system
-    steps the wall clock backwards the previous value is returned until real
-    time catches up, and ``regressions_observed`` counts how often that
-    happened so that health monitoring can fail closed on an unstable clock.
+    ``now_ns`` never decreases and never stands still: if the operating system
+    steps the wall clock backwards, time continues from the last reading at the
+    pace of the monotonic source until the wall clock has caught up.  Freshness
+    and expiry therefore keep failing closed during a clock step instead of
+    freezing.  Each backward step is counted once in ``regressions_observed`` so
+    that health monitoring can stop creating risk on an unstable clock.
 
     Resolution is that of the operating system.  On Windows with Python older
     than 3.13 ``time.time_ns`` advances in steps of about 15.6 ms; paper runs
@@ -255,45 +292,70 @@ class SystemClock:
         self._wall_source = wall_source
         self._monotonic_source = monotonic_source
         self._lock = threading.Lock()
-        self._last_wall_ns: int = 0
+        self._last_now_ns: int = 0
         self._last_monotonic_ns: int = 0
-        self.regressions_observed: int = 0
+        self._monotonic_at_last_now: int | None = None
+        self._behind: bool = False
+        self._regressions: int = 0
 
     @property
     def mode(self) -> ClockMode:
         return ClockMode.SYSTEM
 
+    @property
+    def regressions_observed(self) -> int:
+        with self._lock:
+            return self._regressions
+
+    def _read_monotonic(self) -> int:
+        reading = self._monotonic_source()
+        if reading < self._last_monotonic_ns:
+            return self._last_monotonic_ns
+        self._last_monotonic_ns = reading
+        return reading
+
     def now_ns(self) -> int:
         with self._lock:
-            reading = self._wall_source()
-            if reading < self._last_wall_ns:
-                self.regressions_observed += 1
-                return self._last_wall_ns
-            self._last_wall_ns = reading
-            return reading
+            wall = self._wall_source()
+            monotonic = self._read_monotonic()
+            if wall >= self._last_now_ns:
+                self._behind = False
+                result = wall
+            else:
+                if not self._behind:
+                    self._behind = True
+                    self._regressions += 1
+                elapsed = (
+                    0 if self._monotonic_at_last_now is None else monotonic - self._monotonic_at_last_now
+                )
+                result = min(self._last_now_ns + max(elapsed, 0), MAX_TIME_NS)
+            self._last_now_ns = result
+            self._monotonic_at_last_now = monotonic
+            return result
 
     def monotonic_ns(self) -> int:
         with self._lock:
-            reading = self._monotonic_source()
-            if reading < self._last_monotonic_ns:
-                return self._last_monotonic_ns
-            self._last_monotonic_ns = reading
-            return reading
+            return self._read_monotonic()
 
 
 class PollingScheduler:
     """Scheduler of a paper run: timers fire when the event loop polls.
 
-    The loop that delivers inputs calls :meth:`run_due` before it delivers each
-    input (and at least once per idle period).  Timers therefore run on the loop
-    thread, in ``(due time, registration order)``, and never early; a timer can
-    fire late by at most the poll interval.  The callback receives its *due*
+    The loop that delivers inputs calls ``run_due(limit_ns=<receive time of the
+    next input>)`` before it delivers that input, and plain ``run_due()`` when it
+    is idle.  Timers therefore run on the loop thread, in ``(due time,
+    registration order)``, never early, and a timer due at instant *t* fires
+    before an input that became available at *t* - exactly as in replay.  A timer
+    can fire late by at most the poll interval.  The callback receives its *due*
     time; code that needs the actual time reads the clock.
 
-    The rules are the same as for :class:`ReplayClock`: scheduling in the past
-    is an error, a callback may schedule further timers (those already due fire
-    in the same poll) and may not start a nested poll.  The class is not
-    thread-safe by design: all calls come from the loop thread.
+    Differences from :class:`ReplayClock`, both unavoidable in real time: a due
+    time that is already in the past is not an error (it fires at the next
+    poll), and the clock keeps moving while callbacks run.  Use
+    :meth:`call_after` for code that must behave identically in both modes.
+    A callback may schedule further timers (those already due fire in the same
+    poll) and may not start a nested poll.  The class is not thread-safe by
+    design: all calls come from the loop thread.
     """
 
     def __init__(self, clock: Clock) -> None:
@@ -303,10 +365,11 @@ class PollingScheduler:
 
     def call_at(self, due_ns: int, callback: TimerCallback) -> int:
         _require_instant(due_ns, "due_ns")
-        now_ns = self._clock.now_ns()
-        if due_ns < now_ns:
-            raise ClockRegressionError("timer scheduled in the past", due_ns=due_ns, now_ns=now_ns)
         return self._timers.add(due_ns, callback)
+
+    def call_after(self, delay_ns: int, callback: TimerCallback) -> int:
+        _require_delay(delay_ns)
+        return self._timers.add(min(self._clock.now_ns() + delay_ns, MAX_TIME_NS), callback)
 
     def cancel(self, handle: int) -> None:
         self._timers.cancel(handle)
@@ -317,15 +380,22 @@ class PollingScheduler:
     def pending_timers(self) -> int:
         return self._timers.pending()
 
-    def run_due(self) -> int:
-        """Fire every timer that is due now; returns how many fired."""
+    def run_due(self, limit_ns: int | None = None) -> int:
+        """Fire every timer due at or before *limit_ns* (default: now); returns how many fired.
+
+        *limit_ns* is never allowed to exceed the current time: a timer does not
+        fire before its instant has been reached.
+        """
         if self._firing:
             raise ClockRegressionError("a timer callback may not start a nested poll")
+        if limit_ns is not None:
+            _require_instant(limit_ns, "limit_ns")
         fired = 0
         self._firing = True
         try:
             while True:
-                due = self._timers.pop_due(self._clock.now_ns())
+                now_ns = self._clock.now_ns()
+                due = self._timers.pop_due(now_ns if limit_ns is None else min(limit_ns, now_ns))
                 if due is None:
                     break
                 due_ns, callback = due

@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum
-from typing import Final
+from typing import ClassVar, Final, final
 
 from gie.contracts import identity
 from gie.contracts._spec import (
+    DurationNs,
     EnumOf,
     Id,
     Int,
+    Invariant,
     ListOf,
     Obj,
     Opt,
@@ -21,15 +24,24 @@ from gie.contracts._spec import (
     inv,
     record,
 )
-from gie.contracts.common import CODE_PATTERN, NamedValue, Sequenced
+from gie.contracts.common import (
+    CODE_PATTERN,
+    SHA256_PATTERN,
+    DataOrigin,
+    NamedValue,
+    Sequenced,
+    reason_codes_field,
+)
 from gie.contracts.registry import SEMVER_PATTERN, contract
 from gie.core.errors import IllegalTransitionError
 
-SHA256_PATTERN: Final[str] = r"^[0-9a-f]{64}$"
 GIT_COMMIT_PATTERN: Final[str] = r"^[0-9a-f]{40}$"
-#: Relative artifact location.  No scheme, no credentials, no parent traversal.
+#: Repository-relative location.  No scheme, no credentials, no parent traversal.
 ARTIFACT_URI_PATTERN: Final[str] = r"^(?!/)(?!.*\.\.)(?!.*//)[A-Za-z0-9._/-]{1,200}$"
 CONTRACT_NAME_PATTERN: Final[str] = r"^[A-Z][A-Za-z0-9]{1,47}$"
+#: Who authorised a status: a name without leading or trailing blanks.
+APPROVER_PATTERN: Final[str] = r"^[A-Za-z0-9][A-Za-z0-9 ._@-]{0,62}[A-Za-z0-9.]$"
+DECISION_REFERENCE_PATTERN: Final[str] = r"^D-[0-9]{3,5}$"
 
 
 class ModelKind(str, Enum):
@@ -42,7 +54,7 @@ class ModelKind(str, Enum):
 
 
 class ModelStatus(str, Enum):
-    """Promotion status (G07).  Only ACTIVE versions count as *validated*."""
+    """Promotion status (G07).  Only ACTIVE versions can count as *validated*."""
 
     RESEARCH = "RESEARCH"
     SHADOW = "SHADOW"
@@ -56,9 +68,10 @@ class ModelStatus(str, Enum):
 #:
 #: * ACTIVE is first reached only from SHADOW: shadow validation is mandatory (G07-09).
 #: * Promotion of a successor moves the previous ACTIVE version to RETIRED.
-#: * Rollback (G07-11) moves the faulty ACTIVE version to ROLLED_BACK and re-activates its
-#:   RETIRED parent; that is the only way a RETIRED version becomes ACTIVE again, and like
-#:   every activation it needs a recorded owner approval (MDL-2).
+#: * Rollback (G07-11) moves the faulty ACTIVE version to ROLLED_BACK and re-activates a
+#:   RETIRED version; that is the only way a RETIRED version becomes ACTIVE again, it must
+#:   name the rolled-back version, and like every activation it needs its own recorded
+#:   owner approval.
 #: * A ROLLED_BACK or REJECTED version can never be activated again.
 MODEL_STATUS_TRANSITIONS: Final[dict[ModelStatus | None, frozenset[ModelStatus]]] = {
     None: frozenset({ModelStatus.RESEARCH}),
@@ -70,7 +83,22 @@ MODEL_STATUS_TRANSITIONS: Final[dict[ModelStatus | None, frozenset[ModelStatus]]
     ModelStatus.REJECTED: frozenset(),
 }
 
-_OWNER_DECISIONS = (ModelStatus.ACTIVE, ModelStatus.ROLLED_BACK)
+_OWNER_DECISIONS: Final[tuple[ModelStatus, ...]] = (ModelStatus.ACTIVE, ModelStatus.ROLLED_BACK)
+_REASONED: Final[tuple[ModelStatus, ...]] = (
+    ModelStatus.REJECTED,
+    ModelStatus.ROLLED_BACK,
+    ModelStatus.RETIRED,
+)
+_MIN_REVISION: Final[dict[ModelStatus, int]] = {
+    ModelStatus.RESEARCH: 0,
+    ModelStatus.SHADOW: 1,
+    ModelStatus.REJECTED: 1,
+    ModelStatus.ACTIVE: 2,
+    ModelStatus.RETIRED: 3,
+    ModelStatus.ROLLED_BACK: 3,
+}
+_SHA = Str(pattern=SHA256_PATTERN, min_len=64, max_len=64, label="sha256")
+_URI = Str(pattern=ARTIFACT_URI_PATTERN, max_len=200, label="relative path")
 
 
 @record
@@ -84,16 +112,49 @@ class ContractRef(Record):
     version: str = fld(Str(pattern=SEMVER_PATTERN, max_len=32, label="semver"), "Contract version.")
 
 
+def _training_fields(model: ModelVersion) -> bool:
+    used = model.training_data_start_ns is not None
+    together = (
+        (model.training_information_end_ns is not None) == used
+        and (model.training_data_origin is not None) == used
+        and (model.training_data_sha256 is not None) == used
+    )
+    if not together:
+        return False
+    if not used:
+        return model.embargo_ns is None
+    assert model.training_data_start_ns is not None
+    assert model.training_information_end_ns is not None
+    return model.training_data_start_ns <= model.training_information_end_ns <= model.created_time_ns
+
+
+def _activation_evidence(model: ModelVersion) -> bool:
+    if model.status is not ModelStatus.ACTIVE:
+        return True
+    return (
+        model.evaluation_report_uri is not None
+        and model.evaluation_report_sha256 is not None
+        and model.promotion_criteria_sha256 is not None
+        and bool(model.shadow_run_ids)
+    )
+
+
+@final
 @contract("ModelVersion", "1.0.0")
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ModelVersion(Sequenced):
     """Registry entry of one model artifact and its promotion status.
 
     Stream: ``model_version/<producer>`` (the model registry).  Ordering time:
-    ``status_time_ns``.  The artifact itself is immutable: a status change is a
-    new record with ``revision + 1`` and the same ``model_version_id``.
-    Promotion to ACTIVE and rollback are owner decisions and must cite the
-    decision-log entry that records the approval.
+    ``status_time_ns``.  Registry times are always readings of the system clock,
+    never of a replay clock; a replay takes the models it uses from its run
+    configuration, not from the registry status of the moment.
+
+    The artifact is immutable: a status change is a new record with
+    ``revision + 1`` and the same ``model_version_id``.  Activation and rollback
+    are owner decisions: the record must cite the decision-log entry and the
+    evidence (evaluation report, shadow runs, promotion criteria) it rests on;
+    the registry refuses a transition whose cited evidence does not exist.
     """
 
     model_version_id: str = fld(Id("mdl"), "identity.model_version_id(model_name, semver, artifact_sha256).")
@@ -102,31 +163,51 @@ class ModelVersion(Sequenced):
     semver: str = fld(Str(pattern=SEMVER_PATTERN, max_len=32, label="semver"), "Version of the model.")
     kind: ModelKind = fld(EnumOf(ModelKind), "What the model is.")
     status: ModelStatus = fld(EnumOf(ModelStatus), "Promotion status.")
-    status_time_ns: int = fld(TimeNs(), "When this status was recorded.", unit="ns since epoch, UTC")
-    created_time_ns: int = fld(TimeNs(), "When the artifact was frozen.", unit="ns since epoch, UTC")
-    artifact_sha256: str = fld(
-        Str(pattern=SHA256_PATTERN, min_len=64, max_len=64, label="sha256"), "SHA-256 of the frozen artifact."
+    status_reasons: tuple[str, ...] = reason_codes_field(
+        "Why the status was set; mandatory for REJECTED, ROLLED_BACK and RETIRED."
     )
+    status_time_ns: int = fld(
+        TimeNs(), "When this status was recorded (system clock).", unit="ns since epoch, UTC"
+    )
+    created_time_ns: int = fld(
+        TimeNs(), "When the artifact was frozen (system clock).", unit="ns since epoch, UTC"
+    )
+    artifact_sha256: str = fld(_SHA, "SHA-256 of the frozen artifact.")
     artifact_uri: str = fld(
-        Str(pattern=ARTIFACT_URI_PATTERN, max_len=200, label="relative path"),
-        "Repository-relative location of the artifact (never a URL with credentials).",
+        _URI, "Repository-relative location of the artifact (never a URL with credentials)."
     )
     code_commit: str = fld(
         Str(pattern=GIT_COMMIT_PATTERN, min_len=40, max_len=40, label="git commit"),
         "Commit of the code that produced the artifact.",
     )
-    training_data_start_ns: int | None = fld(
-        Opt(TimeNs()), "Earliest event time used for fitting; null for rule sets.", unit="ns since epoch, UTC"
+    training_data_origin: DataOrigin | None = fld(
+        Opt(EnumOf(DataOrigin)),
+        "Least trustworthy origin of the data used to produce the artifact; null only when no data "
+        "was used.  A model fitted on SYNTHETIC_FIXTURE data is never validated.",
     )
-    training_data_end_ns: int | None = fld(
+    training_data_sha256: str | None = fld(
+        Opt(_SHA), "Hash of the manifest of the data set used; null only when no data was used."
+    )
+    training_config_sha256: str | None = fld(
+        Opt(_SHA), "Hash of the complete training configuration (hyper-parameters, seeds, environment)."
+    )
+    training_data_start_ns: int | None = fld(
+        Opt(TimeNs()), "Earliest event time used; null when no data was used.", unit="ns since epoch, UTC"
+    )
+    training_information_end_ns: int | None = fld(
         Opt(TimeNs()),
-        "Latest event time used for fitting; predictions for earlier instants are in-sample.",
+        "Latest availability instant of ANY information used to produce the artifact: features, "
+        "labels (including the end of their outcome windows), transforms, feature and "
+        "hyper-parameter selection.  A prediction is out of sample only after this instant plus the embargo.",
         unit="ns since epoch, UTC",
     )
-    feature_schema_sha256: str | None = fld(
-        Opt(Str(pattern=SHA256_PATTERN, min_len=64, max_len=64, label="sha256")),
-        "Hash of the feature dictionary the model expects.",
+    embargo_ns: int | None = fld(
+        Opt(DurationNs()), "Embargo applied after training_information_end_ns.", unit="ns"
     )
+    split_spec_sha256: str | None = fld(
+        Opt(_SHA), "Hash of the purged walk-forward split specification the model was validated with."
+    )
+    feature_schema_sha256: str | None = fld(Opt(_SHA), "Hash of the feature dictionary the model expects.")
     contract_versions: tuple[ContractRef, ...] = fld(
         ListOf(
             Obj(ContractRef),
@@ -137,8 +218,18 @@ class ModelVersion(Sequenced):
         ),
         "Contract versions the model was built against.",
     )
-    parent_model_version_id: str | None = fld(
-        Opt(Id("mdl")), "Version this one was derived from, and the rollback target."
+    derived_from_model_version_id: str | None = fld(
+        Opt(Id("mdl")), "Lineage: the version this one was derived from, if any."
+    )
+    component_model_version_ids: tuple[str, ...] = fld(
+        ListOf(
+            Id("mdl"),
+            max_items=32,
+            unique_key=lambda item: item,
+            canonical_sort=lambda item: item,
+            sorted_label="sorted ascending",
+        ),
+        "Component versions of a COMPOSITE model; empty otherwise.",
     )
     seed: int | None = fld(Opt(Int(ge=0, label="seed")), "Random seed used for fitting.")
     metrics: tuple[NamedValue, ...] = fld(
@@ -149,17 +240,43 @@ class ModelVersion(Sequenced):
             canonical_sort=lambda item: item.name,
             sorted_label="sorted by name",
         ),
-        "Headline validation metrics (full results live in the model card).",
+        "Headline validation metrics (the full results are in the evaluation report).",
+    )
+    evaluation_report_uri: str | None = fld(
+        Opt(_URI), "Model card / shadow report this status rests on; mandatory for ACTIVE."
+    )
+    evaluation_report_sha256: str | None = fld(Opt(_SHA), "SHA-256 of that report; mandatory for ACTIVE.")
+    promotion_criteria_sha256: str | None = fld(
+        Opt(_SHA), "Hash of the promotion criteria the report was judged against; mandatory for ACTIVE."
+    )
+    shadow_run_ids: tuple[str, ...] = fld(
+        ListOf(
+            Id("run"),
+            max_items=64,
+            unique_key=lambda item: item,
+            canonical_sort=lambda item: item,
+            sorted_label="sorted ascending",
+        ),
+        "Runs in which the version was shadow-validated; at least one for ACTIVE.",
+    )
+    replaces_model_version_id: str | None = fld(
+        Opt(Id("mdl")),
+        "On an ACTIVE entry: the version that was ACTIVE before it (null if none was).",
+    )
+    rollback_of_model_version_id: str | None = fld(
+        Opt(Id("mdl")),
+        "On a re-activation by rollback: the version that was rolled back; null on a first activation.",
     )
     approved_by: str | None = fld(
-        Opt(Str(max_len=64, label="name")), "Who authorised the status; mandatory for ACTIVE and ROLLED_BACK."
+        Opt(Str(pattern=APPROVER_PATTERN, min_len=2, max_len=64, label="name")),
+        "Who authorised the status; mandatory for ACTIVE and ROLLED_BACK.",
     )
     approval_reference: str | None = fld(
-        Opt(Str(pattern=r"^D-[0-9]{3,5}$", max_len=8, label="decision id")),
+        Opt(Str(pattern=DECISION_REFERENCE_PATTERN, max_len=8, label="decision id")),
         "Decision-log entry recording the approval; mandatory for ACTIVE and ROLLED_BACK.",
     )
 
-    INVARIANTS = (
+    INVARIANTS: ClassVar[tuple[Invariant, ...]] = (
         inv(
             "MDL-1",
             "model_version_id equals identity.model_version_id(model_name, semver, artifact_sha256)",
@@ -177,16 +294,10 @@ class ModelVersion(Sequenced):
         ),
         inv(
             "MDL-3",
-            "training_data_start_ns and training_data_end_ns are both null or both set with start <= end "
-            "<= created_time_ns",
-            lambda r: (
-                r.training_data_end_ns is None
-                if r.training_data_start_ns is None
-                else (
-                    r.training_data_end_ns is not None
-                    and r.training_data_start_ns <= r.training_data_end_ns <= r.created_time_ns
-                )
-            ),
+            "training_data_start_ns, training_information_end_ns, training_data_origin and "
+            "training_data_sha256 are all set (with start <= information end <= created_time_ns) or "
+            "all null; embargo_ns needs them",
+            _training_fields,
         ),
         inv(
             "MDL-4",
@@ -195,23 +306,55 @@ class ModelVersion(Sequenced):
         ),
         inv(
             "MDL-5",
-            "revision 0 has status RESEARCH",
-            lambda r: r.revision != 0 or r.status is ModelStatus.RESEARCH,
+            "the revision is consistent with the path to the status: RESEARCH is revision 0, SHADOW "
+            "and REJECTED need revision >= 1, ACTIVE >= 2, RETIRED and ROLLED_BACK >= 3",
+            lambda r: (
+                r.revision >= _MIN_REVISION[r.status]
+                and (r.revision == 0) == (r.status is ModelStatus.RESEARCH)
+            ),
         ),
         inv(
             "MDL-6",
-            "status ROLLED_BACK requires parent_model_version_id (the version rolled back to)",
-            lambda r: r.status is not ModelStatus.ROLLED_BACK or r.parent_model_version_id is not None,
+            "status_reasons is non-empty for REJECTED, ROLLED_BACK and RETIRED",
+            lambda r: r.status not in _REASONED or bool(r.status_reasons),
+        ),
+        inv(
+            "MDL-7",
+            "ACTIVE cites its evidence: evaluation report with hash, promotion criteria hash and at "
+            "least one shadow run",
+            _activation_evidence,
+        ),
+        inv(
+            "MDL-8",
+            "replaces_model_version_id and rollback_of_model_version_id appear only on ACTIVE entries "
+            "and never name the version itself",
+            lambda r: all(
+                value is None or (r.status is ModelStatus.ACTIVE and value != r.model_version_id)
+                for value in (r.replaces_model_version_id, r.rollback_of_model_version_id)
+            ),
+        ),
+        inv(
+            "MDL-9",
+            "component_model_version_ids is non-empty if and only if kind is COMPOSITE, and never "
+            "contains the version itself",
+            lambda r: (
+                bool(r.component_model_version_ids) == (r.kind is ModelKind.COMPOSITE)
+                and r.model_version_id not in r.component_model_version_ids
+            ),
         ),
     )
 
     @property
     def validated(self) -> bool:
-        """True only for an owner-approved ACTIVE version."""
-        return self.status is ModelStatus.ACTIVE
+        """True only for an owner-approved ACTIVE version that was not fitted on fixture data."""
+        return (
+            self.status is ModelStatus.ACTIVE
+            and self.training_data_origin is not DataOrigin.SYNTHETIC_FIXTURE
+        )
 
 
-_MODEL_IMMUTABLE = (
+#: Fields that never change during the registry history of one model version.
+MODEL_IMMUTABLE_FIELDS: Final[tuple[str, ...]] = (
     "model_version_id",
     "model_name",
     "semver",
@@ -220,11 +363,17 @@ _MODEL_IMMUTABLE = (
     "artifact_sha256",
     "artifact_uri",
     "code_commit",
+    "training_data_origin",
+    "training_data_sha256",
+    "training_config_sha256",
     "training_data_start_ns",
-    "training_data_end_ns",
+    "training_information_end_ns",
+    "embargo_ns",
+    "split_spec_sha256",
     "feature_schema_sha256",
     "contract_versions",
-    "parent_model_version_id",
+    "derived_from_model_version_id",
+    "component_model_version_ids",
     "seed",
 )
 
@@ -251,8 +400,80 @@ def validate_model_transition(previous: ModelVersion | None, entry: ModelVersion
         return
     if entry.revision != previous.revision + 1:
         raise fail("revision must increase by exactly 1")
-    for name in _MODEL_IMMUTABLE:
+    for name in MODEL_IMMUTABLE_FIELDS:
         if getattr(previous, name) != getattr(entry, name):
             raise fail(f"{name} may not change: a model version is immutable")
-    if entry.status_time_ns < previous.status_time_ns:
-        raise fail("status_time_ns may not decrease")
+    if entry.status_time_ns <= previous.status_time_ns:
+        raise fail("status_time_ns must increase with every status change")
+    if entry.status is ModelStatus.ACTIVE:
+        reactivation = previous.status is ModelStatus.RETIRED
+        if reactivation != (entry.rollback_of_model_version_id is not None):
+            raise fail("rollback_of_model_version_id is set exactly when a RETIRED version is re-activated")
+
+
+def validate_registry_history(entries: Sequence[ModelVersion]) -> None:
+    """Check a complete registry history (all versions, in registry order).
+
+    Beyond the per-version rules: at most one version of a model family
+    (``kind``, ``model_name``) is ACTIVE at any time; an activation names the
+    version it replaces; a re-activation names a successor that really was
+    rolled back and carries an approval that was not used for this version
+    before; component versions of a composite are registered.
+    """
+
+    def fail(entry: ModelVersion, rule: str) -> IllegalTransitionError:
+        return IllegalTransitionError(
+            f"illegal registry history: {rule}",
+            model_version_id=entry.model_version_id,
+            revision=entry.revision,
+            rule=rule,
+        )
+
+    latest: dict[str, ModelVersion] = {}
+    active: dict[tuple[ModelKind, str], str] = {}
+    last_active: dict[tuple[ModelKind, str], str] = {}
+    approvals: dict[str, set[str]] = {}
+    last_seq: int | None = None
+    for entry in entries:
+        if type(entry) is not ModelVersion:
+            raise TypeError("validate_registry_history expects ModelVersion records")
+        if last_seq is not None and entry.seq != last_seq + 1:
+            raise fail(entry, "registry seq must increase by exactly 1")
+        last_seq = entry.seq
+        validate_model_transition(latest.get(entry.model_version_id), entry)
+        family = (entry.kind, entry.model_name)
+        if entry.status is ModelStatus.ACTIVE:
+            if family in active:
+                raise fail(entry, "the currently ACTIVE version must be RETIRED or ROLLED_BACK first")
+            if entry.replaces_model_version_id != last_active.get(family):
+                raise fail(entry, "replaces_model_version_id must name the version that was ACTIVE before")
+            assert entry.approval_reference is not None
+            used = approvals.setdefault(entry.model_version_id, set())
+            if entry.approval_reference in used:
+                raise fail(entry, "an activation needs its own approval; this reference was used before")
+            used.add(entry.approval_reference)
+            rolled_back = entry.rollback_of_model_version_id
+            if rolled_back is not None and (
+                rolled_back not in latest or latest[rolled_back].status is not ModelStatus.ROLLED_BACK
+            ):
+                raise fail(entry, "rollback_of_model_version_id must name a ROLLED_BACK version")
+            for component in entry.component_model_version_ids:
+                if component not in latest:
+                    raise fail(entry, "a component of a composite model is not registered")
+            active[family] = entry.model_version_id
+            last_active[family] = entry.model_version_id
+        elif active.get(family) == entry.model_version_id:
+            del active[family]
+        latest[entry.model_version_id] = entry
+
+
+def is_out_of_sample(as_of_time_ns: int, model: ModelVersion) -> bool:
+    """True when a prediction with the given market-data watermark is out of sample for *model*.
+
+    A model that used no data (a rule set) is out of sample for every instant.
+    Otherwise the watermark must lie after ``training_information_end_ns`` plus
+    the embargo.  Use it with ``Candidate.as_of_time_ns`` in leakage checks.
+    """
+    if model.training_information_end_ns is None:
+        return True
+    return as_of_time_ns > model.training_information_end_ns + (model.embargo_ns or 0)

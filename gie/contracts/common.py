@@ -15,6 +15,8 @@ from gie.contracts._spec import (
     Int,
     Invariant,
     ListOf,
+    Obj,
+    Opt,
     Record,
     Str,
     TimeNs,
@@ -32,6 +34,7 @@ __all__ = [
     "REASON_CODE_PATTERN",
     "STRATEGY_ENGINES",
     "SYMBOL_PATTERN",
+    "Contribution",
     "DataOrigin",
     "ExecutionVenue",
     "Horizon",
@@ -39,6 +42,7 @@ __all__ = [
     "NamedValue",
     "OrderType",
     "PriceBasis",
+    "PriceCondition",
     "PriceTrigger",
     "Produced",
     "RunMode",
@@ -46,7 +50,7 @@ __all__ = [
     "Sequenced",
     "Side",
     "Timeframe",
-    "combine_origins",
+    "derive_origin",
     "reason_codes_field",
     "symbol_field",
 ]
@@ -73,6 +77,10 @@ ENGINE_PATTERN: Final[str] = r"^[a-z][a-z0-9_]{1,31}$"
 CODE_PATTERN: Final[str] = r"^[a-z][a-z0-9_]{1,47}$"
 #: Upper-case machine reason code, e.g. ``DAILY_FLOOR_REACHED``.
 REASON_CODE_PATTERN: Final[str] = r"^[A-Z][A-Z0-9_]{1,47}$"
+SHA256_PATTERN: Final[str] = r"^[0-9a-f]{64}$"
+CURRENCY_PATTERN: Final[str] = r"^[A-Z]{3}$"
+#: External reference (broker ticket, account alias): no free text, no control characters.
+REFERENCE_PATTERN: Final[str] = r"^[A-Za-z0-9._:-]{1,64}$"
 
 
 # --------------------------------------------------------------------------- enums
@@ -87,7 +95,10 @@ class DataOrigin(str, Enum):
     """Where the market data behind a record came from.
 
     Ordered from most to least trustworthy; a derived record carries the *least*
-    trustworthy origin among its inputs (:func:`combine_origins`).
+    trustworthy origin among its inputs (:func:`derive_origin`).
+    ``BROKER_FEED`` is a real-time observation of a broker or vendor feed,
+    ``HISTORICAL`` is imported recorded history, ``SYNTHETIC_FIXTURE`` is
+    generated test data that is never evidence of anything.
     """
 
     BROKER_FEED = "BROKER_FEED"
@@ -102,14 +113,22 @@ _ORIGIN_ORDER: Final[dict[DataOrigin, int]] = {
 }
 
 
-def combine_origins(*origins: DataOrigin) -> DataOrigin:
+def derive_origin(*origins: DataOrigin) -> DataOrigin:
     """Origin of a record derived from inputs with the given origins (least trustworthy wins)."""
     if not origins:
         raise ValueError("at least one origin is required")
     return max(origins, key=lambda origin: _ORIGIN_ORDER[origin])
 
 
+def origin_not_better_than(child: DataOrigin, *inputs: DataOrigin) -> bool:
+    """True when *child* does not claim a more trustworthy origin than its inputs allow."""
+    return not inputs or _ORIGIN_ORDER[child] >= _ORIGIN_ORDER[derive_origin(*inputs)]
+
+
 class Timeframe(str, Enum):
+    """Candle timeframe.  ``NONE`` is for observations that are not tied to a candle."""
+
+    NONE = "NONE"
     TICK = "TICK"
     S1 = "S1"
     M1 = "M1"
@@ -153,8 +172,12 @@ class PriceBasis(str, Enum):
 
 
 class PriceTrigger(str, Enum):
+    """Comparison of the basis price with the condition price."""
+
+    BELOW = "BELOW"
     AT_OR_BELOW = "AT_OR_BELOW"
     AT_OR_ABOVE = "AT_OR_ABOVE"
+    ABOVE = "ABOVE"
 
 
 # --------------------------------------------------------------------------- field helpers
@@ -177,14 +200,92 @@ def reason_codes_field(doc: str) -> Any:
     )
 
 
+PRICE: Final[Dec] = Dec(gt="0", label="price")
+ZERO: Final[Decimal] = Decimal(0)
+ONE: Final[Decimal] = Decimal(1)
+
+
 # --------------------------------------------------------------------------- value objects
 @record
 @dataclass(frozen=True, slots=True, kw_only=True)
 class NamedValue(Record):
-    """A named finite number (feature value or metric)."""
+    """A named number (feature value or metric).  ``null`` means unknown, never 0."""
 
     name: str = fld(Str(pattern=CODE_PATTERN, max_len=48, label="code"), "Name from the owning dictionary.")
-    value: float = fld(Float(), "Finite numeric value.")
+    value: float | None = fld(Opt(Float()), "Finite numeric value; null when the value is unknown.")
+
+
+@record
+@dataclass(frozen=True, slots=True, kw_only=True)
+class PriceCondition(Record):
+    """Observable price condition: the basis price compared with a level.
+
+    Used as the invalidation of evidence and as entry trigger / invalidation of a
+    trade plan.  The condition is evaluated by the component that acts on it
+    (the producer emits the resulting state change); it is true when
+    ``basis price <trigger> price`` holds.
+    """
+
+    price: Decimal = fld(Dec(label="price"), "Level of the condition.", unit="quote currency per unit")
+    trigger: PriceTrigger = fld(EnumOf(PriceTrigger), "Comparison that makes the condition true.")
+    basis: PriceBasis = fld(EnumOf(PriceBasis), "Which price is compared.")
+    timeframe: Timeframe | None = fld(
+        Opt(EnumOf(Timeframe)), "Candle timeframe when basis is CANDLE_CLOSE, otherwise null."
+    )
+
+    INVARIANTS: ClassVar[tuple[Invariant, ...]] = (
+        inv(
+            "COND-1",
+            "timeframe is a candle timeframe if and only if basis is CANDLE_CLOSE",
+            lambda r: (
+                (r.timeframe is not None and r.timeframe not in (Timeframe.NONE, Timeframe.TICK))
+                if r.basis is PriceBasis.CANDLE_CLOSE
+                else r.timeframe is None
+            ),
+        ),
+    )
+
+
+@record
+@dataclass(frozen=True, slots=True, kw_only=True)
+class Contribution(Record):
+    """Share of an estimate attributed to one driver (explainability).
+
+    The driver is either one evidence record or one named feature (setup prior,
+    session, cost, intermarket feature ...), never both.
+    """
+
+    evidence_id: str | None = fld(Opt(Id("evd")), "Contributing evidence, or null for a named feature.")
+    feature: str | None = fld(
+        Opt(Str(pattern=CODE_PATTERN, max_len=48, label="code")),
+        "Contributing feature from the feature dictionary, or null for evidence.",
+    )
+    weight_r: float = fld(Float(label="R multiple"), "Signed contribution to the expected net R.", unit="R")
+
+    INVARIANTS: ClassVar[tuple[Invariant, ...]] = (
+        inv(
+            "CONTRIB-1",
+            "exactly one of evidence_id and feature is set",
+            lambda r: (r.evidence_id is None) != (r.feature is None),
+        ),
+    )
+
+    @property
+    def key(self) -> str:
+        return self.evidence_id if self.evidence_id is not None else f"feature:{self.feature}"
+
+
+def contributions_field(doc: str) -> Any:
+    return fld(
+        ListOf(
+            Obj(Contribution),
+            max_items=64,
+            unique_key=lambda item: item.key,
+            canonical_sort=lambda item: item.key,
+            sorted_label="sorted by driver",
+        ),
+        doc,
+    )
 
 
 # --------------------------------------------------------------------------- headers
@@ -204,9 +305,13 @@ class Sequenced(Record):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class RunScoped(Sequenced):
-    """Header of records that belong to one replay or paper run."""
+    """Header of records that belong to one replay or paper run.
 
-    run_id: str = fld(Id("run"), "Run that produced the record.")
+    The stream of a run-scoped record is identified by ``(run_id, stream name)``;
+    its ``seq`` continues across restarts of the same run.
+    """
+
+    run_id: str = fld(Id("run"), "Run that produced the record (see the RunManifest of that run).")
     mode: RunMode = fld(EnumOf(RunMode), "REPLAY or PAPER.  No live mode exists (routing lock).")
     data_origin: DataOrigin = fld(
         EnumOf(DataOrigin),
@@ -223,7 +328,8 @@ class Produced(RunScoped):
     )
     as_of_time_ns: int = fld(
         TimeNs(),
-        "Receive time of the newest input the record depends on (causality watermark).",
+        "Market-data watermark: receive time of the newest market data the record depends on, "
+        "directly or through its inputs.",
         unit="ns since epoch, UTC",
     )
 
@@ -235,9 +341,3 @@ class Produced(RunScoped):
             lambda r: r.as_of_time_ns <= r.decision_time_ns,
         ),
     )
-
-
-ZERO: Final[Decimal] = Decimal(0)
-ONE: Final[Decimal] = Decimal(1)
-
-PRICE = Dec(gt="0", label="price")

@@ -22,6 +22,7 @@ from typing import Any, Final
 
 import gie.contracts  # noqa: F401  (registers all contracts)
 from gie.contracts._spec import ENVELOPE_CONTRACT, ENVELOPE_VERSION, Record, object_schema
+from gie.contracts.behaviour import behaviour
 from gie.contracts.compat import check_evolution
 from gie.contracts.registry import SEMVER_PATTERN, all_contracts, parse_semver
 
@@ -56,9 +57,32 @@ def json_schema(record_type: type[Record]) -> dict[str, Any]:
         "title": f"{name} {version}",
     }
     schema.update(body)
+    schema["$comment"] = (
+        "Necessary but not sufficient: decimal bounds (x-gie-*), canonical order, cross-field "
+        "invariants (x-gie-invariants), lifecycle rules (x-gie-behaviour), exact 64-bit integer "
+        "tokens and printable-text rules are enforced by the reference implementation gie.contracts."
+    )
+    schema["x-gie-behaviour"] = behaviour(record_type)
     if defs:
         schema["$defs"] = {key: defs[key] for key in sorted(defs)}
     return schema
+
+
+#: The routing-lock vocabulary as it must appear in every schema that has the field.
+ROUTING_VOCABULARY: Final[dict[str, list[str]]] = {"mode": ["REPLAY", "PAPER"], "venue": ["SIMULATED"]}
+
+
+def routing_vocabulary_problems(name: str, schema: dict[str, Any]) -> list[str]:
+    """Problems with the run-mode / venue vocabulary of a schema (independent of the lock status)."""
+    problems = []
+    for field, expected in ROUTING_VOCABULARY.items():
+        fragment = schema.get("properties", {}).get(field)
+        if fragment is not None and fragment.get("enum") != expected:
+            problems.append(
+                f"{name}: routing-lock vocabulary changed: {field} must be exactly {expected} "
+                f"(found {fragment.get('enum')})"
+            )
+    return problems
 
 
 def render(schema: dict[str, Any]) -> str:
@@ -106,9 +130,15 @@ def check(schema_dir: Path = SCHEMA_DIR) -> list[str]:
     for name, record_type in all_contracts().items():
         version = record_type.VERSION
         assert version is not None
-        text = render(json_schema(record_type))
+        current_schema = json_schema(record_type)
+        problems.extend(routing_vocabulary_problems(name, current_schema))
+        text = render(current_schema)
         path = schema_dir / schema_filename(name, version)
         expected_files.add(path.name)
+        if path.exists():
+            problems.extend(
+                routing_vocabulary_problems(path.name, json.loads(path.read_text(encoding="utf-8")))
+            )
         if not path.exists():
             problems.append(f"{path.name}: schema of the current version is not published")
         elif path.read_text(encoding="utf-8") != text:

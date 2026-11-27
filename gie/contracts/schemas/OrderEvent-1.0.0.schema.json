@@ -1,9 +1,24 @@
 {
+  "$comment": "Necessary but not sufficient: decimal bounds (x-gie-*), canonical order, cross-field invariants (x-gie-invariants), lifecycle rules (x-gie-behaviour), exact 64-bit integer tokens and printable-text rules are enforced by the reference implementation gie.contracts.",
   "$id": "urn:gie:contract:OrderEvent:1.0.0",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "One lifecycle event of one order at the simulated venue.",
   "properties": {
+    "alternative_group_id": {
+      "anyOf": [
+        {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^grp_[0-9a-f]{32}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Alternative group of the plan behind an entry order."
+    },
     "attached_stop_price": {
       "anyOf": [
         {
@@ -16,7 +31,7 @@
           "type": "null"
         }
       ],
-      "description": "Protective stop held by the (simulated) broker for the resulting position; mandatory for entries.",
+      "description": "Protective stop the simulated broker holds for the resulting position; mandatory for entries.",
       "x-gie-unit": "USD per troy ounce"
     },
     "attached_take_profit_price": {
@@ -31,8 +46,14 @@
           "type": "null"
         }
       ],
-      "description": "Take profit held by the (simulated) broker, if any.",
+      "description": "Take profit held by the simulated broker, if any.",
       "x-gie-unit": "USD per troy ounce"
+    },
+    "attempt": {
+      "description": "Always 0 for an entry (one approval, one order); numbers the orders of an intent for a position.",
+      "maximum": 65535,
+      "minimum": 0,
+      "type": "integer"
     },
     "average_fill_price": {
       "anyOf": [
@@ -64,7 +85,7 @@
       "description": "Identifier assigned by the simulated broker once it knows the order."
     },
     "client_order_id": {
-      "description": "Idempotency key of the order: identity.client_order_id(run, origin, intent, attempt).",
+      "description": "Idempotency key: identity.client_order_id(run_id, origin, intent, attempt), where origin is the risk decision for an entry and the position otherwise.",
       "maxLength": 36,
       "minLength": 36,
       "pattern": "^ord_[0-9a-f]{32}$",
@@ -244,7 +265,7 @@
           "type": "null"
         }
       ],
-      "description": "Plan behind an entry order."
+      "description": "Plan revision behind an entry order."
     },
     "position_id": {
       "anyOf": [
@@ -279,7 +300,7 @@
           "type": "null"
         }
       ],
-      "description": "Reason of a rejection, cancellation, expiry or reconciliation."
+      "description": "Reason of a rejection, cancellation, expiry or reconciliation; on the request of an EXIT or protective order, the reason for it (e.g. RATCHET, TIME_EXIT, EMERGENCY)."
     },
     "receive_time_ns": {
       "description": "When GIE observed the event (includes modelled latency).",
@@ -287,6 +308,80 @@
       "minimum": 0,
       "type": "integer",
       "x-gie-unit": "ns since epoch, UTC"
+    },
+    "reference_price": {
+      "anyOf": [
+        {
+          "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
+          "type": "string",
+          "x-gie-exclusiveMinimum": "0",
+          "x-gie-type": "decimal"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Executable price when the order was requested (ask for BUY, bid for SELL); mandatory for entries.",
+      "x-gie-unit": "USD per troy ounce"
+    },
+    "requested_limit_price": {
+      "anyOf": [
+        {
+          "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
+          "type": "string",
+          "x-gie-exclusiveMinimum": "0",
+          "x-gie-type": "decimal"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Limit price asked for by a pending replacement.",
+      "x-gie-unit": "USD per troy ounce"
+    },
+    "requested_trigger_price": {
+      "anyOf": [
+        {
+          "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
+          "type": "string",
+          "x-gie-exclusiveMinimum": "0",
+          "x-gie-type": "decimal"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Trigger price asked for by a pending replacement.",
+      "x-gie-unit": "USD per troy ounce"
+    },
+    "requested_valid_until_ns": {
+      "anyOf": [
+        {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Expiry asked for by a pending replacement.",
+      "x-gie-unit": "ns since epoch, UTC"
+    },
+    "requested_volume_lots": {
+      "anyOf": [
+        {
+          "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
+          "type": "string",
+          "x-gie-exclusiveMinimum": "0",
+          "x-gie-type": "decimal"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Volume asked for by a pending replacement.",
+      "x-gie-unit": "lots"
     },
     "risk_decision_id": {
       "anyOf": [
@@ -303,7 +398,7 @@
       "description": "Risk approval behind an entry order."
     },
     "run_id": {
-      "description": "Run that produced the record.",
+      "description": "Run that produced the record (see the RunManifest of that run).",
       "maxLength": 36,
       "minLength": 36,
       "pattern": "^run_[0-9a-f]{32}$",
@@ -311,7 +406,7 @@
     },
     "schema_version": {
       "description": "Version of the contract the message was written with.",
-      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+      "pattern": "^(0|[1-9][0-9]{0,8})\\.(0|[1-9][0-9]{0,8})\\.(0|[1-9][0-9]{0,8})$",
       "type": "string"
     },
     "seq": {
@@ -335,6 +430,7 @@
       ],
       "maxLength": 24,
       "minLength": 1,
+      "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]*$",
       "type": "string"
     },
     "trigger_price": {
@@ -363,7 +459,7 @@
           "type": "null"
         }
       ],
-      "description": "Instant at which a working order expires; null for no expiry.",
+      "description": "Instant at which the order expires.  Mandatory for a resting entry; always null for a protective stop.",
       "x-gie-unit": "ns since epoch, UTC"
     },
     "venue": {
@@ -392,6 +488,7 @@
     "data_origin",
     "order_event_id",
     "client_order_id",
+    "attempt",
     "order_seq",
     "event_type",
     "order_state",
@@ -407,6 +504,340 @@
   ],
   "title": "OrderEvent 1.0.0",
   "type": "object",
+  "x-gie-behaviour": {
+    "identity": {
+      "broker_order_id": "broker_order_id(client_order_id)",
+      "client_order_id": "client_order_id(run_id, risk_decision_id, intent, 0) for ENTRY; client_order_id(run_id, position_id, intent, attempt) otherwise",
+      "order_event_id": "order_event_id(client_order_id, order_seq)"
+    },
+    "immutable_fields": [
+      "client_order_id",
+      "attempt",
+      "run_id",
+      "mode",
+      "venue",
+      "symbol",
+      "side",
+      "intent",
+      "order_type",
+      "reference_price",
+      "plan_id",
+      "risk_decision_id",
+      "alternative_group_id",
+      "position_id"
+    ],
+    "ordering_time": "receive_time_ns",
+    "rank": {
+      "name": "ORDER_REPORT",
+      "value": 20
+    },
+    "rank_of_requests": {
+      "name": "ORDER_REQUEST",
+      "value": 80
+    },
+    "replaceable_fields": [
+      "volume_lots",
+      "limit_price",
+      "trigger_price",
+      "attached_stop_price",
+      "attached_take_profit_price",
+      "valid_until_ns"
+    ],
+    "request_events": [
+      "CANCEL_REQUESTED",
+      "REPLACE_REQUESTED",
+      "SUBMIT_REQUESTED"
+    ],
+    "stream": "order_event/<producer>",
+    "terminal_states": [
+      "CANCELED",
+      "EXPIRED",
+      "FILLED",
+      "REJECTED"
+    ],
+    "transitions": [
+      {
+        "event": "SUBMIT_REQUESTED",
+        "from": null,
+        "to": [
+          "PENDING_SUBMIT"
+        ]
+      },
+      {
+        "event": "CANCELED",
+        "from": "PARTIALLY_FILLED",
+        "to": [
+          "CANCELED"
+        ]
+      },
+      {
+        "event": "CANCEL_REQUESTED",
+        "from": "PARTIALLY_FILLED",
+        "to": [
+          "PENDING_CANCEL"
+        ]
+      },
+      {
+        "event": "EXPIRED",
+        "from": "PARTIALLY_FILLED",
+        "to": [
+          "EXPIRED"
+        ]
+      },
+      {
+        "event": "FILLED",
+        "from": "PARTIALLY_FILLED",
+        "to": [
+          "FILLED"
+        ]
+      },
+      {
+        "event": "PARTIALLY_FILLED",
+        "from": "PARTIALLY_FILLED",
+        "to": [
+          "PARTIALLY_FILLED"
+        ]
+      },
+      {
+        "event": "RECONCILED",
+        "from": "PARTIALLY_FILLED",
+        "to": [
+          "CANCELED",
+          "EXPIRED",
+          "FILLED",
+          "PARTIALLY_FILLED",
+          "REJECTED",
+          "WORKING"
+        ]
+      },
+      {
+        "event": "REPLACE_REQUESTED",
+        "from": "PARTIALLY_FILLED",
+        "to": [
+          "PENDING_REPLACE"
+        ]
+      },
+      {
+        "event": "CANCELED",
+        "from": "PENDING_CANCEL",
+        "to": [
+          "CANCELED"
+        ]
+      },
+      {
+        "event": "CANCEL_REJECTED",
+        "from": "PENDING_CANCEL",
+        "to": [
+          "PARTIALLY_FILLED",
+          "WORKING"
+        ]
+      },
+      {
+        "event": "EXPIRED",
+        "from": "PENDING_CANCEL",
+        "to": [
+          "EXPIRED"
+        ]
+      },
+      {
+        "event": "FILLED",
+        "from": "PENDING_CANCEL",
+        "to": [
+          "FILLED"
+        ]
+      },
+      {
+        "event": "PARTIALLY_FILLED",
+        "from": "PENDING_CANCEL",
+        "to": [
+          "PENDING_CANCEL"
+        ]
+      },
+      {
+        "event": "RECONCILED",
+        "from": "PENDING_CANCEL",
+        "to": [
+          "CANCELED",
+          "EXPIRED",
+          "FILLED",
+          "PARTIALLY_FILLED",
+          "REJECTED",
+          "WORKING"
+        ]
+      },
+      {
+        "event": "CANCELED",
+        "from": "PENDING_REPLACE",
+        "to": [
+          "CANCELED"
+        ]
+      },
+      {
+        "event": "CANCEL_REQUESTED",
+        "from": "PENDING_REPLACE",
+        "to": [
+          "PENDING_CANCEL"
+        ]
+      },
+      {
+        "event": "EXPIRED",
+        "from": "PENDING_REPLACE",
+        "to": [
+          "EXPIRED"
+        ]
+      },
+      {
+        "event": "FILLED",
+        "from": "PENDING_REPLACE",
+        "to": [
+          "FILLED"
+        ]
+      },
+      {
+        "event": "PARTIALLY_FILLED",
+        "from": "PENDING_REPLACE",
+        "to": [
+          "PENDING_REPLACE"
+        ]
+      },
+      {
+        "event": "RECONCILED",
+        "from": "PENDING_REPLACE",
+        "to": [
+          "CANCELED",
+          "EXPIRED",
+          "FILLED",
+          "PARTIALLY_FILLED",
+          "REJECTED",
+          "WORKING"
+        ]
+      },
+      {
+        "event": "REPLACED",
+        "from": "PENDING_REPLACE",
+        "to": [
+          "PARTIALLY_FILLED",
+          "WORKING"
+        ]
+      },
+      {
+        "event": "REPLACE_REJECTED",
+        "from": "PENDING_REPLACE",
+        "to": [
+          "PARTIALLY_FILLED",
+          "WORKING"
+        ]
+      },
+      {
+        "event": "ACCEPTED",
+        "from": "PENDING_SUBMIT",
+        "to": [
+          "WORKING"
+        ]
+      },
+      {
+        "event": "CANCEL_REQUESTED",
+        "from": "PENDING_SUBMIT",
+        "to": [
+          "PENDING_CANCEL"
+        ]
+      },
+      {
+        "event": "EXPIRED",
+        "from": "PENDING_SUBMIT",
+        "to": [
+          "EXPIRED"
+        ]
+      },
+      {
+        "event": "FILLED",
+        "from": "PENDING_SUBMIT",
+        "to": [
+          "FILLED"
+        ]
+      },
+      {
+        "event": "PARTIALLY_FILLED",
+        "from": "PENDING_SUBMIT",
+        "to": [
+          "PARTIALLY_FILLED"
+        ]
+      },
+      {
+        "event": "RECONCILED",
+        "from": "PENDING_SUBMIT",
+        "to": [
+          "CANCELED",
+          "EXPIRED",
+          "FILLED",
+          "PARTIALLY_FILLED",
+          "REJECTED",
+          "WORKING"
+        ]
+      },
+      {
+        "event": "REJECTED",
+        "from": "PENDING_SUBMIT",
+        "to": [
+          "REJECTED"
+        ]
+      },
+      {
+        "event": "CANCELED",
+        "from": "WORKING",
+        "to": [
+          "CANCELED"
+        ]
+      },
+      {
+        "event": "CANCEL_REQUESTED",
+        "from": "WORKING",
+        "to": [
+          "PENDING_CANCEL"
+        ]
+      },
+      {
+        "event": "EXPIRED",
+        "from": "WORKING",
+        "to": [
+          "EXPIRED"
+        ]
+      },
+      {
+        "event": "FILLED",
+        "from": "WORKING",
+        "to": [
+          "FILLED"
+        ]
+      },
+      {
+        "event": "PARTIALLY_FILLED",
+        "from": "WORKING",
+        "to": [
+          "PARTIALLY_FILLED"
+        ]
+      },
+      {
+        "event": "RECONCILED",
+        "from": "WORKING",
+        "to": [
+          "CANCELED",
+          "EXPIRED",
+          "FILLED",
+          "PARTIALLY_FILLED",
+          "REJECTED",
+          "WORKING"
+        ]
+      },
+      {
+        "event": "REPLACE_REQUESTED",
+        "from": "WORKING",
+        "to": [
+          "PENDING_REPLACE"
+        ]
+      }
+    ]
+  },
   "x-gie-invariants": [
     {
       "id": "OEV-1",
@@ -426,27 +857,43 @@
     },
     {
       "id": "OEV-5",
-      "rule": "an ENTRY order references its plan and risk approval and carries a protective stop"
+      "rule": "an ENTRY order carries its plan, risk approval, alternative group, reference price and protective stop, and no position"
     },
     {
       "id": "OEV-6",
-      "rule": "a non-ENTRY order references the position it protects or closes and has no attached protection"
+      "rule": "a non-ENTRY order names the position it protects or closes and carries no plan, approval, alternative group or attached protection"
     },
     {
       "id": "OEV-7",
-      "rule": "fill fields are consistent: last_fill_* only on fill events, 0 <= cumulative <= volume, average_fill_price iff cumulative > 0, order_state is FILLED iff cumulative = volume, PENDING_SUBMIT and WORKING have no fills, PARTIALLY_FILLED has some"
+      "rule": "client_order_id equals identity.client_order_id(run_id, origin, intent, attempt) with origin = risk_decision_id and attempt = 0 for ENTRY, origin = position_id otherwise"
     },
     {
       "id": "OEV-8",
-      "rule": "reason_code is set on REJECTED, CANCEL_REJECTED, REPLACE_REJECTED and RECONCILED events"
+      "rule": "a PROTECTIVE_STOP is a STOP order and a TAKE_PROFIT is a LIMIT order"
     },
     {
       "id": "OEV-9",
-      "rule": "attached protection is on the correct side of the order price (stop on the losing side, take profit on the winning side)"
+      "rule": "fill fields are consistent: last_fill_* only on fill events, 0 <= cumulative <= volume, average_fill_price iff cumulative > 0, order_state is FILLED iff cumulative = volume, PENDING_SUBMIT and WORKING have no fills, PARTIALLY_FILLED has some"
     },
     {
       "id": "OEV-10",
+      "rule": "reason_code is set on REJECTED, CANCEL_REJECTED, REPLACE_REJECTED and RECONCILED events"
+    },
+    {
+      "id": "OEV-11",
+      "rule": "attached protection is on the correct side of the order price (limit, trigger, or the reference price of a market order) and of the average fill price: stop on the losing side, take profit on the winning side"
+    },
+    {
+      "id": "OEV-12",
       "rule": "event_time_ns <= receive_time_ns (the venue is simulated in-process, so there is no clock offset)"
+    },
+    {
+      "id": "OEV-13",
+      "rule": "a LIMIT or STOP entry has valid_until_ns; a protective stop never has one; on SUBMIT_REQUESTED valid_until_ns is later than event_time_ns"
+    },
+    {
+      "id": "OEV-14",
+      "rule": "requested_* values are present if and only if order_state is PENDING_REPLACE"
     }
   ]
 }

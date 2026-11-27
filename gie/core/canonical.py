@@ -246,6 +246,9 @@ def _parse_float(text: str) -> float:
     number = float(text)
     if math.isinf(number):
         raise CanonicalEncodingError("number overflows a double", value=text[:64])
+    if number == 0 and any(digit in "123456789" for digit in text.lower().partition("e")[0]):
+        # A non-zero literal such as 1e-400 must not silently become zero.
+        raise CanonicalEncodingError("number underflows a double", value=text[:64])
     return number
 
 

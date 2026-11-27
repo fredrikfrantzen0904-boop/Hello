@@ -10,7 +10,9 @@ from typing import Final, TypeVar
 from gie.contracts._spec import Record, record
 from gie.core.errors import ContractVersionError, UnknownContractError
 
-_SEMVER_RE: Final[re.Pattern[str]] = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
+_SEMVER_RE: Final[re.Pattern[str]] = re.compile(
+    r"^(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})$"
+)
 SEMVER_PATTERN: Final[str] = _SEMVER_RE.pattern
 
 

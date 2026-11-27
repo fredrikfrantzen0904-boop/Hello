@@ -1,11 +1,40 @@
 {
+  "$comment": "Necessary but not sufficient: decimal bounds (x-gie-*), canonical order, cross-field invariants (x-gie-invariants), lifecycle rules (x-gie-behaviour), exact 64-bit integer tokens and printable-text rules are enforced by the reference implementation gie.contracts.",
   "$defs": {
-    "Invalidation": {
+    "NamedValue": {
       "additionalProperties": false,
-      "description": "Observable price condition that invalidates the evidence.",
+      "description": "A named number (feature value or metric).  ``null`` means unknown, never 0.",
+      "properties": {
+        "name": {
+          "description": "Name from the owning dictionary.",
+          "maxLength": 48,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_]{1,47}$",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Finite numeric value; null when the value is unknown."
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "PriceCondition": {
+      "additionalProperties": false,
+      "description": "Observable price condition: the basis price compared with a level.",
       "properties": {
         "basis": {
-          "description": "Which price the condition is evaluated on.",
+          "description": "Which price is compared.",
           "enum": [
             "BID",
             "ASK",
@@ -15,17 +44,17 @@
           "type": "string"
         },
         "price": {
-          "description": "Invalidation price.",
+          "description": "Level of the condition.",
           "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
           "type": "string",
-          "x-gie-exclusiveMinimum": "0",
           "x-gie-type": "decimal",
-          "x-gie-unit": "USD per troy ounce"
+          "x-gie-unit": "quote currency per unit"
         },
         "timeframe": {
           "anyOf": [
             {
               "enum": [
+                "NONE",
                 "TICK",
                 "S1",
                 "M1",
@@ -45,10 +74,12 @@
           "description": "Candle timeframe when basis is CANDLE_CLOSE, otherwise null."
         },
         "trigger": {
-          "description": "Invalidated when the basis price is at or below / at or above the price.",
+          "description": "Comparison that makes the condition true.",
           "enum": [
+            "BELOW",
             "AT_OR_BELOW",
-            "AT_OR_ABOVE"
+            "AT_OR_ABOVE",
+            "ABOVE"
           ],
           "type": "string"
         }
@@ -61,44 +92,25 @@
       "type": "object",
       "x-gie-invariants": [
         {
-          "id": "INVAL-1",
-          "rule": "timeframe is set if and only if basis is CANDLE_CLOSE"
+          "id": "COND-1",
+          "rule": "timeframe is a candle timeframe if and only if basis is CANDLE_CLOSE"
         }
       ]
-    },
-    "NamedValue": {
-      "additionalProperties": false,
-      "description": "A named finite number (feature value or metric).",
-      "properties": {
-        "name": {
-          "description": "Name from the owning dictionary.",
-          "maxLength": 48,
-          "minLength": 1,
-          "pattern": "^[a-z][a-z0-9_]{1,47}$",
-          "type": "string"
-        },
-        "value": {
-          "description": "Finite numeric value.",
-          "type": "number"
-        }
-      },
-      "required": [
-        "name",
-        "value"
-      ],
-      "type": "object"
     },
     "PriceLevel": {
       "additionalProperties": false,
       "description": "A price with a role, e.g. the swept level or the bounds of a fair value gap.",
       "properties": {
+        "identity": {
+          "description": "True when the level is part of the market event's identity (it then never changes between revisions and all engines must report the same value).",
+          "type": "boolean"
+        },
         "price": {
-          "description": "Price of the level.",
+          "description": "Value of the level.",
           "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
           "type": "string",
-          "x-gie-exclusiveMinimum": "0",
           "x-gie-type": "decimal",
-          "x-gie-unit": "USD per troy ounce"
+          "x-gie-unit": "quote currency per unit"
         },
         "role": {
           "description": "Role of the level from the feature dictionary (e.g. SWEPT_LEVEL, FVG_HIGH, PENDING_LIMIT).",
@@ -110,7 +122,8 @@
       },
       "required": [
         "role",
-        "price"
+        "price",
+        "identity"
       ],
       "type": "object"
     }
@@ -121,14 +134,14 @@
   "description": "Directional observation with scores, levels, stage, freshness and invalidation.",
   "properties": {
     "anchor_time_ns": {
-      "description": "Source event time of the market structure that defines the event (part of its identity).",
+      "description": "Source event time that pins the market event (part of its identity).",
       "maximum": 9223372036854775807,
       "minimum": 0,
       "type": "integer",
       "x-gie-unit": "ns since epoch, UTC"
     },
     "as_of_time_ns": {
-      "description": "Receive time of the newest input the record depends on (causality watermark).",
+      "description": "Market-data watermark: receive time of the newest market data the record depends on, directly or through its inputs.",
       "maximum": 9223372036854775807,
       "minimum": 0,
       "type": "integer",
@@ -145,7 +158,7 @@
           "type": "null"
         }
       ],
-      "description": "Strength of bearish evidence; null only when MISSING.",
+      "description": "Strength of evidence that the instrument falls; null only when MISSING.",
       "x-gie-unit": "0..1"
     },
     "bullish_score": {
@@ -159,26 +172,27 @@
           "type": "null"
         }
       ],
-      "description": "Strength of bullish evidence; null only when MISSING.",
+      "description": "Strength of evidence that the instrument rises; null only when MISSING.",
       "x-gie-unit": "0..1"
     },
     "contract": {
       "const": "Evidence",
       "description": "Contract name."
     },
-    "contradicts_evidence_id": {
-      "anyOf": [
-        {
-          "maxLength": 36,
-          "minLength": 36,
-          "pattern": "^evd_[0-9a-f]{32}$",
-          "type": "string"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "description": "Evidence that this record contradicts; set if and only if state is CONTRA."
+    "contradicts_market_event_ids": {
+      "description": "Market events this observation speaks against; non-empty if and only if state is CONTRA.",
+      "items": {
+        "maxLength": 36,
+        "minLength": 36,
+        "pattern": "^mev_[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "maxItems": 16,
+      "minItems": 0,
+      "type": "array",
+      "uniqueItems": true,
+      "x-gie-canonical-order": "sorted ascending",
+      "x-gie-unique": true
     },
     "data_origin": {
       "description": "Least trustworthy origin among the market data the record is derived from.",
@@ -211,7 +225,7 @@
       "type": "string"
     },
     "features": {
-      "description": "Engine-specific numeric features from the feature dictionary.",
+      "description": "Engine-specific features from the feature dictionary.  A feature that is absent or null is unknown, never 0.",
       "items": {
         "$ref": "#/$defs/NamedValue"
       },
@@ -224,13 +238,13 @@
     "invalidation": {
       "anyOf": [
         {
-          "$ref": "#/$defs/Invalidation"
+          "$ref": "#/$defs/PriceCondition"
         },
         {
           "type": "null"
         }
       ],
-      "description": "Price condition that invalidates the evidence, if one exists."
+      "description": "Price condition that invalidates the observation, if one exists.  The producer evaluates it and emits an INVALIDATED revision; consumers do not re-evaluate it."
     },
     "kind": {
       "description": "Evidence kind from the feature dictionary (e.g. liquidity_sweep, fair_value_gap, breakout).",
@@ -240,16 +254,18 @@
       "type": "string"
     },
     "levels": {
-      "description": "Price levels that describe the event.",
+      "description": "Levels that describe the event.",
       "items": {
         "$ref": "#/$defs/PriceLevel"
       },
       "maxItems": 32,
       "minItems": 0,
-      "type": "array"
+      "type": "array",
+      "x-gie-canonical-order": "sorted by (role, price)",
+      "x-gie-unique": true
     },
     "market_event_id": {
-      "description": "Shared identity of the observed market event; equal ids are the same event (exact de-duplication).",
+      "description": "Identity of the observed market event, shared by all engines that observe it (exact de-duplication).  INACTIVE and MISSING records carry the engine's evaluation-slot id instead.",
       "maxLength": 36,
       "minLength": 36,
       "pattern": "^mev_[0-9a-f]{32}$",
@@ -277,6 +293,13 @@
       ],
       "type": "string"
     },
+    "observable_time_ns": {
+      "description": "Receive time of the input from which this revision's state could first be determined. decision_time_ns - observable_time_ns is the notification delay.",
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "type": "integer",
+      "x-gie-unit": "ns since epoch, UTC"
+    },
     "producer": {
       "description": "Component instance that emitted the record; together with the contract name it names the stream.",
       "maxLength": 96,
@@ -294,6 +317,20 @@
       ],
       "type": "string"
     },
+    "related_market_event_id": {
+      "anyOf": [
+        {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^mev_[0-9a-f]{32}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Market event this observation follows from (for a pending limit: the breakout it belongs to)."
+    },
     "revision": {
       "description": "0 for the first record of an observation, +1 per update.",
       "maximum": 9223372036854775807,
@@ -301,7 +338,7 @@
       "type": "integer"
     },
     "run_id": {
-      "description": "Run that produced the record.",
+      "description": "Run that produced the record (see the RunManifest of that run).",
       "maxLength": 36,
       "minLength": 36,
       "pattern": "^run_[0-9a-f]{32}$",
@@ -309,7 +346,7 @@
     },
     "schema_version": {
       "description": "Version of the contract the message was written with.",
-      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+      "pattern": "^(0|[1-9][0-9]{0,8})\\.(0|[1-9][0-9]{0,8})\\.(0|[1-9][0-9]{0,8})$",
       "type": "string"
     },
     "seq": {
@@ -358,15 +395,16 @@
       "description": "Previous revision replaced by this record; null for revision 0."
     },
     "symbol": {
-      "description": "Instrument the observation is about.",
+      "description": "Instrument the observation is about (scores and levels refer to it).",
       "maxLength": 24,
       "minLength": 1,
       "pattern": "^[A-Z0-9][A-Z0-9._-]{0,23}$",
       "type": "string"
     },
     "timeframe": {
-      "description": "Timeframe the observation was made on.",
+      "description": "Timeframe the observation was made on; NONE when it is not tied to a candle.",
       "enum": [
+        "NONE",
         "TICK",
         "S1",
         "M1",
@@ -405,15 +443,36 @@
     "symbol",
     "timeframe",
     "anchor_time_ns",
+    "observable_time_ns",
     "state",
     "stage",
     "levels",
     "valid_until_ns",
     "revision",
+    "contradicts_market_event_ids",
     "features"
   ],
   "title": "Evidence 1.0.0",
   "type": "object",
+  "x-gie-behaviour": {
+    "final_states": [
+      "EXPIRED",
+      "INVALIDATED"
+    ],
+    "identity": {
+      "evidence_id": "evidence_id(engine, market_event_id, revision)",
+      "market_event_id": "market_event_id(kind, symbol, timeframe, anchor_time_ns, identity level prices); evaluation_slot_id(engine, kind, symbol, timeframe, anchor_time_ns) for INACTIVE and MISSING"
+    },
+    "monotonic": [
+      "identity levels and market_event_id never change between revisions"
+    ],
+    "ordering_time": "decision_time_ns",
+    "rank": {
+      "name": "EVIDENCE",
+      "value": 40
+    },
+    "stream": "evidence/<producer>"
+  },
   "x-gie-invariants": [
     {
       "id": "CAUSAL-1",
@@ -425,15 +484,15 @@
     },
     {
       "id": "EVD-2",
-      "rule": "state is MISSING if and only if both scores are null; otherwise both scores are numbers"
+      "rule": "market_event_id equals identity.market_event_id(kind, symbol, timeframe, anchor_time_ns, prices of identity levels); for INACTIVE and MISSING it equals identity.evaluation_slot_id(engine, kind, symbol, timeframe, anchor_time_ns)"
     },
     {
       "id": "EVD-3",
-      "rule": "missing_reason is set if and only if state is MISSING"
+      "rule": "state is MISSING if and only if both scores are null; otherwise both scores are numbers"
     },
     {
       "id": "EVD-4",
-      "rule": "when state is ACTIVE at least one score is greater than 0"
+      "rule": "missing_reason is set if and only if state is MISSING"
     },
     {
       "id": "EVD-5",
@@ -441,11 +500,11 @@
     },
     {
       "id": "EVD-6",
-      "rule": "contradicts_evidence_id is set if and only if state is CONTRA"
+      "rule": "contradicts_market_event_ids is non-empty if and only if state is CONTRA, and never contains the record's own market_event_id"
     },
     {
       "id": "EVD-7",
-      "rule": "supersedes_evidence_id is set if and only if revision > 0"
+      "rule": "supersedes_evidence_id is null for revision 0 and otherwise equals the id of the previous revision, identity.evidence_id(engine, market_event_id, revision - 1)"
     },
     {
       "id": "EVD-8",
@@ -457,7 +516,19 @@
     },
     {
       "id": "EVD-10",
-      "rule": "stage is NONE when state is INACTIVE or MISSING"
+      "rule": "INACTIVE and MISSING records describe no market event: stage is NONE, there are no identity levels and no related market event"
+    },
+    {
+      "id": "EVD-11",
+      "rule": "observable_time_ns <= as_of_time_ns (the state cannot have been observable later than the newest data the record uses)"
+    },
+    {
+      "id": "EVD-12",
+      "rule": "an ACTIVE record of kind pending_limit has exactly one PENDING_LIMIT level, exactly one score greater than 0 (bullish = buy limit) and names the breakout in related_market_event_id"
+    },
+    {
+      "id": "EVD-13",
+      "rule": "levels and invalidation of an XAUUSD observation are prices greater than 0"
     }
   ]
 }

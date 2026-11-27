@@ -1,10 +1,60 @@
 {
+  "$comment": "Necessary but not sufficient: decimal bounds (x-gie-*), canonical order, cross-field invariants (x-gie-invariants), lifecycle rules (x-gie-behaviour), exact 64-bit integer tokens and printable-text rules are enforced by the reference implementation gie.contracts.",
   "$defs": {
+    "Contribution": {
+      "additionalProperties": false,
+      "description": "Share of an estimate attributed to one driver (explainability).",
+      "properties": {
+        "evidence_id": {
+          "anyOf": [
+            {
+              "maxLength": 36,
+              "minLength": 36,
+              "pattern": "^evd_[0-9a-f]{32}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Contributing evidence, or null for a named feature."
+        },
+        "feature": {
+          "anyOf": [
+            {
+              "maxLength": 48,
+              "minLength": 1,
+              "pattern": "^[a-z][a-z0-9_]{1,47}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Contributing feature from the feature dictionary, or null for evidence."
+        },
+        "weight_r": {
+          "description": "Signed contribution to the expected net R.",
+          "type": "number",
+          "x-gie-unit": "R"
+        }
+      },
+      "required": [
+        "weight_r"
+      ],
+      "type": "object",
+      "x-gie-invariants": [
+        {
+          "id": "CONTRIB-1",
+          "rule": "exactly one of evidence_id and feature is set"
+        }
+      ]
+    },
     "Destination": {
       "additionalProperties": false,
       "description": "A price the market may travel to under a named scenario.",
       "properties": {
-        "expected_time_to_reach_ns": {
+        "horizon_ns": {
           "anyOf": [
             {
               "maximum": 9223372036854775807,
@@ -15,11 +65,11 @@
               "type": "null"
             }
           ],
-          "description": "Expected time until it is reached.",
+          "description": "Horizon of the probability; set if and only if it is.",
           "x-gie-unit": "ns"
         },
         "label": {
-          "description": "Scenario or destination name.",
+          "description": "Destination name.",
           "maxLength": 48,
           "minLength": 1,
           "pattern": "^[a-z][a-z0-9_]{1,47}$",
@@ -44,15 +94,29 @@
               "type": "null"
             }
           ],
-          "description": "Estimated probability of reaching it.",
+          "description": "Probability of touching the price within horizon_ns; null when not estimated.",
           "x-gie-unit": "fraction"
+        },
+        "scenario": {
+          "description": "Scenario name.",
+          "maxLength": 48,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_]{1,47}$",
+          "type": "string"
         }
       },
       "required": [
+        "scenario",
         "label",
         "price"
       ],
-      "type": "object"
+      "type": "object",
+      "x-gie-invariants": [
+        {
+          "id": "DEST-1",
+          "rule": "probability_frac and horizon_ns are both set or both null"
+        }
+      ]
     },
     "QuantilePoint": {
       "additionalProperties": false,
@@ -81,17 +145,29 @@
   "$id": "urn:gie:contract:Candidate:1.0.0",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "Opportunity built from de-duplicated evidence, with its predictive estimates.",
+  "description": "Opportunity built from de-duplicated evidence, with one scorer's estimates.",
   "properties": {
     "as_of_time_ns": {
-      "description": "Receive time of the newest input the record depends on (causality watermark).",
+      "description": "Market-data watermark: receive time of the newest market data the record depends on, directly or through its inputs.",
       "maximum": 9223372036854775807,
       "minimum": 0,
       "type": "integer",
       "x-gie-unit": "ns since epoch, UTC"
     },
+    "baseline_r": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Part of expected_net_r not attributed to any listed contribution.",
+      "x-gie-unit": "R"
+    },
     "candidate_id": {
-      "description": "identity.candidate_id(setup_type, side, evidence_ids, revision).",
+      "description": "identity.candidate_id(opportunity_id, model_version_id, revision).",
       "maxLength": 36,
       "minLength": 36,
       "pattern": "^cnd_[0-9a-f]{32}$",
@@ -100,6 +176,17 @@
     "contract": {
       "const": "Candidate",
       "description": "Contract name."
+    },
+    "contributions": {
+      "description": "Attribution of expected_net_r to evidence and features, as given by the scoring model.",
+      "items": {
+        "$ref": "#/$defs/Contribution"
+      },
+      "maxItems": 64,
+      "minItems": 0,
+      "type": "array",
+      "x-gie-canonical-order": "sorted by driver",
+      "x-gie-unique": true
     },
     "data_origin": {
       "description": "Least trustworthy origin among the market data the record is derived from.",
@@ -124,10 +211,12 @@
       },
       "maxItems": 16,
       "minItems": 0,
-      "type": "array"
+      "type": "array",
+      "x-gie-canonical-order": "sorted by (scenario, label)",
+      "x-gie-unique": true
     },
     "evidence_ids": {
-      "description": "Evidence the candidate is built from (already de-duplicated by market event).",
+      "description": "Evidence revisions this revision of the candidate was built from.",
       "items": {
         "maxLength": 36,
         "minLength": 36,
@@ -137,6 +226,7 @@
       "maxItems": 64,
       "minItems": 1,
       "type": "array",
+      "uniqueItems": true,
       "x-gie-canonical-order": "sorted ascending",
       "x-gie-unique": true
     },
@@ -167,6 +257,19 @@
       "description": "Expected holding time.",
       "x-gie-unit": "ns"
     },
+    "expected_loss_r": {
+      "anyOf": [
+        {
+          "minimum": 0.0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Expected net size of a losing outcome, as a positive number.",
+      "x-gie-unit": "R"
+    },
     "expected_net_r": {
       "anyOf": [
         {
@@ -179,6 +282,32 @@
       "description": "Expected net result.",
       "x-gie-unit": "R"
     },
+    "expected_net_r_stderr": {
+      "anyOf": [
+        {
+          "minimum": 0.0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Standard error of expected_net_r itself (uncertainty of the estimate).",
+      "x-gie-unit": "R"
+    },
+    "expected_win_r": {
+      "anyOf": [
+        {
+          "minimum": 0.0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Expected net size of a winning outcome.",
+      "x-gie-unit": "R"
+    },
     "horizon": {
       "description": "Scalp or intraday.",
       "enum": [
@@ -187,6 +316,35 @@
       ],
       "type": "string"
     },
+    "market_event_ids": {
+      "description": "Market events behind the opportunity (each counted once, whichever engines observed it).",
+      "items": {
+        "maxLength": 36,
+        "minLength": 36,
+        "pattern": "^mev_[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "maxItems": 32,
+      "minItems": 1,
+      "type": "array",
+      "uniqueItems": true,
+      "x-gie-canonical-order": "sorted ascending",
+      "x-gie-unique": true
+    },
+    "memory_cutoff_time_ns": {
+      "anyOf": [
+        {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Latest instant at which any retrieved historical case (neighbour) had become fully known, label included.  Prior-only retrieval means it is not later than as_of_time_ns.",
+      "x-gie-unit": "ns since epoch, UTC"
+    },
     "mode": {
       "description": "REPLAY or PAPER.  No live mode exists (routing lock).",
       "enum": [
@@ -194,6 +352,25 @@
         "PAPER"
       ],
       "type": "string"
+    },
+    "model_status": {
+      "anyOf": [
+        {
+          "enum": [
+            "RESEARCH",
+            "SHADOW",
+            "ACTIVE",
+            "RETIRED",
+            "ROLLED_BACK",
+            "REJECTED"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Promotion status of that model at decision time (only ACTIVE counts as validated)."
     },
     "model_version_id": {
       "anyOf": [
@@ -210,7 +387,7 @@
       "description": "Model (or rule set) version that produced the estimates; null when unscored."
     },
     "net_r_quantiles": {
-      "description": "Optional predictive quantiles, ascending.",
+      "description": "Optional predictive quantiles, ascending in q_frac.",
       "items": {
         "$ref": "#/$defs/QuantilePoint"
       },
@@ -228,8 +405,15 @@
           "type": "null"
         }
       ],
-      "description": "Predictive standard deviation of the net result.",
+      "description": "Predictive standard deviation of a single net result (outcome dispersion).",
       "x-gie-unit": "R"
+    },
+    "opportunity_id": {
+      "description": "identity.opportunity_id(setup_type, side, horizon, market_event_ids).",
+      "maxLength": 36,
+      "minLength": 36,
+      "pattern": "^opp_[0-9a-f]{32}$",
+      "type": "string"
     },
     "producer": {
       "description": "Component instance that emitted the record; together with the contract name it names the stream.",
@@ -266,8 +450,23 @@
       "minimum": 0,
       "type": "integer"
     },
+    "risk_unit_price": {
+      "anyOf": [
+        {
+          "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
+          "type": "string",
+          "x-gie-exclusiveMinimum": "0",
+          "x-gie-type": "decimal"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Price distance that equals 1 R in every *_r field of this record.",
+      "x-gie-unit": "USD per troy ounce"
+    },
     "run_id": {
-      "description": "Run that produced the record.",
+      "description": "Run that produced the record (see the RunManifest of that run).",
       "maxLength": 36,
       "minLength": 36,
       "pattern": "^run_[0-9a-f]{32}$",
@@ -275,7 +474,7 @@
     },
     "schema_version": {
       "description": "Version of the contract the message was written with.",
-      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+      "pattern": "^(0|[1-9][0-9]{0,8})\\.(0|[1-9][0-9]{0,8})\\.(0|[1-9][0-9]{0,8})$",
       "type": "string"
     },
     "seq": {
@@ -330,6 +529,7 @@
       "maxItems": 32,
       "minItems": 0,
       "type": "array",
+      "uniqueItems": true,
       "x-gie-canonical-order": "sorted ascending",
       "x-gie-unique": true
     },
@@ -347,6 +547,19 @@
       ],
       "description": "Previous revision replaced by this record; null for revision 0."
     },
+    "support_count": {
+      "anyOf": [
+        {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Effective number of historical cases behind the estimate (e.g. neighbours used)."
+    },
     "symbol": {
       "description": "Always XAUUSD: GIE trades only gold.",
       "enum": [
@@ -354,10 +567,25 @@
       ],
       "maxLength": 24,
       "minLength": 1,
+      "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]*$",
       "type": "string"
     },
+    "unscored_reason": {
+      "anyOf": [
+        {
+          "maxLength": 48,
+          "minLength": 1,
+          "pattern": "^[A-Z][A-Z0-9_]{1,47}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Why no estimate exists; set if and only if the candidate is unscored."
+    },
     "valid_until_ns": {
-      "description": "Expiry instant: the candidate must not be ranked at or after it.",
+      "description": "Expiry instant: the candidate must not be ranked at or after it.  It is not later than the earliest expiry of its evidence.",
       "maximum": 9223372036854775807,
       "minimum": 0,
       "type": "integer",
@@ -389,22 +617,69 @@
     "decision_time_ns",
     "as_of_time_ns",
     "candidate_id",
+    "opportunity_id",
     "symbol",
     "side",
     "setup_type",
     "horizon",
     "session",
+    "market_event_ids",
     "evidence_ids",
     "reference_price",
     "status",
     "status_reasons",
     "net_r_quantiles",
     "destinations",
+    "contributions",
     "valid_until_ns",
     "revision"
   ],
   "title": "Candidate 1.0.0",
   "type": "object",
+  "x-gie-behaviour": {
+    "identity": {
+      "candidate_id": "candidate_id(opportunity_id, model_version_id, revision)",
+      "opportunity_id": "opportunity_id(setup_type, side, horizon, market_event_ids)"
+    },
+    "ordering_time": "decision_time_ns",
+    "rank": {
+      "name": "CANDIDATE",
+      "value": 50
+    },
+    "stream": "candidate/<producer>",
+    "transitions": [
+      {
+        "from": null,
+        "to": [
+          "AVAILABLE",
+          "EXPIRED",
+          "REJECTED",
+          "WITHDRAWN"
+        ]
+      },
+      {
+        "from": "AVAILABLE",
+        "to": [
+          "AVAILABLE",
+          "EXPIRED",
+          "REJECTED",
+          "WITHDRAWN"
+        ]
+      },
+      {
+        "from": "EXPIRED",
+        "to": []
+      },
+      {
+        "from": "REJECTED",
+        "to": []
+      },
+      {
+        "from": "WITHDRAWN",
+        "to": []
+      }
+    ]
+  },
   "x-gie-invariants": [
     {
       "id": "CAUSAL-1",
@@ -412,31 +687,47 @@
     },
     {
       "id": "CND-1",
-      "rule": "candidate_id equals identity.candidate_id(setup_type, side, evidence_ids, revision)"
+      "rule": "opportunity_id equals identity.opportunity_id(setup_type, side, horizon, market_event_ids)"
     },
     {
       "id": "CND-2",
-      "rule": "model_version_id, expected_net_r and net_r_stdev are all null (unscored) or all set (scored)"
+      "rule": "candidate_id equals identity.candidate_id(opportunity_id, model_version_id, revision)"
     },
     {
       "id": "CND-3",
-      "rule": "an unscored candidate has no model-derived estimates, quantiles or destinations"
+      "rule": "model_version_id, model_status, risk_unit_price and expected_net_r are all set (scored) or all null (unscored)"
     },
     {
       "id": "CND-4",
-      "rule": "quantiles have strictly increasing q_frac and non-decreasing value_r"
+      "rule": "unscored_reason is set if and only if the candidate is unscored"
     },
     {
       "id": "CND-5",
-      "rule": "when status is AVAILABLE, valid_until_ns is later than decision_time_ns"
+      "rule": "a scored candidate states its uncertainty: net_r_stdev, expected_net_r_stderr or at least two quantiles"
     },
     {
       "id": "CND-6",
-      "rule": "status_reasons is non-empty when status is REJECTED or WITHDRAWN and empty when AVAILABLE"
+      "rule": "an unscored candidate has no model-derived estimates, quantiles, destinations or contributions"
     },
     {
       "id": "CND-7",
-      "rule": "supersedes_candidate_id is set if and only if revision > 0"
+      "rule": "quantiles have strictly increasing q_frac and non-decreasing value_r"
+    },
+    {
+      "id": "CND-8",
+      "rule": "when status is AVAILABLE, valid_until_ns is later than decision_time_ns"
+    },
+    {
+      "id": "CND-9",
+      "rule": "status_reasons is non-empty when status is REJECTED or WITHDRAWN and empty when AVAILABLE"
+    },
+    {
+      "id": "CND-10",
+      "rule": "supersedes_candidate_id is null for revision 0 and otherwise equals the id of the previous revision, identity.candidate_id(opportunity_id, model_version_id, revision - 1)"
+    },
+    {
+      "id": "CND-11",
+      "rule": "memory_cutoff_time_ns <= as_of_time_ns (retrieved historical cases are prior-only)"
     }
   ]
 }

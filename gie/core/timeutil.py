@@ -94,6 +94,9 @@ def trading_day_bounds_ns(day: str) -> tuple[int, int]:
 
     The interval is half open: an instant belongs to the day iff
     ``start_ns <= t < end_ns``.  Days are 23 h or 25 h long on DST changes.
+    The bounds of the first (1970-01-01) and last (2262-04-12) representable day
+    are clamped to the instant range, so every day returned by
+    :func:`trading_day` has bounds.
     """
     date = parse_trading_day(day)
     try:
@@ -102,4 +105,15 @@ def trading_day_bounds_ns(day: str) -> tuple[int, int]:
         end = _dt.datetime(next_date.year, next_date.month, next_date.day, tzinfo=_PRAGUE)
     except (OverflowError, ValueError) as exc:
         raise ContractValidationError("trading day outside the supported range", value=day) from exc
-    return time_ns_from_datetime(start), time_ns_from_datetime(end)
+    return _clamped_ns(start), _clamped_ns(end)
+
+
+def _clamped_ns(moment: _dt.datetime) -> int:
+    """Instant of *moment*, clamped to the representable range ``[0, MAX_TIME_NS]``.
+
+    Only the first and the last representable trading day are affected: their
+    Prague midnight lies outside the range, so the bound is the range limit.
+    """
+    delta = moment - _dt.datetime(1970, 1, 1, tzinfo=_UTC)
+    time_ns = (delta.days * 86_400 + delta.seconds) * NS_PER_SECOND + delta.microseconds * NS_PER_US
+    return min(max(time_ns, 0), MAX_TIME_NS)

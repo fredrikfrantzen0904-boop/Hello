@@ -1,8 +1,9 @@
 """SYNTHETIC FIXTURES - explicitly labelled test data (requirement COM-07).
 
 Every record built here carries ``DataOrigin.SYNTHETIC_FIXTURE``.  The prices,
-sizes and estimates are invented for testing the contracts only.  They are not
-market data, not broker data and not evidence of any trading performance.
+sizes, estimates, approvals and names are invented for testing the contracts
+only.  They are not market data, not broker data, not owner decisions and not
+evidence of any trading performance.
 """
 
 from __future__ import annotations
@@ -16,17 +17,16 @@ from gie.contracts import (
     ClockMode,
     ClockReading,
     ContractRef,
+    Contribution,
     DailyState,
     DataOrigin,
     Destination,
     EntryStyle,
     Evidence,
-    EvidenceContribution,
     EvidenceStage,
     EvidenceState,
     ExecutionVenue,
     Horizon,
-    Invalidation,
     MarketSession,
     ModelKind,
     ModelStatus,
@@ -42,6 +42,7 @@ from gie.contracts import (
     PositionOwner,
     PositionState,
     PriceBasis,
+    PriceCondition,
     PriceLevel,
     PriceTrigger,
     ProducerClass,
@@ -49,15 +50,19 @@ from gie.contracts import (
     Record,
     RiskDecision,
     RiskOutcome,
+    RunManifest,
     RunMode,
+    RunRole,
     Side,
     Target,
     Tick,
     TickFlag,
     Timeframe,
     TradePlan,
+    fingerprint,
     identity,
 )
+from gie.core.params import load_research_parameters
 from gie.core.timeutil import NS_PER_MS, NS_PER_SECOND, trading_day
 
 FIXTURE_LABEL = "SYNTHETIC FIXTURE - not market data"
@@ -65,9 +70,16 @@ FIXTURE_LABEL = "SYNTHETIC FIXTURE - not market data"
 #: 2026-11-26 09:30:00 UTC (10:30 in Prague).  Arbitrary instant used by all samples.
 T0 = 1_795_685_400 * NS_PER_SECOND
 ORIGIN = DataOrigin.SYNTHETIC_FIXTURE
-RUN_ID = identity.run_id("REPLAY", "0" * 64, "fixture")
+CONFIG_SHA = "0" * 64
+RUN_LABEL = "fixture"
+RUN_ID = identity.run_id("REPLAY", CONFIG_SHA, RUN_LABEL)
 CODE_COMMIT = "0123456789abcdef0123456789abcdef01234567"
 ARTIFACT_SHA = "ab" * 32
+MODEL_NAME = "fixture_net_r"
+MODEL_ID = identity.model_version_id(MODEL_NAME, "0.1.0", ARTIFACT_SHA)
+#: Not an owner decision: a fixture reference used only to exercise the approval rules.
+FIXTURE_APPROVER = "FIXTURE-OWNER"
+FIXTURE_DECISION = "D-999"
 
 
 def _header(producer: str, seq: int = 0, *, t: int = T0) -> dict[str, Any]:
@@ -82,6 +94,31 @@ def _header(producer: str, seq: int = 0, *, t: int = T0) -> dict[str, Any]:
     }
 
 
+def run_manifest(**overrides: Any) -> RunManifest:
+    fields: dict[str, Any] = {
+        "producer": "app.run",
+        "seq": 0,
+        "mode": RunMode.REPLAY,
+        "role": RunRole.RESEARCH,
+        "label": RUN_LABEL,
+        "config_sha256": CONFIG_SHA,
+        "code_commit": CODE_COMMIT,
+        "contract_set_version": "1.0.0",
+        "parameters_sha256": load_research_parameters().parameters_sha256,
+        "data_origin": ORIGIN,
+        "data_sources": ("fixture",),
+        "data_start_ns": T0 - 3600 * NS_PER_SECOND,
+        "data_end_ns": T0 + 3600 * NS_PER_SECOND,
+        "seed": 7,
+        "model_version_ids": (MODEL_ID,),
+        "shadow_of_run_id": None,
+        "created_time_ns": T0 + 86_400 * NS_PER_SECOND,
+    }
+    fields.update(overrides)
+    fields.setdefault("run_id", identity.run_id(fields["mode"], fields["config_sha256"], fields["label"]))
+    return RunManifest(**fields)
+
+
 def tick(**overrides: Any) -> Tick:
     fields: dict[str, Any] = {
         "symbol": "XAUUSD",
@@ -94,7 +131,7 @@ def tick(**overrides: Any) -> Tick:
         "ask": D("2650.35"),
         "bid_volume": None,
         "ask_volume": None,
-        "flags": (),
+        "flags": (TickFlag.RECEIVE_TIME_MODELLED,),
     }
     fields.update(overrides)
     return Tick(**fields)
@@ -105,25 +142,38 @@ def model_version(**overrides: Any) -> ModelVersion:
         "producer": "learning.registry",
         "seq": 0,
         "revision": 0,
-        "model_name": "fixture_net_r",
+        "model_name": MODEL_NAME,
         "semver": "0.1.0",
         "kind": ModelKind.NET_R_MODEL,
         "status": ModelStatus.RESEARCH,
+        "status_reasons": (),
         "status_time_ns": T0 - 3600 * NS_PER_SECOND,
         "created_time_ns": T0 - 7200 * NS_PER_SECOND,
         "artifact_sha256": ARTIFACT_SHA,
         "artifact_uri": "models/research/fixture_net_r/0.1.0/model.bin",
         "code_commit": CODE_COMMIT,
+        "training_data_origin": ORIGIN,
+        "training_data_sha256": "ef" * 32,
+        "training_config_sha256": "12" * 32,
         "training_data_start_ns": T0 - 90 * 86400 * NS_PER_SECOND,
-        "training_data_end_ns": T0 - 30 * 86400 * NS_PER_SECOND,
+        "training_information_end_ns": T0 - 30 * 86400 * NS_PER_SECOND,
+        "embargo_ns": 86400 * NS_PER_SECOND,
+        "split_spec_sha256": "34" * 32,
         "feature_schema_sha256": "cd" * 32,
         "contract_versions": (
             ContractRef(contract="Tick", version="1.0.0"),
             ContractRef(contract="Evidence", version="1.0.0"),
         ),
-        "parent_model_version_id": None,
+        "derived_from_model_version_id": None,
+        "component_model_version_ids": (),
         "seed": 7,
         "metrics": (NamedValue(name="oos_mean_net_r", value=0.0),),
+        "evaluation_report_uri": None,
+        "evaluation_report_sha256": None,
+        "promotion_criteria_sha256": None,
+        "shadow_run_ids": (),
+        "replaces_model_version_id": None,
+        "rollback_of_model_version_id": None,
         "approved_by": None,
         "approval_reference": None,
     }
@@ -135,52 +185,64 @@ def model_version(**overrides: Any) -> ModelVersion:
     return ModelVersion(**fields)
 
 
-MODEL_ID = identity.model_version_id("fixture_net_r", "0.1.0", ARTIFACT_SHA)
-
-
 def evidence(**overrides: Any) -> Evidence:
     fields: dict[str, Any] = {
         **_header("strategy_intelligence.sweep_reversal"),
+        "related_market_event_id": None,
         "producer_class": ProducerClass.STRATEGY_ENGINE,
         "engine": "sweep_reversal",
         "kind": "liquidity_sweep",
         "symbol": "XAUUSD",
         "timeframe": Timeframe.M5,
-        "anchor_time_ns": T0 - 60 * NS_PER_SECOND,
+        "anchor_time_ns": T0 - 300 * NS_PER_SECOND,
         "state": EvidenceState.ACTIVE,
         "stage": EvidenceStage.TRIGGERED,
         "bullish_score": 0.7,
         "bearish_score": 0.0,
-        "levels": (PriceLevel(role="SWEPT_LEVEL", price=D("2648.40")),),
-        "invalidation": Invalidation(
+        "levels": (PriceLevel(role="SWEPT_LEVEL", price=D("2648.40"), identity=True),),
+        "invalidation": PriceCondition(
             price=D("2647.90"), trigger=PriceTrigger.AT_OR_BELOW, basis=PriceBasis.BID, timeframe=None
         ),
         "valid_until_ns": T0 + 300 * NS_PER_SECOND,
         "revision": 0,
         "supersedes_evidence_id": None,
-        "contradicts_evidence_id": None,
+        "contradicts_market_event_ids": (),
         "missing_reason": None,
         "features": (NamedValue(name="sweep_depth", value=0.6),),
     }
     fields.update(overrides)
-    fields.setdefault(
-        "market_event_id",
-        identity.market_event_id(
-            fields["kind"],
-            fields["symbol"],
-            fields["timeframe"].value,
-            fields["anchor_time_ns"],
-            [level.price for level in fields["levels"]],
-        ),
-    )
+    fields.setdefault("observable_time_ns", fields["as_of_time_ns"])
+    no_event = fields["state"] in (EvidenceState.INACTIVE, EvidenceState.MISSING)
+    if "market_event_id" not in fields:
+        if no_event:
+            fields["market_event_id"] = identity.evaluation_slot_id(
+                fields["engine"],
+                fields["kind"],
+                fields["symbol"],
+                fields["timeframe"].value,
+                fields["anchor_time_ns"],
+            )
+        else:
+            fields["market_event_id"] = identity.market_event_id(
+                fields["kind"],
+                fields["symbol"],
+                fields["timeframe"].value,
+                fields["anchor_time_ns"],
+                [level.price for level in fields["levels"] if level.identity],
+            )
     fields.setdefault(
         "evidence_id",
         identity.evidence_id(fields["engine"], fields["market_event_id"], fields["revision"]),
     )
+    if fields["revision"] > 0 and fields.get("supersedes_evidence_id") is None:
+        fields["supersedes_evidence_id"] = identity.evidence_id(
+            fields["engine"], fields["market_event_id"], fields["revision"] - 1
+        )
     return Evidence(**fields)
 
 
 def candidate(**overrides: Any) -> Candidate:
+    base = evidence()
     fields: dict[str, Any] = {
         **_header("prediction.scorer"),
         "symbol": "XAUUSD",
@@ -188,26 +250,44 @@ def candidate(**overrides: Any) -> Candidate:
         "setup_type": "sweep_reversal_long",
         "horizon": Horizon.SCALP,
         "session": MarketSession.LONDON,
-        "evidence_ids": (evidence().evidence_id,),
+        "market_event_ids": (base.market_event_id,),
+        "evidence_ids": (base.evidence_id,),
         "reference_price": D("2650.35"),
         "status": CandidateStatus.AVAILABLE,
         "status_reasons": (),
         "model_version_id": MODEL_ID,
+        "model_status": ModelStatus.RESEARCH,
+        "unscored_reason": None,
+        "risk_unit_price": D("2.00"),
         "expected_net_r": 0.25,
         "net_r_stdev": 1.1,
+        "expected_net_r_stderr": 0.12,
+        "support_count": 84,
         "net_r_quantiles": (
             QuantilePoint(q_frac=0.1, value_r=-1.0),
             QuantilePoint(q_frac=0.5, value_r=0.2),
             QuantilePoint(q_frac=0.9, value_r=2.0),
         ),
         "win_probability_frac": 0.48,
+        "expected_win_r": 1.5,
+        "expected_loss_r": 1.0,
         "expected_cost_r": 0.08,
         "expected_holding_time_ns": 900 * NS_PER_SECOND,
         "quality_score": 0.6,
+        "memory_cutoff_time_ns": T0 - 86400 * NS_PER_SECOND,
         "destinations": (
             Destination(
-                label="prior_high", price=D("2655.00"), probability_frac=0.4, expected_time_to_reach_ns=None
+                scenario="reversal",
+                label="prior_high",
+                price=D("2655.00"),
+                probability_frac=0.4,
+                horizon_ns=1800 * NS_PER_SECOND,
             ),
+        ),
+        "baseline_r": 0.05,
+        "contributions": (
+            Contribution(evidence_id=base.evidence_id, feature=None, weight_r=0.15),
+            Contribution(evidence_id=None, feature="session_london", weight_r=0.05),
         ),
         "valid_until_ns": T0 + 120 * NS_PER_SECOND,
         "revision": 0,
@@ -215,18 +295,57 @@ def candidate(**overrides: Any) -> Candidate:
     }
     fields.update(overrides)
     fields.setdefault(
-        "candidate_id",
-        identity.candidate_id(
-            fields["setup_type"], fields["side"].value, fields["evidence_ids"], fields["revision"]
+        "opportunity_id",
+        identity.opportunity_id(
+            fields["setup_type"], fields["side"].value, fields["horizon"].value, fields["market_event_ids"]
         ),
     )
+    fields.setdefault(
+        "candidate_id",
+        identity.candidate_id(fields["opportunity_id"], fields["model_version_id"], fields["revision"]),
+    )
+    if fields["revision"] > 0 and fields.get("supersedes_candidate_id") is None:
+        fields["supersedes_candidate_id"] = identity.candidate_id(
+            fields["opportunity_id"], fields["model_version_id"], fields["revision"] - 1
+        )
     return Candidate(**fields)
 
 
+def unscored_candidate(**overrides: Any) -> Candidate:
+    fields: dict[str, Any] = {
+        "side": Side.SELL,
+        "setup_type": "sweep_reversal_short",
+        "reference_price": D("2650.10"),
+        "model_version_id": None,
+        "model_status": None,
+        "unscored_reason": "NO_MODEL_AVAILABLE",
+        "risk_unit_price": None,
+        "expected_net_r": None,
+        "net_r_stdev": None,
+        "expected_net_r_stderr": None,
+        "support_count": None,
+        "net_r_quantiles": (),
+        "win_probability_frac": None,
+        "expected_win_r": None,
+        "expected_loss_r": None,
+        "expected_cost_r": None,
+        "expected_holding_time_ns": None,
+        "quality_score": None,
+        "memory_cutoff_time_ns": None,
+        "destinations": (),
+        "baseline_r": None,
+        "contributions": (),
+    }
+    fields.update(overrides)
+    return candidate(**fields)
+
+
 def trade_plan(**overrides: Any) -> TradePlan:
+    source = candidate()
     fields: dict[str, Any] = {
         **_header("decision.planner"),
-        "candidate_id": candidate().candidate_id,
+        "candidate_id": source.candidate_id,
+        "opportunity_id": source.opportunity_id,
         "variant": 0,
         "symbol": "XAUUSD",
         "side": Side.BUY,
@@ -235,6 +354,12 @@ def trade_plan(**overrides: Any) -> TradePlan:
         "entry_order_type": OrderType.LIMIT,
         "entry_price": D("2649.80"),
         "reference_price": D("2650.35"),
+        "entry_trigger": None,
+        "invalidations": (
+            PriceCondition(
+                price=D("2648.00"), trigger=PriceTrigger.AT_OR_BELOW, basis=PriceBasis.BID, timeframe=None
+            ),
+        ),
         "stop_price": D("2647.80"),
         "targets": (
             Target(label="first", price=D("2652.80"), close_frac=D("0.5")),
@@ -242,40 +367,56 @@ def trade_plan(**overrides: Any) -> TradePlan:
         ),
         "expected_net_r": 0.25,
         "net_r_stdev": 1.1,
+        "expected_net_r_stderr": 0.12,
+        "support_count": 84,
         "expected_cost_r": 0.08,
         "model_version_id": MODEL_ID,
+        "model_status": ModelStatus.RESEARCH,
         "max_spread": D("0.40"),
         "max_entry_slippage": D("0.10"),
         "overnight_allowed": False,
-        "status": PlanStatus.PREPARED,
+        "status": PlanStatus.SELECTED,
         "status_reasons": (),
-        "contributions": (EvidenceContribution(evidence_id=evidence().evidence_id, weight=0.25),),
+        "baseline_r": 0.05,
+        "contributions": (Contribution(evidence_id=evidence().evidence_id, feature=None, weight_r=0.20),),
         "valid_until_ns": T0 + 120 * NS_PER_SECOND,
         "revision": 0,
         "supersedes_plan_id": None,
     }
     fields.update(overrides)
-    fields.setdefault("alternative_group_id", identity.alternative_group_id(fields["candidate_id"]))
+    fields.setdefault("alternative_group_id", identity.alternative_group_id(fields["opportunity_id"]))
     fields.setdefault(
         "plan_id",
         identity.plan_id(
             fields["candidate_id"], fields["entry_style"].value, fields["variant"], fields["revision"]
         ),
     )
+    if fields["revision"] > 0 and fields.get("supersedes_plan_id") is None:
+        fields["supersedes_plan_id"] = identity.plan_id(
+            fields["candidate_id"],
+            fields["entry_style"].value,
+            fields["variant"],
+            fields["revision"] - 1,
+        )
     return TradePlan(**fields)
 
 
-def risk_decision(**overrides: Any) -> RiskDecision:
+def risk_decision(plan: TradePlan | None = None, **overrides: Any) -> RiskDecision:
+    plan = trade_plan() if plan is None else plan
     fields: dict[str, Any] = {
         **_header("risk.gate"),
-        "plan_id": trade_plan().plan_id,
+        "plan_id": plan.plan_id,
+        "plan_fingerprint": fingerprint(plan),
+        "alternative_group_id": plan.alternative_group_id,
         "attempt": 0,
         "outcome": RiskOutcome.APPROVED,
         "reason_codes": (),
         "volume_lots": D("0.50"),
         "risk_amount": D("104.00"),
         "risk_frac": D("0.00104"),
+        "reference_equity_amount": D("100000.00"),
         "quality_validated": False,
+        "quality_model_version_id": None,
         "account_currency": "USD",
         "daily_state": DailyState.NORMAL,
         "daily_pnl_frac": D("0.004"),
@@ -303,14 +444,30 @@ def risk_decision(**overrides: Any) -> RiskDecision:
     return RiskDecision(**fields)
 
 
+def rejected_risk_decision(plan: TradePlan | None = None, **overrides: Any) -> RiskDecision:
+    fields: dict[str, Any] = {
+        "outcome": RiskOutcome.REJECTED,
+        "reason_codes": ("FIXTURE_REJECTION",),
+        "volume_lots": D("0"),
+        "risk_amount": D("0"),
+        "risk_frac": D("0"),
+        "margin_required_amount": None,
+        "gap_stress_loss_amount": None,
+    }
+    fields.update(overrides)
+    return risk_decision(plan, **fields)
+
+
 def order_event(**overrides: Any) -> OrderEvent:
     plan = trade_plan()
+    decision = risk_decision(plan)
     fields: dict[str, Any] = {
         "producer": "execution.sim",
         "seq": 0,
         "run_id": RUN_ID,
         "mode": RunMode.REPLAY,
         "data_origin": ORIGIN,
+        "attempt": 0,
         "order_seq": 0,
         "event_type": OrderEventType.SUBMIT_REQUESTED,
         "order_state": OrderState.PENDING_SUBMIT,
@@ -324,11 +481,17 @@ def order_event(**overrides: Any) -> OrderEvent:
         "volume_lots": D("0.50"),
         "limit_price": D("2649.80"),
         "trigger_price": None,
+        "reference_price": D("2650.35"),
         "attached_stop_price": D("2647.80"),
         "attached_take_profit_price": None,
-        "valid_until_ns": T0 + 120 * NS_PER_SECOND,
+        "valid_until_ns": T0 + 30 * NS_PER_SECOND,
+        "requested_volume_lots": None,
+        "requested_limit_price": None,
+        "requested_trigger_price": None,
+        "requested_valid_until_ns": None,
         "plan_id": plan.plan_id,
-        "risk_decision_id": risk_decision().decision_id,
+        "risk_decision_id": decision.decision_id,
+        "alternative_group_id": plan.alternative_group_id,
         "position_id": None,
         "broker_order_id": None,
         "cumulative_filled_lots": D("0"),
@@ -339,10 +502,13 @@ def order_event(**overrides: Any) -> OrderEvent:
         "reason_code": None,
     }
     fields.update(overrides)
-    fields.setdefault(
-        "client_order_id",
-        identity.client_order_id(fields["run_id"], plan.plan_id, fields["intent"].value, 0),
-    )
+    if "client_order_id" not in fields:
+        origin = (
+            fields["risk_decision_id"] if fields["intent"] is OrderIntent.ENTRY else fields["position_id"]
+        )
+        fields["client_order_id"] = identity.client_order_id(
+            fields["run_id"], origin, fields["intent"].value, fields["attempt"]
+        )
     fields.setdefault(
         "order_event_id", identity.order_event_id(fields["client_order_id"], fields["order_seq"])
     )
@@ -370,17 +536,45 @@ def position(**overrides: Any) -> Position:
         "realized_net_pnl_amount": D("-2.00"),
         "unrealized_net_pnl_amount": D("38.00"),
         "peak_net_pnl_amount": D("36.00"),
+        "trough_net_pnl_amount": D("-14.50"),
         "costs_amount": D("2.00"),
         "swap_amount": D("0"),
         "account_currency": "USD",
         "opened_time_ns": T0 + 2 * NS_PER_SECOND,
         "closed_time_ns": None,
+        "close_reason": None,
         "plan_id": entry.plan_id,
         "opening_client_order_id": entry.client_order_id,
     }
     fields.update(overrides)
-    fields.setdefault("position_id", identity.position_id(fields["run_id"], entry.client_order_id))
+    fields.setdefault("peak_time_ns", fields["decision_time_ns"])
+    if "position_id" not in fields:
+        fields["position_id"] = identity.position_id(fields["run_id"], fields["opening_client_order_id"])
     return Position(**fields)
+
+
+def external_position(**overrides: Any) -> Position:
+    fields: dict[str, Any] = {
+        "owner": PositionOwner.EXTERNAL,
+        "external_ref": "FIXTURE-TICKET-1",
+        "position_id": identity.external_position_id("fixture-account", "FIXTURE-TICKET-1"),
+        "symbol": "EURUSD",
+        "side": Side.SELL,
+        "average_entry_price": D("1.0850"),
+        "initial_stop_price": None,
+        "stop_price": None,
+        "mark_price": D("1.0842"),
+        "initial_risk_amount": None,
+        "plan_id": None,
+        "opening_client_order_id": None,
+        "realized_net_pnl_amount": D("0"),
+        "unrealized_net_pnl_amount": D("40.00"),
+        "peak_net_pnl_amount": D("55.00"),
+        "trough_net_pnl_amount": D("-5.00"),
+        "costs_amount": D("0"),
+    }
+    fields.update(overrides)
+    return position(**fields)
 
 
 def clock_reading(**overrides: Any) -> ClockReading:
@@ -392,6 +586,7 @@ def clock_reading(**overrides: Any) -> ClockReading:
         "clock_mode": ClockMode.REPLAY,
         "wall_time_ns": T0,
         "monotonic_ns": 0,
+        "regressions_observed": 0,
     }
     fields.update(overrides)
     fields.setdefault("trading_day", trading_day(fields["wall_time_ns"]))
@@ -400,6 +595,7 @@ def clock_reading(**overrides: Any) -> ClockReading:
 
 #: One valid sample builder per contract name.
 BUILDERS = {
+    "RunManifest": run_manifest,
     "Tick": tick,
     "Evidence": evidence,
     "Candidate": candidate,
@@ -420,10 +616,7 @@ def all_samples() -> dict[str, Record]:
 def order_lifecycle() -> list[OrderEvent]:
     """A complete, valid life of one entry order: submit -> accept -> partial fill -> fill."""
     submit = order_event()
-    common: dict[str, Any] = {
-        "client_order_id": submit.client_order_id,
-        "broker_order_id": identity.broker_order_id(submit.client_order_id),
-    }
+    common: dict[str, Any] = {"broker_order_id": identity.broker_order_id(submit.client_order_id)}
     accepted = order_event(
         **common,
         seq=1,
@@ -464,27 +657,85 @@ def order_lifecycle() -> list[OrderEvent]:
     return [submit, accepted, partial, filled]
 
 
+def protective_stop_lifecycle() -> list[OrderEvent]:
+    """The stop order of the sample position: created, working, tightened by a replacement."""
+    held = position()
+    base: dict[str, Any] = {
+        "side": Side.SELL,
+        "order_type": OrderType.STOP,
+        "intent": OrderIntent.PROTECTIVE_STOP,
+        "limit_price": None,
+        "trigger_price": D("2647.80"),
+        "reference_price": None,
+        "attached_stop_price": None,
+        "valid_until_ns": None,
+        "plan_id": None,
+        "risk_decision_id": None,
+        "alternative_group_id": None,
+        "position_id": held.position_id,
+        "reason_code": "ENTRY_FILLED",
+    }
+    t = T0 + 2 * NS_PER_SECOND
+    submit = order_event(**base, seq=4, event_time_ns=t, receive_time_ns=t)
+    broker = identity.broker_order_id(submit.client_order_id)
+    working = order_event(
+        **{**base, "reason_code": None},
+        seq=5,
+        order_seq=1,
+        event_type=OrderEventType.ACCEPTED,
+        order_state=OrderState.WORKING,
+        broker_order_id=broker,
+        event_time_ns=t,
+        receive_time_ns=t + NS_PER_MS,
+    )
+    request = order_event(
+        **{**base, "reason_code": "RATCHET"},
+        seq=6,
+        order_seq=2,
+        event_type=OrderEventType.REPLACE_REQUESTED,
+        order_state=OrderState.PENDING_REPLACE,
+        broker_order_id=broker,
+        requested_trigger_price=D("2649.90"),
+        event_time_ns=T0 + 60 * NS_PER_SECOND,
+        receive_time_ns=T0 + 60 * NS_PER_SECOND,
+    )
+    replaced = order_event(
+        **{**base, "reason_code": None, "trigger_price": D("2649.90")},
+        seq=7,
+        order_seq=3,
+        event_type=OrderEventType.REPLACED,
+        order_state=OrderState.WORKING,
+        broker_order_id=broker,
+        event_time_ns=T0 + 60 * NS_PER_SECOND,
+        receive_time_ns=T0 + 60 * NS_PER_SECOND + NS_PER_MS,
+    )
+    return [submit, working, request, replaced]
+
+
 def position_lifecycle() -> list[Position]:
     """Open -> stop tightened and partial close -> closed.  Stop only tightens, peak only rises."""
     opened = position()
+    t1 = T0 + 60 * NS_PER_SECOND
     tightened = position(
         revision=1,
         seq=1,
-        decision_time_ns=T0 + 60 * NS_PER_SECOND,
-        as_of_time_ns=T0 + 60 * NS_PER_SECOND - NS_PER_MS,
+        decision_time_ns=t1,
+        as_of_time_ns=t1 - NS_PER_MS,
         volume_lots=D("0.25"),
         stop_price=D("2649.90"),
         mark_price=D("2652.80"),
         realized_net_pnl_amount=D("72.00"),
         unrealized_net_pnl_amount=D("74.00"),
         peak_net_pnl_amount=D("146.00"),
+        peak_time_ns=t1,
         costs_amount=D("3.00"),
     )
+    t2 = T0 + 300 * NS_PER_SECOND
     closed = position(
         revision=2,
         seq=2,
-        decision_time_ns=T0 + 300 * NS_PER_SECOND,
-        as_of_time_ns=T0 + 300 * NS_PER_SECOND - NS_PER_MS,
+        decision_time_ns=t2,
+        as_of_time_ns=t2 - NS_PER_MS,
         state=PositionState.CLOSED,
         volume_lots=D("0"),
         stop_price=D("2649.90"),
@@ -492,14 +743,16 @@ def position_lifecycle() -> list[Position]:
         realized_net_pnl_amount=D("73.50"),
         unrealized_net_pnl_amount=D("0"),
         peak_net_pnl_amount=D("146.00"),
+        peak_time_ns=t1,
         costs_amount=D("4.00"),
         closed_time_ns=T0 + 299 * NS_PER_SECOND,
+        close_reason="PROTECTIVE_STOP",
     )
     return [opened, tightened, closed]
 
 
 def model_lifecycle() -> list[ModelVersion]:
-    """RESEARCH -> SHADOW -> ACTIVE (with a recorded owner approval - fixture values)."""
+    """RESEARCH -> SHADOW -> ACTIVE.  The approval is a FIXTURE value, not an owner decision."""
     research = model_version()
     shadow = model_version(
         seq=1, revision=1, status=ModelStatus.SHADOW, status_time_ns=T0 - 1800 * NS_PER_SECOND
@@ -509,8 +762,12 @@ def model_lifecycle() -> list[ModelVersion]:
         revision=2,
         status=ModelStatus.ACTIVE,
         status_time_ns=T0 - 600 * NS_PER_SECOND,
-        approved_by="FIXTURE-OWNER",
-        approval_reference="D-999",
+        evaluation_report_uri="models/research/fixture_net_r/0.1.0/model_card.md",
+        evaluation_report_sha256="56" * 32,
+        promotion_criteria_sha256="78" * 32,
+        shadow_run_ids=(RUN_ID,),
+        approved_by=FIXTURE_APPROVER,
+        approval_reference=FIXTURE_DECISION,
     )
     return [research, shadow, active]
 
@@ -518,26 +775,67 @@ def model_lifecycle() -> list[ModelVersion]:
 def variants() -> dict[str, dict[str, Record]]:
     """Named, valid sample records per contract covering the main shapes of each contract."""
     base_evidence = evidence()
-    protective_position = position()
+    breakout = evidence(
+        engine="cavemen",
+        producer="strategy_intelligence.cavemen",
+        kind="breakout",
+        levels=(PriceLevel(role="BREAKOUT_LEVEL", price=D("2651.20"), identity=True),),
+        invalidation=None,
+        features=(),
+    )
     orders = order_lifecycle()
+    stops = protective_stop_lifecycle()
     positions = position_lifecycle()
     models = model_lifecycle()
-    halted_time = T0
+    plan = trade_plan()
     return {
+        "RunManifest": {
+            "replay_research": run_manifest(),
+            "paper_primary": run_manifest(
+                mode=RunMode.PAPER,
+                role=RunRole.PRIMARY,
+                label="fixture-paper",
+                data_start_ns=None,
+                data_end_ns=None,
+                seed=None,
+            ),
+            "replay_shadow": run_manifest(
+                role=RunRole.SHADOW, label="fixture-shadow", shadow_of_run_id=RUN_ID
+            ),
+        },
         "Tick": {
             "typical": tick(),
-            "with_volumes": tick(seq=1, bid_volume=D("3.5"), ask_volume=D("1")),
-            "crossed": tick(seq=2, bid=D("2650.40"), ask=D("2650.30"), flags=(TickFlag.CROSSED,)),
+            "measured_receive_time": tick(seq=1, flags=(), bid_volume=D("3.5"), ask_volume=D("1")),
+            "crossed": tick(
+                seq=2,
+                bid=D("2650.40"),
+                ask=D("2650.30"),
+                flags=(TickFlag.CROSSED, TickFlag.RECEIVE_TIME_MODELLED),
+            ),
             "event_after_receive": tick(
                 seq=3,
                 event_time_ns=T0,
                 receive_time_ns=T0 - NS_PER_MS,
-                flags=(TickFlag.STALE, TickFlag.EVENT_AFTER_RECEIVE),
+                flags=(TickFlag.EVENT_AFTER_RECEIVE,),
             ),
             "observed_silver": tick(symbol="XAGUSD", bid=D("31.115"), ask=D("31.14")),
         },
         "Evidence": {
             "active_bullish": base_evidence,
+            "active_non_directional": evidence(
+                engine="orb_vwap",
+                producer="strategy_intelligence.orb_vwap",
+                kind="opening_range",
+                stage=EvidenceStage.FORMING,
+                bullish_score=0.0,
+                bearish_score=0.0,
+                levels=(
+                    PriceLevel(role="RANGE_HIGH", price=D("2651.90"), identity=True),
+                    PriceLevel(role="RANGE_LOW", price=D("2648.10"), identity=True),
+                ),
+                invalidation=None,
+                features=(NamedValue(name="range_minutes", value=15.0),),
+            ),
             "inactive": evidence(
                 engine="orb_vwap",
                 producer="strategy_intelligence.orb_vwap",
@@ -561,21 +859,23 @@ def variants() -> dict[str, dict[str, Record]]:
                 levels=(),
                 invalidation=None,
                 missing_reason="INSUFFICIENT_HISTORY",
-                features=(),
+                features=(NamedValue(name="bars_available", value=None),),
             ),
             "contra": evidence(
                 engine="liquidity_hunter",
                 producer="strategy_intelligence.liquidity_hunter",
+                kind="rejection",
                 state=EvidenceState.CONTRA,
                 stage=EvidenceStage.TRIGGERED,
                 bullish_score=0.0,
                 bearish_score=0.6,
-                contradicts_evidence_id=base_evidence.evidence_id,
+                levels=(PriceLevel(role="REJECTION_HIGH", price=D("2650.90"), identity=True),),
+                invalidation=None,
+                contradicts_market_event_ids=(base_evidence.market_event_id,),
             ),
             "invalidated_revision": evidence(
                 revision=1,
                 seq=1,
-                supersedes_evidence_id=base_evidence.evidence_id,
                 state=EvidenceState.INVALIDATED,
                 stage=EvidenceStage.COMPLETED,
                 bullish_score=0.0,
@@ -583,88 +883,113 @@ def variants() -> dict[str, dict[str, Record]]:
                 decision_time_ns=T0 + 30 * NS_PER_SECOND,
                 as_of_time_ns=T0 + 30 * NS_PER_SECOND,
             ),
+            "same_event_other_engine": evidence(
+                engine="liquidity_hunter",
+                producer="strategy_intelligence.liquidity_hunter",
+                bullish_score=0.4,
+                features=(),
+            ),
+            "cavemen_breakout": breakout,
             "cavemen_pending_limit": evidence(
                 engine="cavemen",
                 producer="strategy_intelligence.cavemen",
+                seq=1,
                 kind="pending_limit",
                 stage=EvidenceStage.ARMED,
                 bullish_score=0.55,
-                levels=(
-                    PriceLevel(role="BREAKOUT_LEVEL", price=D("2651.20")),
-                    PriceLevel(role="PENDING_LIMIT", price=D("2650.90")),
-                ),
-                invalidation=Invalidation(
+                related_market_event_id=breakout.market_event_id,
+                levels=(PriceLevel(role="PENDING_LIMIT", price=D("2650.90"), identity=True),),
+                invalidation=PriceCondition(
                     price=D("2649.50"),
-                    trigger=PriceTrigger.AT_OR_BELOW,
+                    trigger=PriceTrigger.BELOW,
                     basis=PriceBasis.CANDLE_CLOSE,
                     timeframe=Timeframe.M5,
                 ),
+                features=(),
             ),
-            "intermarket": evidence(
+            "intermarket_real_yield": evidence(
                 producer_class=ProducerClass.INTERMARKET,
-                engine="dxy_lead",
+                engine="real_yield_lead",
                 producer="intermarket.lead_lag",
                 kind="lead_lag_signal",
-                symbol="DXY",
-                timeframe=Timeframe.M1,
+                symbol="US10Y_REAL",
+                timeframe=Timeframe.NONE,
                 stage=EvidenceStage.NONE,
-                bullish_score=0.0,
-                bearish_score=0.3,
-                levels=(),
+                bullish_score=0.3,
+                bearish_score=0.0,
+                levels=(PriceLevel(role="OBSERVED_VALUE", price=D("-0.35"), identity=False),),
                 invalidation=None,
                 features=(NamedValue(name="lag_seconds", value=45.0),),
             ),
         },
         "Candidate": {
             "scored": candidate(),
-            "unscored": candidate(
-                side=Side.SELL,
-                setup_type="sweep_reversal_short",
-                reference_price=D("2650.10"),
-                model_version_id=None,
-                expected_net_r=None,
+            "unscored": unscored_candidate(),
+            "scored_by_shadow_model": candidate(
+                model_version_id=identity.model_version_id("fixture_shadow", "0.2.0", "cd" * 32),
+                model_status=ModelStatus.SHADOW,
+                expected_net_r=1.0,
                 net_r_stdev=None,
-                net_r_quantiles=(),
-                win_probability_frac=None,
-                expected_cost_r=None,
-                expected_holding_time_ns=None,
-                quality_score=None,
-                destinations=(),
+                expected_net_r_stderr=None,
+                support_count=None,
+                contributions=(),
+                baseline_r=None,
             ),
-            "rejected_negative": candidate(
+            "rejected_revision": candidate(
                 revision=1,
                 seq=1,
-                supersedes_candidate_id=candidate().candidate_id,
                 status=CandidateStatus.REJECTED,
                 status_reasons=("NEGATIVE_EXPECTED_NET_R",),
                 expected_net_r=-0.15,
+                decision_time_ns=T0 + NS_PER_SECOND,
+                as_of_time_ns=T0 + NS_PER_SECOND,
             ),
         },
         "TradePlan": {
-            "limit_buy": trade_plan(),
-            "market_sell": trade_plan(
+            "limit_buy_selected": plan,
+            "market_sell_prepared": trade_plan(
                 side=Side.SELL,
                 entry_style=EntryStyle.MARKET,
                 entry_order_type=OrderType.MARKET,
                 entry_price=None,
                 reference_price=D("2650.10"),
+                invalidations=(),
                 stop_price=D("2652.10"),
-                targets=(Target(label="first", price=D("2646.10"), close_frac=D("1")),),
+                targets=(Target(label="first", price=D("2646.10"), close_frac=D("0")),),
                 horizon=Horizon.INTRADAY,
                 overnight_allowed=True,
                 max_spread=None,
                 max_entry_slippage=None,
+                status=PlanStatus.PREPARED,
+                expected_net_r=-0.1,
+            ),
+            "pullback_by_market_order_armed": trade_plan(
+                variant=1,
+                entry_style=EntryStyle.PULLBACK,
+                entry_order_type=OrderType.MARKET,
+                entry_price=D("2648.20"),
+                stop_price=D("2646.90"),
+                targets=(Target(label="back_to_quote", price=D("2650.00"), close_frac=D("1")),),
+                entry_trigger=PriceCondition(
+                    price=D("2648.20"),
+                    trigger=PriceTrigger.AT_OR_BELOW,
+                    basis=PriceBasis.ASK,
+                    timeframe=None,
+                ),
+                status=PlanStatus.ARMED,
+                net_r_stdev=None,
             ),
             "rejected_stale": trade_plan(
-                variant=1,
+                variant=2,
                 status=PlanStatus.REJECTED,
                 status_reasons=("STALE_CANDIDATE",),
                 valid_until_ns=T0,
             ),
         },
         "RiskDecision": {
-            "approved": risk_decision(),
-            "approved_reduced": risk_decision(
+            "approved": risk_decision(plan),
+            "approved_reduced_defensive": risk_decision(
+                plan,
                 attempt=1,
                 seq=1,
                 outcome=RiskOutcome.APPROVED_REDUCED,
@@ -675,39 +1000,38 @@ def variants() -> dict[str, dict[str, Record]]:
                 daily_state=DailyState.DEFENSIVE,
                 daily_pnl_frac=D("-0.021"),
             ),
-            "rejected_at_floor": risk_decision(
+            "approved_within_surplus": risk_decision(
+                plan,
                 attempt=2,
                 seq=2,
-                outcome=RiskOutcome.REJECTED,
+                daily_state=DailyState.PROFIT_PROTECTION,
+                daily_pnl_frac=D("0.062"),
+                profit_floor_frac=D("0.05"),
+            ),
+            "rejected_at_floor": rejected_risk_decision(
+                plan,
+                attempt=3,
+                seq=3,
                 reason_codes=("DAILY_PROFIT_FLOOR",),
-                volume_lots=D("0"),
-                risk_amount=D("0"),
-                risk_frac=D("0"),
                 daily_state=DailyState.PROFIT_PROTECTION,
                 daily_pnl_frac=D("0.05"),
                 profit_floor_frac=D("0.05"),
-                margin_required_amount=None,
-                gap_stress_loss_amount=None,
             ),
-            "rejected_halt": risk_decision(
-                attempt=3,
-                seq=3,
-                decision_time_ns=halted_time,
-                outcome=RiskOutcome.REJECTED,
+            "rejected_halt": rejected_risk_decision(
+                plan,
+                attempt=4,
+                seq=4,
                 reason_codes=("EMERGENCY_HALT",),
-                volume_lots=D("0"),
-                risk_amount=D("0"),
-                risk_frac=D("0"),
                 daily_state=DailyState.EMERGENCY_HALT,
                 daily_pnl_frac=D("-0.03"),
             ),
         },
         "OrderEvent": {
-            "submit_requested": orders[0],
-            "accepted": orders[1],
-            "partially_filled": orders[2],
-            "filled": orders[3],
-            "rejected": order_event(
+            "entry_submit_requested": orders[0],
+            "entry_accepted": orders[1],
+            "entry_partially_filled": orders[2],
+            "entry_filled": orders[3],
+            "entry_rejected": order_event(
                 seq=1,
                 order_seq=1,
                 event_type=OrderEventType.REJECTED,
@@ -716,57 +1040,30 @@ def variants() -> dict[str, dict[str, Record]]:
                 receive_time_ns=T0 + 3 * NS_PER_MS,
                 reason_code="MARKET_CLOSED",
             ),
-            "protective_stop": order_event(
-                seq=4,
-                side=Side.SELL,
-                order_type=OrderType.STOP,
-                intent=OrderIntent.PROTECTIVE_STOP,
-                limit_price=None,
-                trigger_price=D("2647.80"),
-                attached_stop_price=None,
-                valid_until_ns=None,
-                plan_id=None,
-                risk_decision_id=None,
-                position_id=protective_position.position_id,
-                client_order_id=identity.client_order_id(
-                    RUN_ID, protective_position.position_id, OrderIntent.PROTECTIVE_STOP.value, 0
-                ),
-                event_time_ns=T0 + 2 * NS_PER_SECOND,
-                receive_time_ns=T0 + 2 * NS_PER_SECOND,
-            ),
+            "protective_stop_submit": stops[0],
+            "protective_stop_replace_requested": stops[2],
+            "protective_stop_replaced": stops[3],
         },
         "Position": {
             "open": positions[0],
             "tightened_partial": positions[1],
             "closed": positions[2],
-            "external_other_bot": position(
-                owner=PositionOwner.EXTERNAL,
-                external_ref="FIXTURE-TICKET-1",
-                position_id=identity.external_position_id("fixture-account", "FIXTURE-TICKET-1"),
-                symbol="EURUSD",
-                side=Side.SELL,
-                average_entry_price=D("1.0850"),
-                initial_stop_price=None,
-                stop_price=None,
-                mark_price=D("1.0842"),
-                initial_risk_amount=None,
-                plan_id=None,
-                opening_client_order_id=None,
-                realized_net_pnl_amount=D("0"),
-                unrealized_net_pnl_amount=D("40.00"),
-                peak_net_pnl_amount=D("55.00"),
-                costs_amount=D("0"),
-            ),
+            "external_other_bot": external_position(),
         },
         "ModelVersion": {
             "research": models[0],
             "shadow": models[1],
-            "active": models[2],
+            "active_fixture_approval": models[2],
             "ruleset_baseline": model_version(
                 model_name="fixture_ruleset",
                 kind=ModelKind.RULESET,
+                training_data_origin=None,
+                training_data_sha256=None,
+                training_config_sha256=None,
                 training_data_start_ns=None,
-                training_data_end_ns=None,
+                training_information_end_ns=None,
+                embargo_ns=None,
+                split_spec_sha256=None,
                 feature_schema_sha256=None,
                 seed=None,
                 metrics=(),
@@ -775,7 +1072,11 @@ def variants() -> dict[str, dict[str, Record]]:
         "Clock": {
             "replay": clock_reading(),
             "paper_system": clock_reading(
-                mode=RunMode.PAPER, clock_mode=ClockMode.SYSTEM, monotonic_ns=123_456_789, seq=7
+                mode=RunMode.PAPER,
+                clock_mode=ClockMode.SYSTEM,
+                monotonic_ns=123_456_789,
+                seq=7,
+                regressions_observed=1,
             ),
         },
     }

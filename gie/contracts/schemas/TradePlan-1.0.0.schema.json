@@ -1,38 +1,133 @@
 {
+  "$comment": "Necessary but not sufficient: decimal bounds (x-gie-*), canonical order, cross-field invariants (x-gie-invariants), lifecycle rules (x-gie-behaviour), exact 64-bit integer tokens and printable-text rules are enforced by the reference implementation gie.contracts.",
   "$defs": {
-    "EvidenceContribution": {
+    "Contribution": {
       "additionalProperties": false,
-      "description": "How much one evidence record contributed to the plan's score (explainability).",
+      "description": "Share of an estimate attributed to one driver (explainability).",
       "properties": {
         "evidence_id": {
-          "description": "Contributing evidence.",
-          "maxLength": 36,
-          "minLength": 36,
-          "pattern": "^evd_[0-9a-f]{32}$",
-          "type": "string"
+          "anyOf": [
+            {
+              "maxLength": 36,
+              "minLength": 36,
+              "pattern": "^evd_[0-9a-f]{32}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Contributing evidence, or null for a named feature."
         },
-        "weight": {
+        "feature": {
+          "anyOf": [
+            {
+              "maxLength": 48,
+              "minLength": 1,
+              "pattern": "^[a-z][a-z0-9_]{1,47}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Contributing feature from the feature dictionary, or null for evidence."
+        },
+        "weight_r": {
           "description": "Signed contribution to the expected net R.",
           "type": "number",
           "x-gie-unit": "R"
         }
       },
       "required": [
-        "evidence_id",
-        "weight"
+        "weight_r"
       ],
-      "type": "object"
+      "type": "object",
+      "x-gie-invariants": [
+        {
+          "id": "CONTRIB-1",
+          "rule": "exactly one of evidence_id and feature is set"
+        }
+      ]
+    },
+    "PriceCondition": {
+      "additionalProperties": false,
+      "description": "Observable price condition: the basis price compared with a level.",
+      "properties": {
+        "basis": {
+          "description": "Which price is compared.",
+          "enum": [
+            "BID",
+            "ASK",
+            "MID",
+            "CANDLE_CLOSE"
+          ],
+          "type": "string"
+        },
+        "price": {
+          "description": "Level of the condition.",
+          "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
+          "type": "string",
+          "x-gie-type": "decimal",
+          "x-gie-unit": "quote currency per unit"
+        },
+        "timeframe": {
+          "anyOf": [
+            {
+              "enum": [
+                "NONE",
+                "TICK",
+                "S1",
+                "M1",
+                "M5",
+                "M15",
+                "M30",
+                "H1",
+                "H4",
+                "D1"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Candle timeframe when basis is CANDLE_CLOSE, otherwise null."
+        },
+        "trigger": {
+          "description": "Comparison that makes the condition true.",
+          "enum": [
+            "BELOW",
+            "AT_OR_BELOW",
+            "AT_OR_ABOVE",
+            "ABOVE"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "price",
+        "trigger",
+        "basis"
+      ],
+      "type": "object",
+      "x-gie-invariants": [
+        {
+          "id": "COND-1",
+          "rule": "timeframe is a candle timeframe if and only if basis is CANDLE_CLOSE"
+        }
+      ]
     },
     "Target": {
       "additionalProperties": false,
-      "description": "A profit destination at which part of the position is closed.",
+      "description": "A profit destination of the plan.",
       "properties": {
         "close_frac": {
-          "description": "Share of the initial volume to close at this target.",
+          "description": "Share of the initial volume to close at this target (0 = no scheduled close).",
           "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
           "type": "string",
-          "x-gie-exclusiveMinimum": "0",
           "x-gie-maximum": "1",
+          "x-gie-minimum": "0",
           "x-gie-type": "decimal",
           "x-gie-unit": "fraction of initial volume"
         },
@@ -63,24 +158,36 @@
   "$id": "urn:gie:contract:TradePlan:1.0.0",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "Executable plan: entry, hard stop, targets, expected net R and uncertainty.",
+  "description": "Executable plan: entry, hard stop, destinations, expected net R and uncertainty.",
   "properties": {
     "alternative_group_id": {
-      "description": "identity.alternative_group_id(candidate_id); alternatives exclude each other.",
+      "description": "identity.alternative_group_id(opportunity_id); alternatives exclude each other.",
       "maxLength": 36,
       "minLength": 36,
       "pattern": "^grp_[0-9a-f]{32}$",
       "type": "string"
     },
     "as_of_time_ns": {
-      "description": "Receive time of the newest input the record depends on (causality watermark).",
+      "description": "Market-data watermark: receive time of the newest market data the record depends on, directly or through its inputs.",
       "maximum": 9223372036854775807,
       "minimum": 0,
       "type": "integer",
       "x-gie-unit": "ns since epoch, UTC"
     },
+    "baseline_r": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Part of expected_net_r not attributed to a contribution.",
+      "x-gie-unit": "R"
+    },
     "candidate_id": {
-      "description": "Candidate this plan trades.",
+      "description": "Candidate (one scorer's view) this plan was built from.",
       "maxLength": 36,
       "minLength": 36,
       "pattern": "^cnd_[0-9a-f]{32}$",
@@ -91,14 +198,14 @@
       "description": "Contract name."
     },
     "contributions": {
-      "description": "Evidence contributions to the expected net R.",
+      "description": "Attribution of expected_net_r to evidence and features.",
       "items": {
-        "$ref": "#/$defs/EvidenceContribution"
+        "$ref": "#/$defs/Contribution"
       },
       "maxItems": 64,
       "minItems": 0,
       "type": "array",
-      "x-gie-canonical-order": "sorted by evidence_id",
+      "x-gie-canonical-order": "sorted by driver",
       "x-gie-unique": true
     },
     "data_origin": {
@@ -138,7 +245,7 @@
           "type": "null"
         }
       ],
-      "description": "Limit or stop-trigger price of the entry; null for a market entry.",
+      "description": "Intended entry level: the limit or stop-trigger price, or the retest / pullback level. Null only for entry style MARKET.",
       "x-gie-unit": "USD per troy ounce"
     },
     "entry_style": {
@@ -152,6 +259,17 @@
       ],
       "type": "string"
     },
+    "entry_trigger": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PriceCondition"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Observable condition that must occur before the entry is attempted (e.g. the confirmation of a retest); null when none."
+    },
     "expected_cost_r": {
       "description": "Expected spread, commission and slippage already deducted in expected_net_r.",
       "minimum": 0.0,
@@ -159,8 +277,21 @@
       "x-gie-unit": "R"
     },
     "expected_net_r": {
-      "description": "Expected net result of this plan.",
+      "description": "Expected net result in R of this plan's own risk distance.",
       "type": "number",
+      "x-gie-unit": "R"
+    },
+    "expected_net_r_stderr": {
+      "anyOf": [
+        {
+          "minimum": 0.0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Standard error of expected_net_r.",
       "x-gie-unit": "R"
     },
     "horizon": {
@@ -170,6 +301,15 @@
         "INTRADAY"
       ],
       "type": "string"
+    },
+    "invalidations": {
+      "description": "Observable conditions that invalidate the plan before entry (actual behaviour overrides the expectation); evaluated by the decision engine, which then emits a WITHDRAWN revision.",
+      "items": {
+        "$ref": "#/$defs/PriceCondition"
+      },
+      "maxItems": 8,
+      "minItems": 0,
+      "type": "array"
     },
     "max_entry_slippage": {
       "anyOf": [
@@ -209,6 +349,18 @@
       ],
       "type": "string"
     },
+    "model_status": {
+      "description": "Promotion status of that model at decision time (only ACTIVE is validated).",
+      "enum": [
+        "RESEARCH",
+        "SHADOW",
+        "ACTIVE",
+        "RETIRED",
+        "ROLLED_BACK",
+        "REJECTED"
+      ],
+      "type": "string"
+    },
     "model_version_id": {
       "description": "Model (or rule set) version behind the estimates.",
       "maxLength": 36,
@@ -217,10 +369,24 @@
       "type": "string"
     },
     "net_r_stdev": {
-      "description": "Predictive standard deviation of the net result.",
-      "minimum": 0.0,
-      "type": "number",
+      "anyOf": [
+        {
+          "minimum": 0.0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Outcome dispersion of a single result.",
       "x-gie-unit": "R"
+    },
+    "opportunity_id": {
+      "description": "Stable identity of the opportunity (same as on the candidate).",
+      "maxLength": 36,
+      "minLength": 36,
+      "pattern": "^opp_[0-9a-f]{32}$",
+      "type": "string"
     },
     "overnight_allowed": {
       "description": "Whether the position may be held past the daily rollover (never over a weekend).",
@@ -255,7 +421,7 @@
       "type": "integer"
     },
     "run_id": {
-      "description": "Run that produced the record.",
+      "description": "Run that produced the record (see the RunManifest of that run).",
       "maxLength": 36,
       "minLength": 36,
       "pattern": "^run_[0-9a-f]{32}$",
@@ -263,7 +429,7 @@
     },
     "schema_version": {
       "description": "Version of the contract the message was written with.",
-      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+      "pattern": "^(0|[1-9][0-9]{0,8})\\.(0|[1-9][0-9]{0,8})\\.(0|[1-9][0-9]{0,8})$",
       "type": "string"
     },
     "seq": {
@@ -303,11 +469,12 @@
       "maxItems": 32,
       "minItems": 0,
       "type": "array",
+      "uniqueItems": true,
       "x-gie-canonical-order": "sorted ascending",
       "x-gie-unique": true
     },
     "stop_price": {
-      "description": "Hard protective stop (the plan's invalidation).  It may later be tightened, never widened.",
+      "description": "Hard protective stop.  In later revisions it may move towards the entry, never away from it.",
       "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
       "type": "string",
       "x-gie-exclusiveMinimum": "0",
@@ -328,6 +495,19 @@
       ],
       "description": "Previous revision replaced by this record; null for revision 0."
     },
+    "support_count": {
+      "anyOf": [
+        {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Effective number of cases behind it."
+    },
     "symbol": {
       "description": "Always XAUUSD: GIE trades only gold.",
       "enum": [
@@ -335,6 +515,7 @@
       ],
       "maxLength": 24,
       "minLength": 1,
+      "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]*$",
       "type": "string"
     },
     "targets": {
@@ -344,10 +525,12 @@
       },
       "maxItems": 8,
       "minItems": 1,
-      "type": "array"
+      "type": "array",
+      "x-gie-canonical-order": "sorted by price",
+      "x-gie-unique": true
     },
     "valid_until_ns": {
-      "description": "Expiry instant: the plan must not be acted on at or after it.",
+      "description": "Expiry instant: the plan must not be acted on at or after it.  It is not later than the expiry of its candidate.",
       "maximum": 9223372036854775807,
       "minimum": 0,
       "type": "integer",
@@ -372,6 +555,7 @@
     "as_of_time_ns",
     "plan_id",
     "candidate_id",
+    "opportunity_id",
     "alternative_group_id",
     "variant",
     "symbol",
@@ -380,12 +564,13 @@
     "entry_style",
     "entry_order_type",
     "reference_price",
+    "invalidations",
     "stop_price",
     "targets",
     "expected_net_r",
-    "net_r_stdev",
     "expected_cost_r",
     "model_version_id",
+    "model_status",
     "overnight_allowed",
     "status",
     "status_reasons",
@@ -395,6 +580,76 @@
   ],
   "title": "TradePlan 1.0.0",
   "type": "object",
+  "x-gie-behaviour": {
+    "identity": {
+      "alternative_group_id": "alternative_group_id(opportunity_id)",
+      "plan_id": "plan_id(candidate_id, entry_style, variant, revision)"
+    },
+    "monotonic": [
+      "stop_price never moves away from the entry between revisions"
+    ],
+    "ordering_time": "decision_time_ns",
+    "rank": {
+      "name": "TRADE_PLAN",
+      "value": 60
+    },
+    "stream": "trade_plan/<producer>",
+    "transitions": [
+      {
+        "from": null,
+        "to": [
+          "ARMED",
+          "EXPIRED",
+          "PREPARED",
+          "REJECTED",
+          "SELECTED",
+          "WITHDRAWN"
+        ]
+      },
+      {
+        "from": "ARMED",
+        "to": [
+          "ARMED",
+          "EXPIRED",
+          "REJECTED",
+          "SELECTED",
+          "WITHDRAWN"
+        ]
+      },
+      {
+        "from": "EXPIRED",
+        "to": []
+      },
+      {
+        "from": "PREPARED",
+        "to": [
+          "ARMED",
+          "EXPIRED",
+          "PREPARED",
+          "REJECTED",
+          "SELECTED",
+          "WITHDRAWN"
+        ]
+      },
+      {
+        "from": "REJECTED",
+        "to": []
+      },
+      {
+        "from": "SELECTED",
+        "to": [
+          "EXPIRED",
+          "REJECTED",
+          "SELECTED",
+          "WITHDRAWN"
+        ]
+      },
+      {
+        "from": "WITHDRAWN",
+        "to": []
+      }
+    ]
+  },
   "x-gie-invariants": [
     {
       "id": "CAUSAL-1",
@@ -406,23 +661,23 @@
     },
     {
       "id": "PLN-2",
-      "rule": "alternative_group_id equals identity.alternative_group_id(candidate_id)"
+      "rule": "alternative_group_id equals identity.alternative_group_id(opportunity_id)"
     },
     {
       "id": "PLN-3",
-      "rule": "entry_price is null if and only if entry_order_type is MARKET"
+      "rule": "entry_price is null if and only if entry_style is MARKET"
     },
     {
       "id": "PLN-4",
-      "rule": "entry styles MARKET, LIMIT and STOP use the order type of the same name"
+      "rule": "entry styles MARKET, LIMIT and STOP use the order type of the same name; RETEST and PULLBACK use LIMIT or MARKET"
     },
     {
       "id": "PLN-5",
-      "rule": "the stop is on the losing side of the entry (BUY: stop < entry, SELL: stop > entry)"
+      "rule": "the stop is on the losing side of the effective entry (BUY: stop < entry, SELL: stop > entry)"
     },
     {
       "id": "PLN-6",
-      "rule": "every target is on the winning side of the entry"
+      "rule": "every target is on the winning side of the effective entry"
     },
     {
       "id": "PLN-7",
@@ -434,11 +689,19 @@
     },
     {
       "id": "PLN-9",
-      "rule": "status_reasons is non-empty when status is REJECTED or WITHDRAWN and empty when usable"
+      "rule": "status_reasons is non-empty when status is REJECTED or WITHDRAWN"
     },
     {
       "id": "PLN-10",
-      "rule": "supersedes_plan_id is set if and only if revision > 0"
+      "rule": "supersedes_plan_id is null for revision 0 and otherwise equals the id of the previous revision, identity.plan_id(candidate_id, entry_style, variant, revision - 1)"
+    },
+    {
+      "id": "PLN-11",
+      "rule": "an ARMED or SELECTED plan has expected_net_r > 0 (positive expectancy gate)"
+    },
+    {
+      "id": "PLN-12",
+      "rule": "the plan states its uncertainty: net_r_stdev or expected_net_r_stderr"
     }
   ]
 }

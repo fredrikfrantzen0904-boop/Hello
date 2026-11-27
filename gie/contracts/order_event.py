@@ -6,10 +6,10 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from decimal import Decimal
 from enum import Enum
-from typing import Final
+from typing import ClassVar, Final, final
 
 from gie.contracts import identity
-from gie.contracts._spec import Dec, EnumOf, Id, Int, Opt, Str, TimeNs, fld, inv
+from gie.contracts._spec import Dec, EnumOf, Id, Int, Invariant, Opt, Str, TimeNs, fld, inv
 from gie.contracts.common import (
     PRICE,
     REASON_CODE_PATTERN,
@@ -21,11 +21,19 @@ from gie.contracts.common import (
     symbol_field,
 )
 from gie.contracts.registry import contract
+from gie.core.canonical import EXACT
 from gie.core.errors import IllegalTransitionError
 
 
 class OrderIntent(str, Enum):
-    """Why the order exists.  Only ENTRY creates risk and needs a risk approval."""
+    """Why the order exists.
+
+    Only ``ENTRY`` creates risk; it needs a plan and a risk approval.  The other
+    intents belong to an existing GIE position and may only reduce it:
+    ``PROTECTIVE_STOP`` is the hard stop held by the simulated broker (a STOP
+    order), ``TAKE_PROFIT`` a LIMIT order at a target, ``EXIT`` a discretionary
+    close by the reflex or decision engine.
+    """
 
     ENTRY = "ENTRY"
     PROTECTIVE_STOP = "PROTECTIVE_STOP"
@@ -66,6 +74,10 @@ class OrderState(str, Enum):
 TERMINAL_ORDER_STATES: Final[frozenset[OrderState]] = frozenset(
     {OrderState.FILLED, OrderState.CANCELED, OrderState.REJECTED, OrderState.EXPIRED}
 )
+#: Event types that originate in GIE (requests); all others are reports of the simulated broker.
+ORDER_REQUEST_EVENTS: Final[frozenset[OrderEventType]] = frozenset(
+    {OrderEventType.SUBMIT_REQUESTED, OrderEventType.CANCEL_REQUESTED, OrderEventType.REPLACE_REQUESTED}
+)
 
 _S = OrderState
 _E = OrderEventType
@@ -81,6 +93,9 @@ def _build_transitions() -> dict[tuple[OrderState | None, OrderEventType], froze
         # A market order can fill without a separate acknowledgement.
         (_S.PENDING_SUBMIT, _E.PARTIALLY_FILLED): frozenset({_S.PARTIALLY_FILLED}),
         (_S.PENDING_SUBMIT, _E.FILLED): frozenset({_S.FILLED}),
+        # A request that was never acknowledged can be withdrawn or lapse.
+        (_S.PENDING_SUBMIT, _E.CANCEL_REQUESTED): frozenset({_S.PENDING_CANCEL}),
+        (_S.PENDING_SUBMIT, _E.EXPIRED): frozenset({_S.EXPIRED}),
     }
     for state in _OPEN:
         table[(state, _E.PARTIALLY_FILLED)] = frozenset({_S.PARTIALLY_FILLED})
@@ -104,7 +119,7 @@ def _build_transitions() -> dict[tuple[OrderState | None, OrderEventType], froze
     # Restart reconciliation adopts the simulated broker's authoritative state.
     for state in OrderState:
         if state not in TERMINAL_ORDER_STATES:
-            table[(state, _E.RECONCILED)] = frozenset(OrderState) - {_S.PENDING_SUBMIT}
+            table[(state, _E.RECONCILED)] = frozenset(OrderState) - {_S.PENDING_SUBMIT, *_PENDING_CHANGE}
     return table
 
 
@@ -120,36 +135,64 @@ _STATES_AFTER: Final[dict[OrderEventType, frozenset[OrderState]]] = {
     event: frozenset().union(*(after for (_, e), after in ORDER_TRANSITIONS.items() if e is event))
     for event in OrderEventType
 }
-_PRICE_FIELDS_BY_TYPE = {
+_PRICE_FIELDS_BY_TYPE: Final[dict[OrderType, tuple[bool, bool]]] = {
     OrderType.MARKET: (False, False),
     OrderType.LIMIT: (True, False),
     OrderType.STOP: (False, True),
 }
+_TYPE_BY_INTENT: Final[dict[OrderIntent, OrderType]] = {
+    OrderIntent.PROTECTIVE_STOP: OrderType.STOP,
+    OrderIntent.TAKE_PROFIT: OrderType.LIMIT,
+}
+_REQUESTED = (
+    "requested_volume_lots",
+    "requested_limit_price",
+    "requested_trigger_price",
+    "requested_valid_until_ns",
+)
 
 
 def _order_price(event: OrderEvent) -> Decimal | None:
-    return event.limit_price if event.limit_price is not None else event.trigger_price
+    if event.limit_price is not None:
+        return event.limit_price
+    if event.trigger_price is not None:
+        return event.trigger_price
+    return event.reference_price
+
+
+def _on_losing_side(side: Side, stop: Decimal, price: Decimal) -> bool:
+    return stop < price if side is Side.BUY else stop > price
 
 
 def _protection_geometry(event: OrderEvent) -> bool:
-    price = _order_price(event)
-    if price is None:
-        return True
-    buy = event.side is Side.BUY
-    if event.attached_stop_price is not None and not (
-        event.attached_stop_price < price if buy else event.attached_stop_price > price
+    for price in (
+        _order_price(event),
+        event.average_fill_price if event.intent is OrderIntent.ENTRY else None,
     ):
-        return False
-    return event.attached_take_profit_price is None or (
-        event.attached_take_profit_price > price if buy else event.attached_take_profit_price < price
-    )
+        if price is None:
+            continue
+        if event.attached_stop_price is not None and not _on_losing_side(
+            event.side, event.attached_stop_price, price
+        ):
+            return False
+        if event.attached_take_profit_price is not None and _on_losing_side(
+            event.side, event.attached_take_profit_price, price
+        ):
+            return False
+        if event.attached_take_profit_price is not None and event.attached_take_profit_price == price:
+            return False
+    return True
 
 
 def _fill_consistency(event: OrderEvent) -> bool:
     is_fill = event.event_type in _FILL_EVENTS
     if is_fill != (event.last_fill_lots is not None and event.last_fill_price is not None):
         return False
-    if not is_fill and (event.last_fill_lots is not None or event.last_fill_price is not None):
+    if not is_fill and (
+        event.last_fill_lots is not None
+        or event.last_fill_price is not None
+        or event.last_fill_cost_amount is not None
+    ):
         return False
     if event.cumulative_filled_lots > event.volume_lots:
         return False
@@ -169,6 +212,35 @@ def _fill_consistency(event: OrderEvent) -> bool:
     return (event.order_state is _S.FILLED) == (event.cumulative_filled_lots == event.volume_lots)
 
 
+def _origin_and_identity(event: OrderEvent) -> bool:
+    if event.intent is OrderIntent.ENTRY:
+        origin = event.risk_decision_id
+        if event.attempt != 0:
+            return False
+    else:
+        origin = event.position_id
+    return origin is not None and event.client_order_id == identity.client_order_id(
+        event.run_id, origin, event.intent.value, event.attempt
+    )
+
+
+def _expiry_rules(event: OrderEvent) -> bool:
+    if event.intent is OrderIntent.PROTECTIVE_STOP and event.valid_until_ns is not None:
+        return False
+    if (
+        event.intent is OrderIntent.ENTRY
+        and event.order_type is not OrderType.MARKET
+        and event.valid_until_ns is None
+    ):
+        return False
+    return not (
+        event.event_type is _E.SUBMIT_REQUESTED
+        and event.valid_until_ns is not None
+        and event.valid_until_ns <= event.event_time_ns
+    )
+
+
+@final
 @contract("OrderEvent", "1.0.0")
 @dataclass(frozen=True, slots=True, kw_only=True)
 class OrderEvent(RunScoped):
@@ -179,11 +251,24 @@ class OrderEvent(RunScoped):
     Every event repeats the order's current parameters, so the newest event of
     an order is a complete description of it.  ``venue`` can only be SIMULATED:
     a live order cannot be represented in this contract version.
+
+    A replacement is asked for with ``REPLACE_REQUESTED``, which carries the
+    wanted values in the ``requested_*`` fields while the order's parameters stay
+    as they are; ``REPLACED`` then shows the new parameters.  The hard stop of a
+    position is its own ``PROTECTIVE_STOP`` order, created by the simulated
+    broker from ``attached_stop_price`` the instant the entry fills, so it can be
+    tightened by a replacement and never widened.
     """
 
     order_event_id: str = fld(Id("oev"), "identity.order_event_id(client_order_id, order_seq).")
     client_order_id: str = fld(
-        Id("ord"), "Idempotency key of the order: identity.client_order_id(run, origin, intent, attempt)."
+        Id("ord"),
+        "Idempotency key: identity.client_order_id(run_id, origin, intent, attempt), where origin is "
+        "the risk decision for an entry and the position otherwise.",
+    )
+    attempt: int = fld(
+        Int(ge=0, le=65535, label="attempt"),
+        "Always 0 for an entry (one approval, one order); numbers the orders of an intent for a position.",
     )
     order_seq: int = fld(
         Int(ge=0, label="sequence number"), "Index of the event within its order: 0, 1, 2, ..."
@@ -210,21 +295,42 @@ class OrderEvent(RunScoped):
     trigger_price: Decimal | None = fld(
         Opt(PRICE), "Stop trigger price; set if and only if order_type is STOP.", unit="USD per troy ounce"
     )
+    reference_price: Decimal | None = fld(
+        Opt(PRICE),
+        "Executable price when the order was requested (ask for BUY, bid for SELL); mandatory for entries.",
+        unit="USD per troy ounce",
+    )
     attached_stop_price: Decimal | None = fld(
         Opt(PRICE),
-        "Protective stop held by the (simulated) broker for the resulting position; mandatory for entries.",
+        "Protective stop the simulated broker holds for the resulting position; mandatory for entries.",
         unit="USD per troy ounce",
     )
     attached_take_profit_price: Decimal | None = fld(
-        Opt(PRICE), "Take profit held by the (simulated) broker, if any.", unit="USD per troy ounce"
+        Opt(PRICE), "Take profit held by the simulated broker, if any.", unit="USD per troy ounce"
     )
     valid_until_ns: int | None = fld(
         Opt(TimeNs()),
-        "Instant at which a working order expires; null for no expiry.",
+        "Instant at which the order expires.  Mandatory for a resting entry; always null for a "
+        "protective stop.",
         unit="ns since epoch, UTC",
     )
-    plan_id: str | None = fld(Opt(Id("pln")), "Plan behind an entry order.")
+    requested_volume_lots: Decimal | None = fld(
+        Opt(Dec(gt="0", label="volume")), "Volume asked for by a pending replacement.", unit="lots"
+    )
+    requested_limit_price: Decimal | None = fld(
+        Opt(PRICE), "Limit price asked for by a pending replacement.", unit="USD per troy ounce"
+    )
+    requested_trigger_price: Decimal | None = fld(
+        Opt(PRICE), "Trigger price asked for by a pending replacement.", unit="USD per troy ounce"
+    )
+    requested_valid_until_ns: int | None = fld(
+        Opt(TimeNs()), "Expiry asked for by a pending replacement.", unit="ns since epoch, UTC"
+    )
+    plan_id: str | None = fld(Opt(Id("pln")), "Plan revision behind an entry order.")
     risk_decision_id: str | None = fld(Opt(Id("rsk")), "Risk approval behind an entry order.")
+    alternative_group_id: str | None = fld(
+        Opt(Id("grp")), "Alternative group of the plan behind an entry order."
+    )
     position_id: str | None = fld(Opt(Id("pos")), "Position a protective or exit order belongs to.")
     broker_order_id: str | None = fld(
         Opt(Id("brk")), "Identifier assigned by the simulated broker once it knows the order."
@@ -250,10 +356,11 @@ class OrderEvent(RunScoped):
     )
     reason_code: str | None = fld(
         Opt(Str(pattern=REASON_CODE_PATTERN, max_len=48, label="reason code")),
-        "Reason of a rejection, cancellation, expiry or reconciliation.",
+        "Reason of a rejection, cancellation, expiry or reconciliation; on the request of an EXIT or "
+        "protective order, the reason for it (e.g. RATCHET, TIME_EXIT, EMERGENCY).",
     )
 
-    INVARIANTS = (
+    INVARIANTS: ClassVar[tuple[Invariant, ...]] = (
         inv(
             "OEV-1",
             "order_event_id equals identity.order_event_id(client_order_id, order_seq)",
@@ -279,23 +386,31 @@ class OrderEvent(RunScoped):
         ),
         inv(
             "OEV-5",
-            "an ENTRY order references its plan and risk approval and carries a protective stop",
+            "an ENTRY order carries its plan, risk approval, alternative group, reference price and "
+            "protective stop, and no position",
             lambda r: (
                 r.intent is not OrderIntent.ENTRY
                 or (
                     r.plan_id is not None
                     and r.risk_decision_id is not None
+                    and r.alternative_group_id is not None
+                    and r.reference_price is not None
                     and r.attached_stop_price is not None
+                    and r.position_id is None
                 )
             ),
         ),
         inv(
             "OEV-6",
-            "a non-ENTRY order references the position it protects or closes and has no attached protection",
+            "a non-ENTRY order names the position it protects or closes and carries no plan, approval, "
+            "alternative group or attached protection",
             lambda r: (
                 r.intent is OrderIntent.ENTRY
                 or (
                     r.position_id is not None
+                    and r.plan_id is None
+                    and r.risk_decision_id is None
+                    and r.alternative_group_id is None
                     and r.attached_stop_price is None
                     and r.attached_take_profit_price is None
                 )
@@ -303,27 +418,53 @@ class OrderEvent(RunScoped):
         ),
         inv(
             "OEV-7",
+            "client_order_id equals identity.client_order_id(run_id, origin, intent, attempt) with "
+            "origin = risk_decision_id and attempt = 0 for ENTRY, origin = position_id otherwise",
+            _origin_and_identity,
+        ),
+        inv(
+            "OEV-8",
+            "a PROTECTIVE_STOP is a STOP order and a TAKE_PROFIT is a LIMIT order",
+            lambda r: r.intent not in _TYPE_BY_INTENT or _TYPE_BY_INTENT[r.intent] is r.order_type,
+        ),
+        inv(
+            "OEV-9",
             "fill fields are consistent: last_fill_* only on fill events, 0 <= cumulative <= volume, "
             "average_fill_price iff cumulative > 0, order_state is FILLED iff cumulative = volume, "
             "PENDING_SUBMIT and WORKING have no fills, PARTIALLY_FILLED has some",
             _fill_consistency,
         ),
         inv(
-            "OEV-8",
+            "OEV-10",
             "reason_code is set on REJECTED, CANCEL_REJECTED, REPLACE_REJECTED and RECONCILED events",
             lambda r: r.event_type not in _REASON_EVENTS or r.reason_code is not None,
         ),
         inv(
-            "OEV-9",
-            "attached protection is on the correct side of the order price (stop on the losing side, "
-            "take profit on the winning side)",
+            "OEV-11",
+            "attached protection is on the correct side of the order price (limit, trigger, or the "
+            "reference price of a market order) and of the average fill price: stop on the losing "
+            "side, take profit on the winning side",
             _protection_geometry,
         ),
         inv(
-            "OEV-10",
+            "OEV-12",
             "event_time_ns <= receive_time_ns "
             "(the venue is simulated in-process, so there is no clock offset)",
             lambda r: r.event_time_ns <= r.receive_time_ns,
+        ),
+        inv(
+            "OEV-13",
+            "a LIMIT or STOP entry has valid_until_ns; a protective stop never has one; on "
+            "SUBMIT_REQUESTED valid_until_ns is later than event_time_ns",
+            _expiry_rules,
+        ),
+        inv(
+            "OEV-14",
+            "requested_* values are present if and only if order_state is PENDING_REPLACE",
+            lambda r: (
+                any(getattr(r, name) is not None for name in _REQUESTED)
+                == (r.order_state is _S.PENDING_REPLACE)
+            ),
         ),
     )
 
@@ -331,23 +472,31 @@ class OrderEvent(RunScoped):
     def is_terminal(self) -> bool:
         return self.order_state in TERMINAL_ORDER_STATES
 
+    @property
+    def is_request(self) -> bool:
+        """True for events that originate in GIE (``*_REQUESTED``)."""
+        return self.event_type in ORDER_REQUEST_EVENTS
+
 
 #: Fields that never change during the life of an order.
-_IMMUTABLE = (
+ORDER_IMMUTABLE_FIELDS: Final[tuple[str, ...]] = (
     "client_order_id",
+    "attempt",
     "run_id",
     "mode",
     "venue",
     "symbol",
     "side",
     "intent",
+    "order_type",
+    "reference_price",
     "plan_id",
     "risk_decision_id",
+    "alternative_group_id",
     "position_id",
 )
 #: Fields that may only change with a REPLACED or RECONCILED event.
-_REPLACEABLE = (
-    "order_type",
+ORDER_REPLACEABLE_FIELDS: Final[tuple[str, ...]] = (
     "volume_lots",
     "limit_price",
     "trigger_price",
@@ -356,12 +505,83 @@ _REPLACEABLE = (
     "valid_until_ns",
 )
 
+_Fail = Callable[[str], IllegalTransitionError]
+
+
+def _check_no_added_risk(
+    previous: OrderEvent,
+    *,
+    volume_lots: Decimal,
+    limit_price: Decimal | None,
+    trigger_price: Decimal | None,
+    valid_until_ns: int | None,
+    attached_stop_price: Decimal | None,
+    attached_take_profit_price: Decimal | None,
+    fail: _Fail,
+) -> None:
+    """Rules for what a replacement or reconciliation may change: it can never add risk.
+
+    * No order may grow: ``volume_lots`` never increases.
+    * An ENTRY order is bound to the plan and stop that risk approved, so its
+      prices and attached protection are fixed; only its volume (down) and its
+      expiry (earlier) may change.  A different entry or stop is a new plan and
+      needs a new risk decision and a new order.
+    * A PROTECTIVE_STOP may only be tightened: the trigger of a SELL stop
+      (protecting a long position) may only rise, that of a BUY stop only fall.
+    """
+    if volume_lots > previous.volume_lots:
+        raise fail("volume_lots may not increase")
+    if previous.intent is OrderIntent.ENTRY:
+        fixed = (
+            ("limit_price", limit_price),
+            ("trigger_price", trigger_price),
+            ("attached_stop_price", attached_stop_price),
+            ("attached_take_profit_price", attached_take_profit_price),
+        )
+        for name, value in fixed:
+            if getattr(previous, name) != value:
+                raise fail(f"{name} of an ENTRY order may not change (it is bound to the approved plan)")
+        before = previous.valid_until_ns
+        if before is not None and (valid_until_ns is None or valid_until_ns > before):
+            raise fail("the expiry of an ENTRY order may only be moved earlier")
+    else:
+        if attached_stop_price is not None or attached_take_profit_price is not None:
+            raise fail("only an ENTRY order carries attached protection")
+        if previous.intent is OrderIntent.PROTECTIVE_STOP:
+            before_trigger = previous.trigger_price
+            if before_trigger is None or trigger_price is None:
+                raise fail("a protective stop must keep a trigger price")
+            widened = (
+                trigger_price < before_trigger
+                if previous.side is Side.SELL
+                else trigger_price > before_trigger
+            )
+            if widened:
+                raise fail("a protective stop may only be tightened, never widened")
+            if valid_until_ns is not None:
+                raise fail("a protective stop may not be given an expiry")
+
+
+def _requested_values(event: OrderEvent, current: OrderEvent) -> dict[str, Decimal | int | None]:
+    """Parameters an order would have if the pending replacement of *event* were applied to *current*."""
+    return {
+        "volume_lots": event.requested_volume_lots or current.volume_lots,
+        "limit_price": event.requested_limit_price or current.limit_price,
+        "trigger_price": event.requested_trigger_price or current.trigger_price,
+        "valid_until_ns": (
+            event.requested_valid_until_ns
+            if event.requested_valid_until_ns is not None
+            else current.valid_until_ns
+        ),
+    }
+
 
 def validate_order_transition(previous: OrderEvent | None, event: OrderEvent) -> None:
     """Check that *event* may follow *previous* in the life of one order.
 
-    Raises :class:`IllegalTransitionError` naming the violated rule.  Used by the
-    execution engine before it journals an event and by QA on recorded traces.
+    Raises :class:`IllegalTransitionError` naming the violated rule.  The
+    execution engine and every journal call it (through the lifecycle ledger)
+    before an event becomes part of the history; QA runs it over recorded traces.
     """
 
     def fail(rule: str) -> IllegalTransitionError:
@@ -389,22 +609,78 @@ def validate_order_transition(previous: OrderEvent | None, event: OrderEvent) ->
             f"{previous.order_state.value} --{event.event_type.value}--> "
             f"{event.order_state.value} is not allowed"
         )
-    for name in _IMMUTABLE:
+    for name in ORDER_IMMUTABLE_FIELDS:
         if getattr(previous, name) != getattr(event, name):
             raise fail(f"{name} may not change during the life of an order")
-    if event.event_type not in (_E.REPLACED, _E.RECONCILED):
-        for name in _REPLACEABLE:
-            if getattr(previous, name) != getattr(event, name):
-                raise fail(f"{name} may only change with a REPLACED or RECONCILED event")
     if event.broker_order_id != previous.broker_order_id and previous.broker_order_id is not None:
         raise fail("broker_order_id may not change once assigned")
-    if event.event_time_ns < previous.event_time_ns or event.receive_time_ns < previous.receive_time_ns:
-        raise fail("event and receive times may not decrease")
+    for name in ("event_time_ns", "receive_time_ns", "seq"):
+        if getattr(event, name) < getattr(previous, name):
+            raise fail(f"{name} may not decrease")
+
+    # ---- parameters -----------------------------------------------------------------------
+    if event.event_type is _E.REPLACED:
+        wanted = _requested_values(previous, previous)
+        for name, value in wanted.items():
+            if getattr(event, name) != value:
+                raise fail(f"REPLACED must apply exactly the requested {name}")
+        for name in ("attached_stop_price", "attached_take_profit_price"):
+            if getattr(previous, name) != getattr(event, name):
+                raise fail(f"{name} may not change with a replacement")
+    elif event.event_type is _E.RECONCILED:
+        _check_no_added_risk(
+            previous,
+            volume_lots=event.volume_lots,
+            limit_price=event.limit_price,
+            trigger_price=event.trigger_price,
+            valid_until_ns=event.valid_until_ns,
+            attached_stop_price=event.attached_stop_price,
+            attached_take_profit_price=event.attached_take_profit_price,
+            fail=fail,
+        )
+    else:
+        for name in ORDER_REPLACEABLE_FIELDS:
+            if getattr(previous, name) != getattr(event, name):
+                raise fail(f"{name} may only change with a REPLACED or RECONCILED event")
+
+    # ---- pending replacement --------------------------------------------------------------
+    if event.event_type is _E.REPLACE_REQUESTED:
+        wanted = _requested_values(event, previous)
+        if all(getattr(previous, name) == value for name, value in wanted.items()):
+            raise fail("a replacement must change at least one parameter")
+        if event.requested_limit_price is not None and previous.order_type is not OrderType.LIMIT:
+            raise fail("requested_limit_price is only meaningful for a LIMIT order")
+        if event.requested_trigger_price is not None and previous.order_type is not OrderType.STOP:
+            raise fail("requested_trigger_price is only meaningful for a STOP order")
+        volume = wanted["volume_lots"]
+        assert isinstance(volume, Decimal)
+        if volume <= previous.cumulative_filled_lots:
+            raise fail("requested volume must exceed the quantity already filled")
+        limit, trigger, expiry = wanted["limit_price"], wanted["trigger_price"], wanted["valid_until_ns"]
+        assert limit is None or isinstance(limit, Decimal)
+        assert trigger is None or isinstance(trigger, Decimal)
+        assert expiry is None or isinstance(expiry, int)
+        _check_no_added_risk(
+            previous,
+            volume_lots=volume,
+            limit_price=limit,
+            trigger_price=trigger,
+            valid_until_ns=expiry,
+            attached_stop_price=previous.attached_stop_price,
+            attached_take_profit_price=previous.attached_take_profit_price,
+            fail=fail,
+        )
+    elif previous.order_state is _S.PENDING_REPLACE and event.order_state is _S.PENDING_REPLACE:
+        for name in _REQUESTED:
+            if getattr(previous, name) != getattr(event, name):
+                raise fail(f"{name} may not change while the replacement is pending")
+
+    # ---- fills ----------------------------------------------------------------------------
     if event.cumulative_filled_lots < previous.cumulative_filled_lots:
         raise fail("cumulative_filled_lots may not decrease")
     if event.event_type in _FILL_EVENTS:
         assert event.last_fill_lots is not None
-        if previous.cumulative_filled_lots + event.last_fill_lots != event.cumulative_filled_lots:
+        if EXACT.add(previous.cumulative_filled_lots, event.last_fill_lots) != event.cumulative_filled_lots:
             raise fail("cumulative_filled_lots must equal the previous value plus last_fill_lots")
     elif event.event_type is not _E.RECONCILED and (
         event.cumulative_filled_lots != previous.cumulative_filled_lots
@@ -412,35 +688,3 @@ def validate_order_transition(previous: OrderEvent | None, event: OrderEvent) ->
         raise fail("cumulative_filled_lots may only change with a fill or RECONCILED event")
     if event.volume_lots < event.cumulative_filled_lots:
         raise fail("volume_lots may not be reduced below the filled quantity")
-    if event.event_type is _E.REPLACED:
-        _check_replacement(previous, event, fail)
-
-
-def _check_replacement(
-    previous: OrderEvent, event: OrderEvent, fail: Callable[[str], IllegalTransitionError]
-) -> None:
-    """Rules for what a REPLACED event may change (a replacement can never add risk).
-
-    * No order may grow: ``volume_lots`` never increases.
-    * An ENTRY order is bound to the plan and stop that risk approved, so its
-      prices and attached protection are fixed; only its volume (down) and its
-      expiry may change.  A different entry or stop is a new plan and needs a
-      new risk decision and a new order.
-    * A PROTECTIVE_STOP may only be tightened: the trigger of a SELL stop
-      (protecting a long position) may only rise, that of a BUY stop only fall.
-    """
-    if event.volume_lots > previous.volume_lots:
-        raise fail("a replacement may not increase volume_lots")
-    if event.order_type is not previous.order_type:
-        raise fail("order_type may not change")
-    if event.intent is OrderIntent.ENTRY:
-        for name in ("limit_price", "trigger_price", "attached_stop_price", "attached_take_profit_price"):
-            if getattr(previous, name) != getattr(event, name):
-                raise fail(f"{name} of an ENTRY order may not be replaced (it is bound to the approved plan)")
-    if event.intent is OrderIntent.PROTECTIVE_STOP:
-        before, after = previous.trigger_price, event.trigger_price
-        if before is None or after is None:
-            raise fail("a protective stop must keep a trigger price")
-        widened = after < before if event.side is Side.SELL else after > before
-        if widened:
-            raise fail("a protective stop may only be tightened, never widened")

@@ -1,4 +1,5 @@
 {
+  "$comment": "Necessary but not sufficient: decimal bounds (x-gie-*), canonical order, cross-field invariants (x-gie-invariants), lifecycle rules (x-gie-behaviour), exact 64-bit integer tokens and printable-text rules are enforced by the reference implementation gie.contracts.",
   "$id": "urn:gie:contract:Tick:1.0.0",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
@@ -70,20 +71,22 @@
           "OUT_OF_ORDER",
           "DUPLICATE",
           "GAP_BEFORE",
-          "STALE",
+          "DELAYED",
           "OUTLIER",
-          "OFF_SESSION"
+          "OFF_SESSION",
+          "RECEIVE_TIME_MODELLED"
         ],
         "type": "string"
       },
       "maxItems": 16,
       "minItems": 0,
       "type": "array",
+      "uniqueItems": true,
       "x-gie-canonical-order": "sorted by value",
       "x-gie-unique": true
     },
     "origin": {
-      "description": "Whether the quote is a live broker observation, imported history or a fixture.",
+      "description": "Whether the quote is a real-time feed observation, imported history or a fixture.",
       "enum": [
         "BROKER_FEED",
         "HISTORICAL",
@@ -92,7 +95,7 @@
       "type": "string"
     },
     "receive_time_ns": {
-      "description": "Local clock reading when GIE received the quote.  For imported history without a recorded receive time it equals event_time_ns plus the modelled feed delay.",
+      "description": "Local clock reading when GIE received the quote (the availability instant), or the modelled value for imported history.",
       "maximum": 9223372036854775807,
       "minimum": 0,
       "type": "integer",
@@ -100,7 +103,7 @@
     },
     "schema_version": {
       "description": "Version of the contract the message was written with.",
-      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+      "pattern": "^(0|[1-9][0-9]{0,8})\\.(0|[1-9][0-9]{0,8})\\.(0|[1-9][0-9]{0,8})$",
       "type": "string"
     },
     "seq": {
@@ -110,7 +113,7 @@
       "type": "integer"
     },
     "source": {
-      "description": "Identifier of the feed that delivered the quote.",
+      "description": "Identifier of the feed (and dataset version) that delivered the quote.",
       "maxLength": 64,
       "minLength": 1,
       "pattern": "^[a-z0-9][a-z0-9_.:-]{0,63}$",
@@ -139,6 +142,17 @@
   ],
   "title": "Tick 1.0.0",
   "type": "object",
+  "x-gie-behaviour": {
+    "identity": {
+      "identity": "(source, symbol, seq)"
+    },
+    "ordering_time": "receive_time_ns",
+    "rank": {
+      "name": "TICK",
+      "value": 10
+    },
+    "stream": "tick/<source>/<symbol>"
+  },
   "x-gie-invariants": [
     {
       "id": "TICK-1",

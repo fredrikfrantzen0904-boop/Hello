@@ -11,22 +11,47 @@ A reference instant later than ``now_ns`` is never "very fresh": it is either
 clock skew or look-ahead leakage and raises :class:`FutureDataError`.
 
 Freshness is always evaluated against the injected :class:`~gie.core.clock.Clock`
-so that replay evaluates it against virtual time.
+so that replay evaluates it against virtual time.  Components use the
+``*_now`` functions, which take the clock: they refuse any future tolerance in
+replay (where it would be look-ahead) and bound it in paper mode.  The plain
+functions that take ``now_ns`` exist for code that already holds a reading.
+
+Which instant is the reference is fixed per contract in
+``specifications/SHARED_CONTRACTS.md`` section 3.3; a source event time is never
+used as the reference.
 """
 
 from __future__ import annotations
 
-from gie.core.errors import ContractValidationError, FutureDataError, StaleDataError
+from typing import Final
 
-_INT64_MIN = -(2**63)
-_INT64_MAX = 2**63 - 1
+from gie.core.clock import Clock, ClockMode
+from gie.core.errors import ContractValidationError, FutureDataError, StaleDataError
+from gie.core.timeutil import MAX_TIME_NS, NS_PER_SECOND
+
+#: Largest tolerance for a reference instant in the future (cross-host clock skew, paper only).
+MAX_FUTURE_TOLERANCE_NS: Final[int] = NS_PER_SECOND
 
 
 def _require_int(value: int, what: str) -> None:
     if isinstance(value, bool) or not isinstance(value, int):
         raise ContractValidationError(f"{what} must be an int of nanoseconds", value=repr(value)[:64])
-    if not _INT64_MIN <= value <= _INT64_MAX:
-        raise ContractValidationError(f"{what} is outside the signed 64-bit range", value=str(value)[:64])
+    if not -MAX_TIME_NS <= value <= MAX_TIME_NS:
+        raise ContractValidationError(f"{what} is outside the supported range", value=str(value)[:64])
+
+
+def _require_instant(value: int, what: str) -> None:
+    _require_int(value, what)
+    if value < 0:
+        raise ContractValidationError(f"{what} must be an instant (>= 0)", value=value)
+
+
+def _require_tolerance(future_tolerance_ns: int) -> None:
+    _require_int(future_tolerance_ns, "future_tolerance_ns")
+    if not 0 <= future_tolerance_ns <= MAX_FUTURE_TOLERANCE_NS:
+        raise ContractValidationError(
+            "future_tolerance_ns must be within [0, MAX_FUTURE_TOLERANCE_NS]", value=future_tolerance_ns
+        )
 
 
 def age_ns(*, now_ns: int, reference_ns: int, future_tolerance_ns: int = 0) -> int:
@@ -36,11 +61,9 @@ def age_ns(*, now_ns: int, reference_ns: int, future_tolerance_ns: int = 0) -> i
     in the future (cross-host clock skew in paper mode).  It must stay ``0`` in
     replay.  Within the tolerance the age is reported as ``0``.
     """
-    _require_int(now_ns, "now_ns")
-    _require_int(reference_ns, "reference_ns")
-    _require_int(future_tolerance_ns, "future_tolerance_ns")
-    if future_tolerance_ns < 0:
-        raise ContractValidationError("future_tolerance_ns must be >= 0", value=future_tolerance_ns)
+    _require_instant(now_ns, "now_ns")
+    _require_instant(reference_ns, "reference_ns")
+    _require_tolerance(future_tolerance_ns)
     age = now_ns - reference_ns
     if age < -future_tolerance_ns:
         raise FutureDataError(
@@ -82,8 +105,8 @@ def require_fresh(
 
 def is_expired(*, now_ns: int, valid_until_ns: int) -> bool:
     """True iff ``now_ns >= valid_until_ns`` (expired exactly at the expiry instant)."""
-    _require_int(now_ns, "now_ns")
-    _require_int(valid_until_ns, "valid_until_ns")
+    _require_instant(now_ns, "now_ns")
+    _require_instant(valid_until_ns, "valid_until_ns")
     return now_ns >= valid_until_ns
 
 
@@ -92,3 +115,46 @@ def require_not_expired(*, now_ns: int, valid_until_ns: int, what: str) -> int:
     if is_expired(now_ns=now_ns, valid_until_ns=valid_until_ns):
         raise StaleDataError(f"{what} has expired", what=what, now_ns=now_ns, valid_until_ns=valid_until_ns)
     return valid_until_ns - now_ns
+
+
+# --------------------------------------------------------------------------- clock-based forms
+def _clock_tolerance(clock: Clock, future_tolerance_ns: int) -> int:
+    _require_tolerance(future_tolerance_ns)
+    if clock.mode is ClockMode.REPLAY and future_tolerance_ns != 0:
+        raise ContractValidationError(
+            "a future tolerance is look-ahead in replay and must be 0", value=future_tolerance_ns
+        )
+    return future_tolerance_ns
+
+
+def is_fresh_now(clock: Clock, *, reference_ns: int, max_age_ns: int, future_tolerance_ns: int = 0) -> bool:
+    """:func:`is_fresh` against the injected clock; refuses a future tolerance in replay."""
+    return is_fresh(
+        now_ns=clock.now_ns(),
+        reference_ns=reference_ns,
+        max_age_ns=max_age_ns,
+        future_tolerance_ns=_clock_tolerance(clock, future_tolerance_ns),
+    )
+
+
+def require_fresh_now(
+    clock: Clock, *, reference_ns: int, max_age_ns: int, what: str, future_tolerance_ns: int = 0
+) -> int:
+    """:func:`require_fresh` against the injected clock; refuses a future tolerance in replay."""
+    return require_fresh(
+        now_ns=clock.now_ns(),
+        reference_ns=reference_ns,
+        max_age_ns=max_age_ns,
+        what=what,
+        future_tolerance_ns=_clock_tolerance(clock, future_tolerance_ns),
+    )
+
+
+def is_expired_now(clock: Clock, *, valid_until_ns: int) -> bool:
+    """:func:`is_expired` against the injected clock."""
+    return is_expired(now_ns=clock.now_ns(), valid_until_ns=valid_until_ns)
+
+
+def require_not_expired_now(clock: Clock, *, valid_until_ns: int, what: str) -> int:
+    """:func:`require_not_expired` against the injected clock."""
+    return require_not_expired(now_ns=clock.now_ns(), valid_until_ns=valid_until_ns, what=what)

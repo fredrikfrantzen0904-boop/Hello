@@ -1,0 +1,240 @@
+{
+  "$comment": "Necessary but not sufficient: decimal bounds (x-gie-*), canonical order, cross-field invariants (x-gie-invariants), lifecycle rules (x-gie-behaviour), exact 64-bit integer tokens and printable-text rules are enforced by the reference implementation gie.contracts.",
+  "$id": "urn:gie:contract:RunManifest:1.0.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Identity and reproducibility record of one run; the first record of its journal.",
+  "properties": {
+    "code_commit": {
+      "description": "Commit of the code that executes the run.",
+      "maxLength": 40,
+      "minLength": 40,
+      "pattern": "^[0-9a-f]{40}$",
+      "type": "string"
+    },
+    "config_sha256": {
+      "description": "SHA-256 of the complete run configuration (canonical JSON).",
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "contract": {
+      "const": "RunManifest",
+      "description": "Contract name."
+    },
+    "contract_set_version": {
+      "description": "Version of the contract set in use.",
+      "maxLength": 32,
+      "minLength": 1,
+      "pattern": "^(0|[1-9][0-9]{0,8})\\.(0|[1-9][0-9]{0,8})\\.(0|[1-9][0-9]{0,8})$",
+      "type": "string"
+    },
+    "created_time_ns": {
+      "description": "When the run was created (system clock, also for replays).",
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "type": "integer",
+      "x-gie-unit": "ns since epoch, UTC"
+    },
+    "data_end_ns": {
+      "anyOf": [
+        {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "End (exclusive) of the replayed period; null for a paper run.",
+      "x-gie-unit": "ns since epoch, UTC"
+    },
+    "data_origin": {
+      "description": "Least trustworthy origin of the market data the run will use.",
+      "enum": [
+        "BROKER_FEED",
+        "HISTORICAL",
+        "SYNTHETIC_FIXTURE"
+      ],
+      "type": "string"
+    },
+    "data_sources": {
+      "description": "Tick sources (versioned feed ids) the run reads.",
+      "items": {
+        "maxLength": 64,
+        "minLength": 1,
+        "pattern": "^[a-z0-9][a-z0-9_.:-]{0,63}$",
+        "type": "string"
+      },
+      "maxItems": 64,
+      "minItems": 1,
+      "type": "array",
+      "uniqueItems": true,
+      "x-gie-canonical-order": "sorted ascending",
+      "x-gie-unique": true
+    },
+    "data_start_ns": {
+      "anyOf": [
+        {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Start of the replayed period; null for a paper run.",
+      "x-gie-unit": "ns since epoch, UTC"
+    },
+    "label": {
+      "description": "Operator label of the run.",
+      "maxLength": 64,
+      "minLength": 1,
+      "pattern": "^[a-z0-9][a-z0-9_.-]{0,63}$",
+      "type": "string"
+    },
+    "mode": {
+      "description": "REPLAY or PAPER.  No live mode exists (routing lock).",
+      "enum": [
+        "REPLAY",
+        "PAPER"
+      ],
+      "type": "string"
+    },
+    "model_version_ids": {
+      "description": "Model versions the run uses (its model schedule comes from the configuration, not from the registry status of the moment).",
+      "items": {
+        "maxLength": 36,
+        "minLength": 36,
+        "pattern": "^mdl_[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "maxItems": 64,
+      "minItems": 0,
+      "type": "array",
+      "uniqueItems": true,
+      "x-gie-canonical-order": "sorted ascending",
+      "x-gie-unique": true
+    },
+    "parameters_sha256": {
+      "description": "Hash of the research-parameter set (gie.core.params).",
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "producer": {
+      "description": "Component instance that emitted the record; together with the contract name it names the stream.",
+      "maxLength": 96,
+      "minLength": 1,
+      "pattern": "^[a-z][a-z0-9_]*(\\.[a-z0-9_]+){0,4}$",
+      "type": "string"
+    },
+    "role": {
+      "description": "PRIMARY, SHADOW or RESEARCH.",
+      "enum": [
+        "PRIMARY",
+        "SHADOW",
+        "RESEARCH"
+      ],
+      "type": "string"
+    },
+    "run_id": {
+      "description": "identity.run_id(mode, config_sha256, label).",
+      "maxLength": 36,
+      "minLength": 36,
+      "pattern": "^run_[0-9a-f]{32}$",
+      "type": "string"
+    },
+    "schema_version": {
+      "description": "Version of the contract the message was written with.",
+      "pattern": "^(0|[1-9][0-9]{0,8})\\.(0|[1-9][0-9]{0,8})\\.(0|[1-9][0-9]{0,8})$",
+      "type": "string"
+    },
+    "seed": {
+      "anyOf": [
+        {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Seed of every pseudo-random element of the run."
+    },
+    "seq": {
+      "description": "Position of the record in its stream: starts at 0 and increases by exactly 1.",
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "shadow_of_run_id": {
+      "anyOf": [
+        {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^run_[0-9a-f]{32}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Primary run a SHADOW run is compared with; null otherwise."
+    }
+  },
+  "required": [
+    "contract",
+    "schema_version",
+    "producer",
+    "seq",
+    "run_id",
+    "mode",
+    "role",
+    "label",
+    "config_sha256",
+    "code_commit",
+    "contract_set_version",
+    "parameters_sha256",
+    "data_origin",
+    "data_sources",
+    "model_version_ids",
+    "created_time_ns"
+  ],
+  "title": "RunManifest 1.0.0",
+  "type": "object",
+  "x-gie-behaviour": {
+    "identity": {
+      "run_id": "run_id(mode, config_sha256, label)"
+    },
+    "ordering_time": "created_time_ns",
+    "rank": {
+      "name": "RUN_MANIFEST",
+      "value": 0
+    },
+    "stream": "run_manifest/<producer>"
+  },
+  "x-gie-invariants": [
+    {
+      "id": "RUN-1",
+      "rule": "run_id equals identity.run_id(mode, config_sha256, label)"
+    },
+    {
+      "id": "RUN-2",
+      "rule": "a REPLAY run states its data period (start < end); a PAPER run has none"
+    },
+    {
+      "id": "RUN-3",
+      "rule": "shadow_of_run_id is set if and only if role is SHADOW, and is not the run itself"
+    },
+    {
+      "id": "RUN-4",
+      "rule": "the manifest is the first record of its stream (seq 0)"
+    }
+  ]
+}

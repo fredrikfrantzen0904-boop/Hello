@@ -1,4 +1,5 @@
 {
+  "$comment": "Necessary but not sufficient: decimal bounds (x-gie-*), canonical order, cross-field invariants (x-gie-invariants), lifecycle rules (x-gie-behaviour), exact 64-bit integer tokens and printable-text rules are enforced by the reference implementation gie.contracts.",
   "$id": "urn:gie:contract:Position:1.0.0",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
@@ -12,7 +13,7 @@
       "type": "string"
     },
     "as_of_time_ns": {
-      "description": "Receive time of the newest input the record depends on (causality watermark).",
+      "description": "Market-data watermark: receive time of the newest market data the record depends on, directly or through its inputs.",
       "maximum": 9223372036854775807,
       "minimum": 0,
       "type": "integer",
@@ -25,6 +26,20 @@
       "x-gie-exclusiveMinimum": "0",
       "x-gie-type": "decimal",
       "x-gie-unit": "quote currency per unit"
+    },
+    "close_reason": {
+      "anyOf": [
+        {
+          "maxLength": 48,
+          "minLength": 1,
+          "pattern": "^[A-Z][A-Z0-9_]{1,47}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Why the position closed (e.g. PROTECTIVE_STOP, TAKE_PROFIT, RATCHET, TIME_EXIT); set if and only if a GIE position is CLOSED."
     },
     "closed_time_ns": {
       "anyOf": [
@@ -73,13 +88,14 @@
         {
           "maxLength": 64,
           "minLength": 1,
+          "pattern": "^[A-Za-z0-9._:-]{1,64}$",
           "type": "string"
         },
         {
           "type": "null"
         }
       ],
-      "description": "Broker ticket of an EXTERNAL position; null for GIE positions."
+      "description": "Broker ticket of an EXTERNAL position; null for GIE positions.  Never an account number."
     },
     "initial_risk_amount": {
       "anyOf": [
@@ -112,7 +128,7 @@
       "x-gie-unit": "quote currency per unit"
     },
     "initial_volume_lots": {
-      "description": "Volume at opening.",
+      "description": "Volume at opening (for EXTERNAL positions: the largest volume observed so far).",
       "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
       "type": "string",
       "x-gie-exclusiveMinimum": "0",
@@ -172,11 +188,18 @@
       "type": "string"
     },
     "peak_net_pnl_amount": {
-      "description": "Highest value of realized + unrealized executable net P&L since opening (never decreases).",
+      "description": "Highest executable net P&L (realized + unrealized) since opening.",
       "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
       "type": "string",
       "x-gie-type": "decimal",
       "x-gie-unit": "account currency"
+    },
+    "peak_time_ns": {
+      "description": "Decision time of the snapshot at which the peak was reached.",
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "type": "integer",
+      "x-gie-unit": "ns since epoch, UTC"
     },
     "plan_id": {
       "anyOf": [
@@ -190,10 +213,10 @@
           "type": "null"
         }
       ],
-      "description": "Plan that opened a GIE position."
+      "description": "Plan revision that opened a GIE position."
     },
     "position_id": {
-      "description": "identity.position_id(run, opening order) or identity.external_position_id(...).",
+      "description": "identity.position_id(run_id, opening_client_order_id) for GIE positions; identity.external_position_id(account alias, ticket) for EXTERNAL ones.",
       "maxLength": 36,
       "minLength": 36,
       "pattern": "^pos_[0-9a-f]{32}$",
@@ -220,7 +243,7 @@
       "type": "integer"
     },
     "run_id": {
-      "description": "Run that produced the record.",
+      "description": "Run that produced the record (see the RunManifest of that run).",
       "maxLength": 36,
       "minLength": 36,
       "pattern": "^run_[0-9a-f]{32}$",
@@ -228,7 +251,7 @@
     },
     "schema_version": {
       "description": "Version of the contract the message was written with.",
-      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+      "pattern": "^(0|[1-9][0-9]{0,8})\\.(0|[1-9][0-9]{0,8})\\.(0|[1-9][0-9]{0,8})$",
       "type": "string"
     },
     "seq": {
@@ -265,7 +288,7 @@
           "type": "null"
         }
       ],
-      "description": "Current hard protective stop; never further from the entry than initial_stop_price.",
+      "description": "Current hard protective stop (trigger of the working PROTECTIVE_STOP order).",
       "x-gie-unit": "quote currency per unit"
     },
     "swap_amount": {
@@ -296,6 +319,13 @@
       ],
       "description": "Current broker-side take profit, if any.",
       "x-gie-unit": "quote currency per unit"
+    },
+    "trough_net_pnl_amount": {
+      "description": "Lowest executable net P&L (realized + unrealized) since opening.",
+      "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
+      "type": "string",
+      "x-gie-type": "decimal",
+      "x-gie-unit": "account currency"
     },
     "unrealized_net_pnl_amount": {
       "description": "Result of closing the open volume at mark_price, net of estimated exit costs; 0 when closed.",
@@ -335,6 +365,8 @@
     "realized_net_pnl_amount",
     "unrealized_net_pnl_amount",
     "peak_net_pnl_amount",
+    "peak_time_ns",
+    "trough_net_pnl_amount",
     "costs_amount",
     "swap_amount",
     "account_currency",
@@ -342,6 +374,42 @@
   ],
   "title": "Position 1.0.0",
   "type": "object",
+  "x-gie-behaviour": {
+    "identity": {
+      "position_id": "position_id(run_id, opening_client_order_id) for GIE; external_position_id(account alias, external_ref) for EXTERNAL"
+    },
+    "immutable_fields": [
+      "position_id",
+      "run_id",
+      "mode",
+      "owner",
+      "external_ref",
+      "symbol",
+      "side",
+      "account_currency",
+      "opened_time_ns",
+      "plan_id",
+      "opening_client_order_id"
+    ],
+    "immutable_fields_gie_owner": [
+      "initial_volume_lots",
+      "average_entry_price",
+      "initial_stop_price",
+      "initial_risk_amount"
+    ],
+    "monotonic_gie_owner": [
+      "volume_lots never increases",
+      "stop_price never moves away from the entry and is never removed while open",
+      "peak_net_pnl_amount never decreases",
+      "trough_net_pnl_amount never increases"
+    ],
+    "ordering_time": "decision_time_ns",
+    "rank": {
+      "name": "POSITION",
+      "value": 30
+    },
+    "stream": "position/<producer>"
+  },
   "x-gie-invariants": [
     {
       "id": "CAUSAL-1",
@@ -353,19 +421,19 @@
     },
     {
       "id": "POS-2",
-      "rule": "volume_lots <= initial_volume_lots (a position is never increased: no averaging down)"
+      "rule": "volume_lots <= initial_volume_lots (a GIE position is never increased: no averaging down; for EXTERNAL positions initial_volume_lots is the largest observed volume)"
     },
     {
       "id": "POS-3",
-      "rule": "a GIE position is XAUUSD with plan, opening order, initial stop and initial risk, and while open has a stop and a mark price; an EXTERNAL position has external_ref and no plan or opening order"
+      "rule": "a GIE position is XAUUSD, has plan, opening order, initial stop and initial risk, has position_id = identity.position_id(run_id, opening_client_order_id) and, while open, a stop and a mark price; an EXTERNAL position has external_ref and no plan or opening order"
     },
     {
       "id": "POS-4",
-      "rule": "the stop is never wider than the initial stop (BUY: stop >= initial, SELL: stop <= initial)"
+      "rule": "for a GIE position the initial stop is on the losing side of the entry and the stop is never wider than the initial stop (BUY: initial < entry and stop >= initial; SELL mirrored)"
     },
     {
       "id": "POS-5",
-      "rule": "peak_net_pnl_amount >= realized_net_pnl_amount + unrealized_net_pnl_amount"
+      "rule": "trough_net_pnl_amount <= realized + unrealized <= peak_net_pnl_amount"
     },
     {
       "id": "POS-6",
@@ -373,7 +441,11 @@
     },
     {
       "id": "POS-7",
-      "rule": "opened_time_ns <= closed_time_ns (when closed) <= decision_time_ns"
+      "rule": "opened_time_ns <= peak_time_ns <= decision_time_ns, and opened_time_ns <= closed_time_ns <= decision_time_ns when closed"
+    },
+    {
+      "id": "POS-8",
+      "rule": "close_reason is null while OPEN and set for a CLOSED GIE position"
     }
   ]
 }
