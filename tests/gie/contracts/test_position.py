@@ -1,10 +1,12 @@
 """Independent tests for the ``Position`` contract and ``validate_position_transition``.
 
 Expected behaviour is taken from ``specifications/SHARED_CONTRACTS.md`` (sections 9.1, 9.2, 9.4),
-``specifications/contracts/FIELDS.md`` (Position fields and invariants POS-1..8), the class
-docstrings and the owner's specification G04 ("no martingale, averaging down or widening
-protective stops; hard protective stops; monotonic profit ratchet based on executable net P&L")
-- not from the implementation.
+``specifications/contracts/FIELDS.md`` (Position fields and invariants POS-1..9), the class
+docstrings, the rework-2 change notice (section 7: POS-9 protection status, POS-4 relaxed,
+``peak_time_ns`` is the receive time of the quote that made the peak, the volume opened so far
+grows only while the entry order fills) and the owner's specification G04 ("no martingale,
+averaging down or widening protective stops; hard protective stops; monotonic profit ratchet based
+on executable net P&L") - not from the implementation.
 
 SYNTHETIC FIXTURE: every record in this module is built with the labelled builders of
 ``tests/gie/samples.py`` (``DataOrigin.SYNTHETIC_FIXTURE``).  Prices, volumes, P&L amounts and
@@ -90,6 +92,9 @@ def _closed(previous: Position, **overrides: Any) -> Position:
         "unrealized_net_pnl_amount": D("0"),
         "closed_time_ns": previous.decision_time_ns + NS_PER_SECOND,
         "close_reason": "PROTECTIVE_STOP" if previous.owner is PositionOwner.GIE else None,
+        # POS-9: a closed position names no protective order and no reason for having none.
+        "protective_client_order_id": None,
+        "unprotected_reason": None,
     }
     fields.update(overrides)
     return _after(previous, **fields)
@@ -200,7 +205,7 @@ def test_pos3_the_id_of_a_gie_position_is_derived_from_run_and_opening_order() -
     assert good.opening_client_order_id is not None
     assert good.position_id == identity.position_id(good.run_id, good.opening_client_order_id)
     other_order = samples.protective_stop_lifecycle()[0].client_order_id
-    other_run = identity.run_id("REPLAY", "1" * 64, "other-fixture")
+    other_run = identity.run_id("REPLAY", "1" * 64)
     for foreign in (
         identity.position_id(good.run_id, other_order),
         identity.position_id(other_run, good.opening_client_order_id),
@@ -243,6 +248,8 @@ def test_an_external_reference_is_never_free_text() -> None:
 
 
 # --------------------------------------------------------------------------- POS-4
+# Rework 2 (POS-4 relaxed): the stop is never wider than the initial stop; the entry price is a
+# reported fact and may lie at or beyond the stop after a gap (the stop then closes the position).
 @pytest.mark.requirement("G04-11", "G04-12")
 @pytest.mark.parametrize(
     ("initial", "stop", "accepted"),
@@ -252,8 +259,8 @@ def test_an_external_reference_is_never_free_text() -> None:
         ("2647.80", "2649.90", True),
         ("2647.80", "2650.50", True),
         ("2649.799999999999", "2649.799999999999", True),
-        ("2649.80", "2649.80", False),
-        ("2650.00", "2650.00", False),
+        ("2649.80", "2649.80", True),
+        ("2650.00", "2650.00", True),
         ("2647.80", "2647.799999999999", False),
         ("2647.80", "2640.00", False),
     ],
@@ -285,8 +292,8 @@ def test_pos4_long_position_stop_geometry(initial: str, stop: str, accepted: boo
         ("2651.80", "2651.799999999999", True),
         ("2651.80", "2649.00", True),
         ("2649.800000000001", "2649.800000000001", True),
-        ("2649.80", "2649.80", False),
-        ("2649.00", "2649.00", False),
+        ("2649.80", "2649.80", True),
+        ("2649.00", "2649.00", True),
         ("2651.80", "2651.800000000001", False),
         ("2651.80", "2660.00", False),
     ],
@@ -297,6 +304,21 @@ def test_pos4_short_position_stop_geometry(initial: str, stop: str, accepted: bo
         assert _short(**fields).stop_price == D(stop)
     else:
         _violates("POS-4", lambda: _short(**fields))
+
+
+@pytest.mark.requirement("G04-11", "G04-12")
+@pytest.mark.parametrize("side", [Side.BUY, Side.SELL])
+def test_pos4_an_entry_filled_beyond_the_stop_after_a_gap_is_a_reported_fact(side: Side) -> None:
+    # The entry of 2649.80 filled after a gap through the stop: below the stop of a long, above the
+    # stop of a short.  The snapshot reports it; only a stop wider than the initial one is refused.
+    beyond = {Side.BUY: (D("2650.40"), D("2650.39")), Side.SELL: (D("2649.20"), D("2649.21"))}[side]
+    stop, wider = beyond
+    build = samples.position if side is Side.BUY else _short
+    gapped = build(initial_stop_price=stop, stop_price=stop, average_entry_price=D("2649.80"))
+    assert gapped.average_entry_price == D("2649.80")
+    assert (gapped.stop_price > gapped.average_entry_price) is (side is Side.BUY)
+    error = _violates("POS-4", lambda: build(initial_stop_price=stop, stop_price=wider))
+    assert "never wider than its initial stop" in str(error.details.get("rule"))
 
 
 @pytest.mark.requirement("G04-11")
@@ -478,15 +500,17 @@ def test_the_volume_of_a_gie_position_never_increases() -> None:
 @pytest.mark.parametrize(
     "changed",
     [
-        {"initial_volume_lots": D("1.00")},
+        {"initial_volume_lots": D("0.499999999999"), "volume_lots": D("0.25")},
         {"average_entry_price": D("2649.00")},
         {"average_entry_price": D("2650.20")},
         {"initial_stop_price": D("2647.00")},
         {"initial_risk_amount": D("208.00")},
     ],
-    ids=["initial_volume", "averaged_down", "averaged_up", "initial_stop", "initial_risk"],
+    ids=["initial_volume_shrinks", "averaged_down", "averaged_up", "initial_stop", "initial_risk"],
 )
 def test_what_was_fixed_at_the_opening_of_a_gie_position_stays_fixed(changed: dict[str, Any]) -> None:
+    # Without a further fill of the entry order (initial_volume_lots unchanged) nothing of the
+    # opening may change; the volume opened so far never decreases.
     opened = samples.position()
     validate_position_transition(opened, _after(opened))
     _refused(opened, _after(opened, **changed))
@@ -520,7 +544,7 @@ def test_a_snapshot_of_another_position_cannot_continue_this_one() -> None:
     )
     assert "position_id" in _rule(_refused(opened, other))
     assert opened.opening_client_order_id is not None
-    other_run = identity.run_id("REPLAY", "1" * 64, "other-fixture")
+    other_run = identity.run_id("REPLAY", "1" * 64)
     foreign = _after(
         opened,
         run_id=other_run,
@@ -541,15 +565,23 @@ def test_the_peak_never_decreases() -> None:
 
 
 @pytest.mark.requirement("G04-13")
-def test_a_new_peak_carries_the_decision_time_of_the_snapshot_that_reached_it() -> None:
+def test_a_new_peak_carries_the_receive_time_of_the_quote_that_made_it() -> None:
+    # Rework 2: peak_time_ns is the receive time of the quote that made the peak, so a new peak lies
+    # between the two snapshots' watermarks: not before what the previous snapshot had seen, not after
+    # this snapshot's own watermark.
     opened = samples.position()
     higher = {"unrealized_net_pnl_amount": D("52.00"), "peak_net_pnl_amount": D("50.00")}
-    moment = opened.decision_time_ns + NS_PER_SECOND
-    reached = _after(opened, peak_time_ns=moment, **higher)
-    assert reached.peak_time_ns == reached.decision_time_ns
-    validate_position_transition(opened, reached)
-    for stale in (opened.peak_time_ns, moment - 1, opened.opened_time_ns):
+    watermark = opened.decision_time_ns + NS_PER_SECOND - NS_PER_MS  # as_of_time_ns set by _after
+    for quote_time in (watermark, opened.as_of_time_ns, opened.as_of_time_ns + 1, watermark - 1):
+        reached = _after(opened, peak_time_ns=quote_time, **higher)
+        assert reached.as_of_time_ns == watermark
+        validate_position_transition(opened, reached)
+    for stale in (opened.as_of_time_ns - 1, opened.opened_time_ns):
         assert "peak" in _rule(_refused(opened, _after(opened, peak_time_ns=stale, **higher)))
+    # Later than the snapshot's watermark (but not later than its decision time, POS-7) is refused.
+    too_late = _after(opened, peak_time_ns=watermark + 1, **higher)
+    assert too_late.peak_time_ns <= too_late.decision_time_ns
+    assert "peak" in _rule(_refused(opened, too_late))
 
 
 @pytest.mark.requirement("G04-13")
@@ -602,6 +634,7 @@ def test_nothing_follows_a_closed_position(owner: PositionOwner) -> None:
         close_reason=None,
         stop_price=opened.stop_price,
         mark_price=opened.mark_price,
+        protective_client_order_id=opened.protective_client_order_id,
     )
     _refused(closed, reopened)
 
@@ -674,6 +707,7 @@ def test_an_external_position_cannot_become_a_gie_position() -> None:
         stop_price=D("2651.80"),
         mark_price=D("2649.00"),
         initial_risk_amount=D("104.00"),
+        unprotected_reason="STOP_PENDING",  # POS-9: so that the snapshot itself is a valid record
     )
     _refused(observed, adopted)
 
@@ -692,3 +726,133 @@ def test_revisions_of_external_snapshots_are_still_continuous() -> None:
     observed = _external()
     _refused(observed, _after(observed, revision=2))
     _refused(None, _external(revision=1))
+
+
+# --------------------------------------------------------------------------- POS-9 (rework 2)
+@pytest.mark.requirement("G04-12")
+def test_pos9_an_open_gie_position_names_its_protective_order_or_why_it_has_none() -> None:
+    protected = samples.position()
+    assert protected.protective_client_order_id is not None
+    assert protected.unprotected_reason is None
+    for reason in ("STOP_PENDING", "STOP_REJECTED"):
+        unprotected = samples.position(protective_client_order_id=None, unprotected_reason=reason)
+        assert unprotected.unprotected_reason == reason
+        assert unprotected.protective_client_order_id is None
+    error = _violates("POS-9", lambda: samples.position(protective_client_order_id=None))
+    assert "exactly one of protective_client_order_id, unprotected_reason" in str(error.details.get("rule"))
+    _violates("POS-9", lambda: samples.position(unprotected_reason="STOP_PENDING"))
+
+
+@pytest.mark.requirement("G04-12")
+@pytest.mark.parametrize(
+    "named",
+    [
+        {"protective_client_order_id": samples.protective_stop_lifecycle()[0].client_order_id},
+        {"unprotected_reason": "STOP_PENDING"},
+    ],
+    ids=["protective_order", "unprotected_reason"],
+)
+def test_pos9_a_closed_or_external_position_has_neither(named: dict[str, Any]) -> None:
+    opened = samples.position()
+    assert _closed(opened).protective_client_order_id is None
+    _violates("POS-9", lambda: _closed(opened, **named))
+    external = samples.external_position()
+    assert (external.protective_client_order_id, external.unprotected_reason) == (None, None)
+    _violates("POS-9", lambda: samples.external_position(**named))
+
+
+@pytest.mark.parametrize(
+    ("path", "value"),
+    [
+        ("protective_client_order_id", samples.position().position_id),
+        ("protective_client_order_id", "ord_not-hex"),
+        ("unprotected_reason", "stop pending"),
+        ("unprotected_reason", "X" * 49),
+        ("unprotected_reason", ""),
+    ],
+    ids=["position_id_not_an_order", "malformed_order_id", "free_text", "too_long", "empty"],
+)
+def test_pos9_fields_have_the_vocabulary_of_their_kind(path: str, value: object) -> None:
+    fields = {"protective_client_order_id": None, "unprotected_reason": "STOP_PENDING", path: value}
+    with pytest.raises(ContractValidationError) as caught:
+        samples.position(**fields)
+    assert caught.value.details.get("path") == path
+
+
+def test_the_protection_of_a_position_may_be_lost_and_regained_between_snapshots() -> None:
+    protected = samples.position()
+    lost = _after(protected, protective_client_order_id=None, unprotected_reason="STOP_REJECTED")
+    validate_position_transition(protected, lost)
+    regained = _after(
+        lost, protective_client_order_id=protected.protective_client_order_id, unprotected_reason=None
+    )
+    validate_position_transition(lost, regained)
+
+
+# --------------------------------------------------------------------------- growth by fills of the entry
+def _first_fill() -> Position:
+    """The first snapshot after a partial fill of 0.20 of the 0.50 lot entry order."""
+    return samples.position(
+        volume_lots=D("0.20"),
+        initial_volume_lots=D("0.20"),
+        initial_risk_amount=D("41.60"),
+        unrealized_net_pnl_amount=D("15.20"),
+        peak_net_pnl_amount=D("13.20"),
+    )
+
+
+@pytest.mark.requirement("G04-09", "G04-10")
+@pytest.mark.parametrize(
+    ("initial", "volume", "risk", "price", "allowed"),
+    [
+        ("0.50", "0.50", "104.00", "2649.788", True),
+        ("0.50", "0.40", "104.00", "2649.788", True),
+        ("0.30", "0.30", "62.40", "2649.80", True),
+        ("0.50", "0.500000000001", "104.00", "2649.788", False),
+        ("0.30", "0.300000000001", "62.40", "2649.80", False),
+        ("0.50", "0.50", "41.599999999999", "2649.788", False),
+    ],
+    ids=[
+        "filled_completely",
+        "filled_and_partly_closed",
+        "one_more_partial_fill",
+        "open_volume_beyond_what_was_opened",
+        "open_volume_grows_more_than_the_fill",
+        "risk_of_more_volume_decreases",
+    ],
+)
+def test_the_volume_opened_so_far_grows_only_together_with_the_open_volume(
+    initial: str, volume: str, risk: str, price: str, allowed: bool
+) -> None:
+    first = _first_fill()
+    fields: dict[str, Any] = {
+        "initial_volume_lots": D(initial),
+        "initial_risk_amount": D(risk),
+        "average_entry_price": D(price),
+    }
+    if D(volume) <= D(initial):
+        snapshot = _after(first, volume_lots=D(volume), **fields)
+        if allowed:
+            validate_position_transition(first, snapshot)
+        else:
+            assert "initial_risk_amount" in _rule(_refused(first, snapshot))
+    else:
+        # More open volume than was opened is not even a valid snapshot (POS-2).
+        _violates("POS-2", lambda: _after(first, volume_lots=D(volume), **fields))
+
+
+@pytest.mark.requirement("G04-09", "G04-10")
+def test_the_open_volume_grows_by_no_more_than_the_volume_opened_since_the_previous_snapshot() -> None:
+    # 0.20 opened and 0.10 already closed; the next fill opens 0.10 more.  The open volume may then
+    # grow from 0.10 by at most 0.10.
+    reduced = _after(_first_fill(), volume_lots=D("0.10"))
+    grow = {"initial_volume_lots": D("0.30"), "initial_risk_amount": D("62.40")}
+    validate_position_transition(reduced, _after(reduced, volume_lots=D("0.20"), **grow))
+    validate_position_transition(reduced, _after(reduced, volume_lots=D("0.15"), **grow))
+    too_much = _after(reduced, volume_lots=D("0.200000000001"), **grow)
+    assert "volume_lots may grow only by fills of the entry order" in _rule(_refused(reduced, too_much))
+    # Without a further fill nothing may be added at all, and nothing of the opening may change.
+    assert "volume_lots" in _rule(_refused(reduced, _after(reduced, volume_lots=D("0.11"))))
+    assert "average_entry_price" in _rule(
+        _refused(reduced, _after(reduced, average_entry_price=D("2649.70")))
+    )

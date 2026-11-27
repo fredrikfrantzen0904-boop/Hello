@@ -66,7 +66,11 @@ echo $LASTEXITCODE
 exit code 0 mean that no listed file differs. Files whose date changed but whose content is the same
 are listed under `mtime_only` (add `--strict-mtime` to treat that as a failure). Files without a
 fingerprint (the secret-looking ones) are listed under `unverified`; they count as changed only if
-their size or date changed.
+their size or date changed. **An `unverified` file is not proven unchanged**, even when the exit
+code is 0: for a complete proof take both manifests with `--hash-sensitive --no-default-excludes
+--include-venvs` (the fingerprints of secret-looking files then appear in the manifest - only
+fingerprints, never contents - so keep those two files private). The acceptance test "no production
+changes" of the project accepts only manifests without unverified files.
 
 If the trading system is running, it changes its own files (logs, data, caches). Those show up as
 differences - they come from the trading system, not from the audit. A manifest takes as long as the
@@ -115,7 +119,9 @@ Please look at these points in particular:
   `.pytest_cache`, `.ruff_cache`, `.idea`, `.vscode` and detected Python environments are only
   counted (number of files, total size); `compare` does not see changes inside them. Use
   `--no-default-excludes --include-venvs` for a complete manifest.
-* Links and junctions are listed, not followed; cloud "online-only" files are listed, not read.
+* Links and junctions are listed (in the inventory), not followed, and are not part of a manifest,
+  which holds regular files only; cloud "online-only" files are listed, not read. The baseline
+  freeze of the project refuses a baseline whose patterns reach a link or a special file.
 * Secret-looking files are recognised by their **name** only. The keyword and credential scans are
   heuristics over the first 8 MiB of source files and the first 1 MiB of configuration files: they
   give hints, not proof that something is present or absent.

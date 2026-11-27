@@ -1,9 +1,14 @@
 """Independent tests for the ``RiskDecision`` contract and ``validate_daily_state_sequence``.
 
 Expected behaviour is taken from ``specifications/SHARED_CONTRACTS.md`` (sections 3.4, 9.1, 9.2),
-``specifications/contracts/FIELDS.md`` (RiskDecision fields and invariants RSK-1..12) and the
+``specifications/contracts/FIELDS.md`` (RiskDecision fields and invariants RSK-1..13), the rework-2
+change notice (section 8, D-028: "amounts decide, fractions report"; ``advance_daily_risk``) and the
 owner's master specification G05 ("emergency halt", "nondecreasing daily profit floor", "at
 exactly the floor no new risk", "track Prague day") - not from the implementation.
+
+The boundaries are decided on money amounts against a reference equity of 100000.00 (fixture);
+a fraction is always the derivation ``gie.core.canonical.fraction_of`` (the daily result rounded
+down, the floor and the risk rounded up, 12 fractional digits).
 
 SYNTHETIC FIXTURE: every record in this module is built with the labelled builders of
 ``tests/gie/samples.py`` (``DataOrigin.SYNTHETIC_FIXTURE``).  The sizes, fractions, equity values
@@ -23,6 +28,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from gie.contracts import (
+    DailyRiskSummary,
     DailyState,
     LifecycleLedger,
     RiskDecision,
@@ -32,6 +38,8 @@ from gie.contracts import (
     to_wire,
     validate_daily_state_sequence,
 )
+from gie.contracts.risk_decision import advance_daily_risk
+from gie.core.canonical import fraction_of
 from gie.core.errors import ContractValidationError, IllegalTransitionError
 from gie.core.timeutil import NS_PER_HOUR, NS_PER_SECOND
 from tests.gie import samples
@@ -41,6 +49,8 @@ pytestmark = pytest.mark.requirement("S00-ASG-15")
 T0 = samples.T0
 #: One unit in the last place of a wire decimal (12 fractional digits are the canonical maximum).
 ULP = D("0.000000000001")
+#: The same unit for a money amount.
+AULP = D("0.000000000001")
 PROTECT = DailyState.PROFIT_PROTECTION
 APPROVALS = (RiskOutcome.APPROVED, RiskOutcome.APPROVED_REDUCED)
 
@@ -132,7 +142,7 @@ def test_rsk1_decision_id_is_derived_from_run_plan_and_attempt() -> None:
 def test_rsk1_refuses_a_decision_id_of_another_attempt_plan_or_run() -> None:
     good = samples.risk_decision()
     other_plan = samples.trade_plan(variant=1)
-    other_run = identity.run_id("REPLAY", "1" * 64, "other-fixture")
+    other_run = identity.run_id("REPLAY", "1" * 64)
     foreign_ids = [
         identity.risk_decision_id(good.run_id, good.plan_id, 1),
         identity.risk_decision_id(good.run_id, other_plan.plan_id, 0),
@@ -231,43 +241,53 @@ def test_rsk4_reasons_are_optional_for_a_plain_approval_only() -> None:
 @pytest.mark.requirement("G05-04")
 def test_rsk5_emergency_halt_can_only_reject() -> None:
     halted = samples.rejected_risk_decision(
-        daily_state=DailyState.EMERGENCY_HALT, daily_pnl_frac=D("-0.03"), reason_codes=("EMERGENCY_HALT",)
+        daily_state=DailyState.EMERGENCY_HALT,
+        daily_pnl_amount=D("-3000.00"),
+        reason_codes=("EMERGENCY_HALT",),
     )
     assert halted.outcome is RiskOutcome.REJECTED
     assert halted.approved is False
+    assert halted.daily_pnl_frac == D("-0.03")
 
 
 @pytest.mark.requirement("G05-04")
 @pytest.mark.parametrize("outcome", APPROVALS)
-@pytest.mark.parametrize("pnl", [D("-0.03"), D("-0.5"), D("0"), D("0.2")])
+@pytest.mark.parametrize("pnl", [D("-3000"), D("-50000"), D("0"), D("20000")])
 def test_rsk5_emergency_halt_never_approves_whatever_the_pnl(outcome: RiskOutcome, pnl: D) -> None:
     _violates(
         "RSK-5",
-        lambda: _approval(outcome, daily_state=DailyState.EMERGENCY_HALT, daily_pnl_frac=pnl),
+        lambda: _approval(outcome, daily_state=DailyState.EMERGENCY_HALT, daily_pnl_amount=pnl),
     )
 
 
 # --------------------------------------------------------------------------- RSK-6
 @pytest.mark.requirement("G05-06")
-def test_rsk6_the_floor_exists_exactly_in_profit_protection() -> None:
-    protected = _approval(daily_state=PROTECT, daily_pnl_frac=D("0.062"), profit_floor_frac=D("0.05"))
+def test_rsk6_the_floor_is_mandatory_in_profit_protection_and_carried_only_there_or_in_a_halt() -> None:
+    protected = _approval(daily_state=PROTECT, daily_pnl_amount=D("6200"), profit_floor_amount=D("5000"))
+    assert protected.profit_floor_amount == D("5000")
     assert protected.profit_floor_frac == D("0.05")
     for state in (DailyState.NORMAL, DailyState.DEFENSIVE):
-        assert _approval(daily_state=state).profit_floor_frac is None
-    _violates("RSK-6", lambda: _approval(daily_state=PROTECT, daily_pnl_frac=D("0.062")))
+        assert _approval(daily_state=state).profit_floor_amount is None
+    _violates("RSK-6", lambda: _approval(daily_state=PROTECT, daily_pnl_amount=D("6200")))
+    _violates(
+        "RSK-6", lambda: samples.rejected_risk_decision(daily_state=PROTECT, daily_pnl_amount=D("6200"))
+    )
     for state in (DailyState.NORMAL, DailyState.DEFENSIVE):
         _violates(
             "RSK-6",
             lambda state=state: _approval(
-                daily_state=state, daily_pnl_frac=D("0.062"), profit_floor_frac=D("0.05")
+                daily_state=state, daily_pnl_amount=D("6200"), profit_floor_amount=D("5000")
             ),
         )
-    _violates(
-        "RSK-6",
-        lambda: samples.rejected_risk_decision(
-            daily_state=DailyState.EMERGENCY_HALT, daily_pnl_frac=D("-0.03"), profit_floor_frac=D("0.05")
-        ),
+    # Rework 2: a floor established earlier in the day stays when the day is then halted.
+    halted = samples.rejected_risk_decision(
+        daily_state=DailyState.EMERGENCY_HALT,
+        daily_pnl_amount=D("-3000"),
+        profit_floor_amount=D("5000"),
+        reason_codes=("EMERGENCY_HALT",),
     )
+    assert halted.profit_floor_amount == D("5000")
+    assert halted.profit_floor_frac == D("0.05")
 
 
 # --------------------------------------------------------------------------- RSK-7
@@ -276,12 +296,12 @@ def test_rsk6_the_floor_exists_exactly_in_profit_protection() -> None:
 @pytest.mark.parametrize(
     ("pnl", "floor"),
     [
-        (D("0.05"), D("0.05")),
-        (D("0.050"), D("0.05")),
-        (D("0.05"), D("0.050000000000")),
-        (D("0.049999999999"), D("0.05")),
-        (D("0.01"), D("0.05")),
-        (D("-0.01"), D("0.05")),
+        (D("5000"), D("5000")),
+        (D("5000.00"), D("5000")),
+        (D("5000"), D("5000.000000000000")),
+        (D("4999.999999999999"), D("5000")),
+        (D("1000"), D("5000")),
+        (D("-1000"), D("5000")),
     ],
     ids=["exactly", "exactly_other_scale", "exactly_padded", "one_ulp_below", "below", "negative"],
 )
@@ -292,25 +312,41 @@ def test_rsk7_at_or_below_the_floor_only_a_rejection_can_be_constructed(
     _violates(
         "RSK-7",
         lambda: _approval(
-            outcome,
-            daily_state=PROTECT,
-            daily_pnl_frac=pnl,
-            profit_floor_frac=floor,
-            risk_frac=ULP,
-            risk_amount=D("0.0000001"),
+            outcome, daily_state=PROTECT, daily_pnl_amount=pnl, profit_floor_amount=floor, risk_amount=AULP
         ),
     )
     rejected = samples.rejected_risk_decision(
-        daily_state=PROTECT, daily_pnl_frac=pnl, profit_floor_frac=floor
+        daily_state=PROTECT, daily_pnl_amount=pnl, profit_floor_amount=floor
     )
     assert rejected.outcome is RiskOutcome.REJECTED
 
 
 @pytest.mark.requirement("G05-08")
+def test_rsk7_is_decided_on_amounts_even_where_the_fractions_coincide() -> None:
+    # Amounts decide, fractions report (D-028): 5000.00000005 is above a floor of 5000 although both
+    # fractions round to 0.05 (the result rounded down, the floor rounded up).
+    pnl, floor = D("5000.00000005"), D("5000")
+    approved = _approval(
+        daily_state=PROTECT, daily_pnl_amount=pnl, profit_floor_amount=floor, risk_amount=D("0.00000005")
+    )
+    assert approved.daily_pnl_frac == approved.profit_floor_frac == D("0.05")
+    assert approved.risk_frac == ULP  # the smallest risk still shows as a positive fraction (rounded up)
+    # ... and a floor a hair above an unchanged result refuses although the fractions still coincide.
+    _violates(
+        "RSK-7",
+        lambda: _approval(
+            daily_state=PROTECT, daily_pnl_amount=pnl, profit_floor_amount=pnl, risk_amount=D("0.00000005")
+        ),
+    )
+
+
+@pytest.mark.requirement("G05-08")
 def test_rsk7_is_also_enforced_when_a_decision_is_decoded() -> None:
     wire = to_wire(samples.variants()["RiskDecision"]["approved_within_surplus"])
+    assert wire["profit_floor_amount"] == "5000"
     assert wire["profit_floor_frac"] == "0.05"
-    wire["daily_pnl_frac"] = "0.05"
+    wire["daily_pnl_amount"] = "5000"
+    wire["daily_pnl_frac"] = "0.05"  # consistent with the amount (RSK-9 holds)
     with pytest.raises(ContractValidationError) as caught:
         from_wire(wire, RiskDecision)
     assert caught.value.details.get("invariant") == "RSK-7"
@@ -320,83 +356,106 @@ def test_rsk7_is_also_enforced_when_a_decision_is_decoded() -> None:
 @pytest.mark.requirement("G05-08", "G05-06")
 @pytest.mark.parametrize("outcome", APPROVALS)
 def test_rsk8_a_hair_above_the_floor_only_the_surplus_may_be_risked(outcome: RiskOutcome) -> None:
-    floor = D("0.05")
-    hair_above = floor + ULP
+    floor = D("5000")
+    hair_above = floor + AULP
     exact = _approval(
-        outcome,
-        daily_state=PROTECT,
-        daily_pnl_frac=hair_above,
-        profit_floor_frac=floor,
-        risk_frac=ULP,
-        risk_amount=D("0.0000001"),
+        outcome, daily_state=PROTECT, daily_pnl_amount=hair_above, profit_floor_amount=floor, risk_amount=AULP
     )
-    assert exact.risk_frac == exact.daily_pnl_frac - exact.profit_floor_frac
+    assert exact.risk_amount == exact.daily_pnl_amount - floor
     _violates(
         "RSK-8",
         lambda: _approval(
             outcome,
             daily_state=PROTECT,
-            daily_pnl_frac=hair_above,
-            profit_floor_frac=floor,
-            risk_frac=2 * ULP,
-            risk_amount=D("0.0000001"),
+            daily_pnl_amount=hair_above,
+            profit_floor_amount=floor,
+            risk_amount=2 * AULP,
         ),
     )
 
 
 @pytest.mark.requirement("G05-08", "G05-06")
 def test_rsk8_surplus_boundary_exactly_equal_and_one_unit_in_the_last_place_above() -> None:
-    floor, pnl = D("0.05"), D("0.05104")
+    floor, pnl = D("5000"), D("5104")
     surplus = pnl - floor
-    assert surplus == D("0.00104")
-    equal = _approval(daily_state=PROTECT, daily_pnl_frac=pnl, profit_floor_frac=floor, risk_frac=surplus)
-    assert equal.risk_frac == surplus
-    below = _approval(
-        daily_state=PROTECT,
-        daily_pnl_frac=pnl,
-        profit_floor_frac=floor,
-        risk_frac=surplus - ULP,
-        risk_amount=D("103.99"),
-    )
-    assert below.risk_frac < surplus
+    assert surplus == D("104")
+    common: dict[str, Any] = {"daily_state": PROTECT, "daily_pnl_amount": pnl, "profit_floor_amount": floor}
+    assert _approval(**common, risk_amount=surplus).risk_amount == surplus
+    assert _approval(**common, risk_amount=D("103.99")).risk_amount < surplus
+    _violates("RSK-8", lambda: _approval(**common, risk_amount=surplus + AULP))
+
+
+@pytest.mark.requirement("G05-07", "G05-08")
+@pytest.mark.parametrize(
+    ("open_risk", "pending_risk", "risk", "fits"),
+    [
+        (D("50"), D("30"), D("24"), True),
+        (D("50"), D("30"), D("24.000000000001"), False),
+        (D("104"), D("0"), AULP, False),
+        (D("0"), D("104"), AULP, False),
+        (D("103.999999999999"), D("0"), AULP, True),
+    ],
+    ids=["exactly_the_rest", "one_ulp_over", "open_risk_uses_it_all", "pending_uses_it_all", "one_ulp_left"],
+)
+def test_rsk8_open_and_pending_risk_count_against_the_surplus(
+    open_risk: D, pending_risk: D, risk: D, fits: bool
+) -> None:
+    def build() -> RiskDecision:
+        return _approval(
+            daily_state=PROTECT,
+            daily_pnl_amount=D("5104"),
+            profit_floor_amount=D("5000"),
+            open_risk_amount=open_risk,
+            pending_risk_amount=pending_risk,
+            risk_amount=risk,
+        )
+
+    if fits:
+        assert build().approved is True
+    else:
+        _violates("RSK-8", build)
+
+
+@pytest.mark.requirement("G05-07")
+@pytest.mark.parametrize("unknown", ["open_risk_amount", "pending_risk_amount"])
+def test_rsk8_above_the_floor_an_unknown_exposure_is_never_approved(unknown: str) -> None:
     _violates(
         "RSK-8",
         lambda: _approval(
-            daily_state=PROTECT, daily_pnl_frac=pnl, profit_floor_frac=floor, risk_frac=surplus + ULP
+            daily_state=PROTECT, daily_pnl_amount=D("9000"), profit_floor_amount=D("5000"), **{unknown: None}
         ),
     )
+    rejected = samples.rejected_risk_decision(
+        daily_state=PROTECT, daily_pnl_amount=D("9000"), profit_floor_amount=D("5000"), **{unknown: None}
+    )
+    assert rejected.approved is False
 
 
 @pytest.mark.requirement("G05-08")
 def test_rsk8_does_not_restrict_a_rejection_above_the_floor() -> None:
     rejected = samples.rejected_risk_decision(
-        daily_state=PROTECT, daily_pnl_frac=D("0.09"), profit_floor_frac=D("0.05")
+        daily_state=PROTECT, daily_pnl_amount=D("9000"), profit_floor_amount=D("5000")
     )
+    assert rejected.risk_amount == 0
     assert rejected.risk_frac == 0
 
 
 @pytest.mark.requirement("G05-08", "G05-06")
 @settings(derandomize=True, max_examples=150, deadline=None, database=None)
 @given(
-    pnl_units=st.integers(min_value=-2_000, max_value=120_000),
-    floor_units=st.integers(min_value=1, max_value=100_000),
-    risk_units=st.integers(min_value=1, max_value=30_000),
+    pnl_units=st.integers(min_value=-200_000, max_value=12_000_000),
+    floor_units=st.integers(min_value=1, max_value=10_000_000),
+    risk_units=st.integers(min_value=1, max_value=3_000_000),
 )
 def test_rsk7_rsk8_an_approval_exists_iff_pnl_is_above_the_floor_and_risk_within_surplus(
     pnl_units: int, floor_units: int, risk_units: int
 ) -> None:
-    scale = D("0.000001")
-    pnl, floor, risk = pnl_units * scale, floor_units * scale, risk_units * scale
-    equity = D("100000.00")
+    cent = D("0.01")
+    pnl, floor, risk = pnl_units * cent, floor_units * cent, risk_units * cent
 
     def build() -> RiskDecision:
         return _approval(
-            daily_state=PROTECT,
-            daily_pnl_frac=pnl,
-            profit_floor_frac=floor,
-            risk_frac=risk,
-            risk_amount=risk * equity,
-            reference_equity_amount=equity,
+            daily_state=PROTECT, daily_pnl_amount=pnl, profit_floor_amount=floor, risk_amount=risk
         )
 
     if pnl > floor and risk <= pnl - floor:
@@ -418,10 +477,13 @@ def test_rsk7_rsk8_an_approval_exists_iff_pnl_is_above_the_floor_and_risk_within
     ],
     ids=["exact_boundary", "one_ulp_below", "rounded_up_fraction", "whole_equity"],
 )
-def test_rsk9_the_amount_may_reach_but_not_exceed_fraction_times_equity(
+def test_rsk9_the_risk_fraction_is_the_amount_over_equity_rounded_up(
     risk_amount: D, risk_frac: D, equity: D
 ) -> None:
-    decision = _approval(risk_amount=risk_amount, risk_frac=risk_frac, reference_equity_amount=equity)
+    decision = _approval(
+        risk_amount=risk_amount, risk_frac=risk_frac, reference_equity_amount=equity, daily_pnl_amount=D("0")
+    )
+    assert decision.risk_frac == fraction_of(risk_amount, equity, round_up=True)
     assert decision.risk_amount <= decision.risk_frac * decision.reference_equity_amount
 
 
@@ -432,13 +494,127 @@ def test_rsk9_the_amount_may_reach_but_not_exceed_fraction_times_equity(
         (D("104.01"), D("0.00104"), D("100000.00")),
         (D("33.333333333333"), D("0.000333333333"), D("100000.00")),
         (D("104.00"), D("0.00104"), D("99999.99")),
+        (D("104.00"), D("0.001040000001"), D("100000.00")),
+        (D("104.00"), D("0.00105"), D("100000.00")),
     ],
-    ids=["one_ulp_above", "a_cent_above", "fraction_rounded_down", "smaller_equity"],
+    ids=[
+        "one_ulp_above",
+        "a_cent_above",
+        "fraction_rounded_down",
+        "smaller_equity",
+        "overstated_by_one_ulp",
+        "overstated",
+    ],
 )
-def test_rsk9_an_understated_risk_fraction_is_refused(risk_amount: D, risk_frac: D, equity: D) -> None:
+def test_rsk9_a_risk_fraction_other_than_the_derivation_is_refused(
+    risk_amount: D, risk_frac: D, equity: D
+) -> None:
     _violates(
         "RSK-9",
-        lambda: _approval(risk_amount=risk_amount, risk_frac=risk_frac, reference_equity_amount=equity),
+        lambda: _approval(
+            risk_amount=risk_amount,
+            risk_frac=risk_frac,
+            reference_equity_amount=equity,
+            daily_pnl_amount=D("0"),
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    ("pnl", "derived"),
+    [
+        (D("400.00"), D("0.004")),
+        (D("33.333333333333"), D("0.000333333333")),
+        (D("-33.333333333333"), D("-0.000333333334")),
+        (D("0.0000001"), D("0.000000000001")),
+        (D("0.00000009"), D("0")),
+        (D("-0.00000001"), D("-0.000000000001")),
+    ],
+    ids=["exact", "positive_rounded_down", "negative_rounded_down", "one_ulp", "below_one_ulp", "tiny_loss"],
+)
+def test_rsk9_the_daily_result_fraction_is_rounded_down(pnl: D, derived: D) -> None:
+    decision = samples.rejected_risk_decision(daily_pnl_amount=pnl)
+    assert decision.daily_pnl_frac == derived
+    assert decision.daily_pnl_frac == fraction_of(pnl, decision.reference_equity_amount, round_up=False)
+    _violates(
+        "RSK-9", lambda: samples.rejected_risk_decision(daily_pnl_amount=pnl, daily_pnl_frac=derived + ULP)
+    )
+    _violates(
+        "RSK-9", lambda: samples.rejected_risk_decision(daily_pnl_amount=pnl, daily_pnl_frac=derived - ULP)
+    )
+
+
+@pytest.mark.requirement("G05-06")
+@pytest.mark.parametrize(
+    ("floor", "derived"),
+    [(D("5000"), D("0.05")), (D("33.333333333333"), D("0.000333333334")), (D("0.00000001"), ULP)],
+    ids=["exact", "rounded_up", "tiny_floor_rounded_up"],
+)
+def test_rsk9_the_profit_floor_fraction_is_rounded_up(floor: D, derived: D) -> None:
+    common: dict[str, Any] = {
+        "daily_state": PROTECT,
+        "daily_pnl_amount": D("1"),
+        "profit_floor_amount": floor,
+    }
+    decision = samples.rejected_risk_decision(**common)
+    assert decision.profit_floor_frac == derived
+    assert decision.profit_floor_frac == fraction_of(floor, decision.reference_equity_amount, round_up=True)
+    for wrong in (derived - ULP, derived + ULP, None):
+        _violates(
+            "RSK-9", lambda wrong=wrong: samples.rejected_risk_decision(**common, profit_floor_frac=wrong)
+        )
+
+
+def test_rsk9_a_floor_fraction_without_a_floor_amount_is_refused() -> None:
+    _violates("RSK-9", lambda: samples.risk_decision(profit_floor_frac=D("0.05")))
+
+
+# --------------------------------------------------------------------------- RSK-13
+_AGGREGATES = (
+    "equity_amount",
+    "open_risk_amount",
+    "pending_risk_amount",
+    "margin_required_amount",
+    "margin_free_amount",
+    "gap_stress_loss_amount",
+)
+
+
+@pytest.mark.requirement("G05-07", "G05-12")
+@pytest.mark.parametrize("outcome", APPROVALS)
+@pytest.mark.parametrize("unknown", _AGGREGATES)
+def test_rsk13_an_approval_states_every_aggregate_it_rests_on(outcome: RiskOutcome, unknown: str) -> None:
+    approved = _approval(outcome)
+    assert all(getattr(approved, name) is not None for name in _AGGREGATES)
+    _violates("RSK-13", lambda: _approval(outcome, **{unknown: None}))
+
+
+@pytest.mark.requirement("G05-12")
+def test_rsk13_a_rejection_may_rest_on_unknown_aggregates() -> None:
+    rejected = samples.rejected_risk_decision(**dict.fromkeys(_AGGREGATES))
+    assert all(getattr(rejected, name) is None for name in _AGGREGATES)
+
+
+@pytest.mark.parametrize("outcome", APPROVALS)
+def test_rsk13_the_margin_required_may_reach_but_not_exceed_the_free_margin(outcome: RiskOutcome) -> None:
+    exact = _approval(outcome, margin_required_amount=D("1325.18"), margin_free_amount=D("1325.18"))
+    assert exact.margin_required_amount == exact.margin_free_amount
+    _violates(
+        "RSK-13",
+        lambda: _approval(
+            outcome, margin_required_amount=D("1325.18") + AULP, margin_free_amount=D("1325.18")
+        ),
+    )
+    _violates(
+        "RSK-13",
+        lambda: _approval(outcome, margin_required_amount=D("0.01"), margin_free_amount=D("-500.00")),
+    )
+    # A rejection grants nothing, so its margin figures are not a limit.
+    assert (
+        samples.rejected_risk_decision(
+            margin_required_amount=D("2000"), margin_free_amount=D("1000")
+        ).approved
+        is False
     )
 
 
@@ -547,11 +723,22 @@ def test_plan_fingerprint_must_match_the_sha256_pattern(fingerprint: str) -> Non
         ("quality_validated", 1),
         ("reservation_id", samples.risk_decision().decision_id),
         ("open_risk_amount", D("-0.01")),
+        ("pending_risk_amount", D("-0.01")),
+        ("margin_required_amount", D("-0.01")),
+        ("gap_stress_loss_amount", D("-0.01")),
+        ("daily_pnl_amount", 400),
+        ("daily_pnl_amount", D("Infinity")),
+        ("profit_floor_amount", D("0")),
+        ("profit_floor_amount", D("-5000")),
+        ("profit_floor_amount", 5000),
         ("valid_until_ns", -1),
     ],
 )
 def test_invalid_field_values_are_refused_and_never_coerced(path: str, value: object) -> None:
-    _field_error(path, lambda: samples.risk_decision(**{path: value}))
+    # Built from the fields of a valid sample, so that only the field under test is wrong.
+    valid = samples.risk_decision()
+    fields = {spec.name: getattr(valid, spec.name) for spec in RiskDecision.FIELD_SPECS}
+    _field_error(path, lambda: RiskDecision(**{**fields, path: value}))
 
 
 def test_reason_codes_are_unique_upper_case_codes_in_canonical_order() -> None:
@@ -578,18 +765,28 @@ def _refused_sequence(previous: RiskDecision, decision: RiskDecision) -> Illegal
     return caught.value
 
 
+def _refused_advance(summary: DailyRiskSummary | None, decision: RiskDecision) -> str:
+    with pytest.raises(IllegalTransitionError) as caught:
+        advance_daily_risk(summary, decision)
+    assert caught.value.code == "GIE.STATE.ILLEGAL_TRANSITION"
+    assert caught.value.details.get("decision_id") == decision.decision_id
+    return str(caught.value.details.get("rule"))
+
+
 def _halt(time_ns: int, **overrides: Any) -> RiskDecision:
     fields: dict[str, Any] = {
         "daily_state": DailyState.EMERGENCY_HALT,
-        "daily_pnl_frac": D("-0.03"),
+        "daily_pnl_amount": D("-3000"),
         "reason_codes": ("EMERGENCY_HALT",),
     }
     fields.update(overrides)
     return _rejected_at(time_ns, **fields)
 
 
-def _protected(time_ns: int, floor: str, pnl: str = "0.09", **overrides: Any) -> RiskDecision:
-    return _at(time_ns, daily_state=PROTECT, daily_pnl_frac=D(pnl), profit_floor_frac=D(floor), **overrides)
+def _protected(time_ns: int, floor: str, pnl: str = "9000", **overrides: Any) -> RiskDecision:
+    return _at(
+        time_ns, daily_state=PROTECT, daily_pnl_amount=D(pnl), profit_floor_amount=D(floor), **overrides
+    )
 
 
 LATER = T0 + 60 * NS_PER_SECOND
@@ -598,13 +795,13 @@ NEXT_DAY = T0 + 24 * NS_PER_HOUR
 
 def test_the_first_decision_of_a_gate_has_no_predecessor_to_violate() -> None:
     validate_daily_state_sequence(None, _halt(T0))
-    validate_daily_state_sequence(None, _protected(T0, "0.05"))
+    validate_daily_state_sequence(None, _protected(T0, "5000"))
 
 
 @pytest.mark.requirement("G05-04")
 def test_same_day_states_other_than_halt_may_follow_each_other_freely() -> None:
     normal = _at(T0)
-    defensive = _at(LATER, seq=1, attempt=1, daily_state=DailyState.DEFENSIVE, daily_pnl_frac=D("-0.02"))
+    defensive = _at(LATER, seq=1, attempt=1, daily_state=DailyState.DEFENSIVE, daily_pnl_amount=D("-2000"))
     back = _at(LATER + 1, seq=2, attempt=2)
     halt = _halt(LATER + 2, seq=3, attempt=3)
     assert {d.trading_day for d in (normal, defensive, back, halt)} == {"2026-11-26"}
@@ -619,7 +816,7 @@ def test_an_emergency_halt_stays_in_force_for_the_rest_of_the_trading_day(state:
     halt = _halt(T0)
     extra: dict[str, Any] = {"daily_state": state, "seq": 1, "attempt": 1}
     if state is PROTECT:
-        extra.update(daily_pnl_frac=D("0.09"), profit_floor_frac=D("0.05"))
+        extra.update(daily_pnl_amount=D("9000"), profit_floor_amount=D("5000"))
     rejected_after = _rejected_at(LATER, **extra)
     approved_after = _at(LATER, **extra)
     assert halt.trading_day == rejected_after.trading_day == approved_after.trading_day == "2026-11-26"
@@ -649,20 +846,25 @@ def test_an_emergency_halt_resets_on_the_next_prague_trading_day() -> None:
 
 @pytest.mark.requirement("G05-06")
 def test_the_daily_profit_floor_may_stay_or_rise_within_the_day() -> None:
-    first = _protected(T0, "0.05")
-    validate_daily_state_sequence(first, _protected(LATER, "0.05", seq=1, attempt=1))
-    validate_daily_state_sequence(first, _protected(LATER, "0.050000000001", seq=1, attempt=1))
-    validate_daily_state_sequence(first, _protected(LATER, "0.08", seq=1, attempt=1))
+    first = _protected(T0, "5000")
+    validate_daily_state_sequence(first, _protected(LATER, "5000", seq=1, attempt=1))
+    validate_daily_state_sequence(first, _protected(LATER, "5000.000000000001", seq=1, attempt=1))
+    validate_daily_state_sequence(first, _protected(LATER, "8000", seq=1, attempt=1))
 
 
 @pytest.mark.requirement("G05-06")
-@pytest.mark.parametrize("lower", ["0.049999999999", "0.04", "0.000001"])
+@pytest.mark.parametrize("lower", ["4999.999999999999", "4000", "0.01"])
 def test_the_daily_profit_floor_never_decreases_within_the_day(lower: str) -> None:
-    first = _protected(T0, "0.05")
+    first = _protected(T0, "5000")
     for follower in (
         _protected(LATER, lower, seq=1, attempt=1),
         _rejected_at(
-            LATER, seq=1, attempt=1, daily_state=PROTECT, daily_pnl_frac=D("0.09"), profit_floor_frac=D(lower)
+            LATER,
+            seq=1,
+            attempt=1,
+            daily_state=PROTECT,
+            daily_pnl_amount=D("9000"),
+            profit_floor_amount=D(lower),
         ),
     ):
         assert follower.trading_day == first.trading_day
@@ -672,48 +874,57 @@ def test_the_daily_profit_floor_never_decreases_within_the_day(lower: str) -> No
 
 @pytest.mark.requirement("G05-06", "G05-10")
 def test_a_new_trading_day_starts_with_a_new_floor() -> None:
-    first = _protected(T0, "0.05")
+    first = _protected(T0, "5000")
     validate_daily_state_sequence(
-        first, _protected(NEXT_DAY, "0.01", "0.02", seq=1, attempt=1, trading_day="2026-11-27")
+        first, _protected(NEXT_DAY, "1000", "2000", seq=1, attempt=1, trading_day="2026-11-27")
     )
     validate_daily_state_sequence(first, _at(NEXT_DAY, seq=1, attempt=1, trading_day="2026-11-27"))
 
 
 @pytest.mark.requirement("G05-06")
 def test_the_floor_cannot_be_lowered_by_leaving_and_re_entering_profit_protection_in_one_day() -> None:
-    # SHARED_CONTRACTS 9.2: "Within a trading day ... the profit floor never decreases", enforced by
-    # the lifecycle ledger.  0.05 -> (no floor) -> 0.03 on one trading day is a decrease.
-    ledger = LifecycleLedger()
-    protected = _protected(T0, "0.05", "0.062")
-    left = _at(T0 + NS_PER_SECOND, seq=1, attempt=1, daily_pnl_frac=D("0.04"))
-    lowered = _protected(T0 + 2 * NS_PER_SECOND, "0.03", "0.045", seq=2, attempt=2)
+    # 5000 -> (no floor) -> 3000 on one trading day is a decrease.  Rework 2: the floor may not even
+    # disappear, so the step that leaves profit protection is already refused, and the lowered floor
+    # stays refused against what the day established.
+    ledger = _ledger_with_plan()
+    protected = _protected(T0, "5000", "6200")
+    left = _at(T0 + NS_PER_SECOND, seq=1, attempt=1, daily_pnl_amount=D("4000"))
+    lowered = _protected(T0 + 2 * NS_PER_SECOND, "3000", "4500", seq=2, attempt=2)
     assert protected.trading_day == left.trading_day == lowered.trading_day == "2026-11-26"
     assert ledger.admit(protected) is True
-
-    def leave_and_re_enter_lower() -> None:
+    with pytest.raises(IllegalTransitionError) as caught:
         ledger.admit(left)
+    assert caught.value.details.get("rule") == "a daily profit floor, once established, may not disappear"
+    with pytest.raises(IllegalTransitionError) as caught:
         ledger.admit(lowered)
-
-    with pytest.raises(IllegalTransitionError):
-        leave_and_re_enter_lower()
+    assert caught.value.details.get("rule") == "the daily profit floor may not decrease"
+    summary = ledger.daily_risk(protected.run_id)
+    assert summary is not None
+    assert summary.profit_floor_amount == D("5000")
+    assert summary.last_decision_time_ns == T0
 
 
 @pytest.mark.requirement("G05-06", "G05-08")
 @pytest.mark.parametrize(
-    "pnl", ["0.05", "0.04"], ids=["exactly_at_the_earlier_floor", "below_the_earlier_floor"]
+    "pnl", ["5000", "4000"], ids=["exactly_at_the_earlier_floor", "below_the_earlier_floor"]
 )
 def test_no_approval_at_or_below_a_floor_that_was_protected_earlier_the_same_day(pnl: str) -> None:
     # G05: "protect a nondecreasing daily profit floor ... At exactly the floor no new risk."  A floor
-    # of 0.05 was protected at T0; reporting another daily state a second later does not lower it.
-    protected = _protected(T0, "0.05", "0.062")
-    approval = _at(T0 + NS_PER_SECOND, seq=1, attempt=1, daily_pnl_frac=D(pnl))
+    # of 5000 was protected at T0; reporting another daily state a second later does not lower it.
+    protected = _protected(T0, "5000", "6200")
+    approval = _at(T0 + NS_PER_SECOND, seq=1, attempt=1, daily_pnl_amount=D(pnl))
     assert approval.daily_state is DailyState.NORMAL
     assert approval.approved is True
-    assert approval.profit_floor_frac is None
+    assert approval.profit_floor_amount is None
     assert approval.trading_day == protected.trading_day == "2026-11-26"
-    assert protected.profit_floor_frac is not None
-    assert approval.daily_pnl_frac <= protected.profit_floor_frac
+    assert protected.profit_floor_amount is not None
+    assert approval.daily_pnl_amount <= protected.profit_floor_amount
     _refused_sequence(protected, approval)
+    # Carrying the floor, as the rule demands, the approval cannot even be constructed (RSK-7).
+    _violates(
+        "RSK-7",
+        lambda: _protected(T0 + NS_PER_SECOND, "5000", pnl, seq=1, attempt=1),
+    )
 
 
 def test_decisions_at_the_same_instant_may_follow_each_other() -> None:
@@ -734,3 +945,143 @@ def test_the_trading_day_never_goes_back() -> None:
     _refused_sequence(tomorrow, yesterday)
     # A halt of an earlier day cannot be "escaped" backwards either.
     _refused_sequence(_halt(NEXT_DAY, trading_day="2026-11-27"), yesterday)
+
+
+# --------------------------------------------------------------------------- advance_daily_risk
+def _ledger_with_plan() -> LifecycleLedger:
+    """A referential ledger that already holds the sample plan (and the evidence and candidate it needs)."""
+    ledger = LifecycleLedger()
+    for record in (samples.evidence(), samples.candidate(), samples.trade_plan()):
+        assert ledger.admit(record) is True
+    return ledger
+
+
+def _walk(*decisions: RiskDecision) -> DailyRiskSummary:
+    summary: DailyRiskSummary | None = None
+    for decision in decisions:
+        summary = advance_daily_risk(summary, decision)
+    assert summary is not None
+    return summary
+
+
+def test_the_first_decision_of_a_day_establishes_the_summary() -> None:
+    decision = _protected(T0, "5000")
+    summary = advance_daily_risk(None, decision)
+    assert summary == DailyRiskSummary(
+        trading_day="2026-11-26",
+        account_currency="USD",
+        reference_equity_amount=D("100000.00"),
+        halted=False,
+        profit_floor_amount=D("5000"),
+        last_decision_time_ns=T0,
+    )
+    assert advance_daily_risk(None, _halt(T0)).halted is True
+    assert advance_daily_risk(None, _at(T0)).profit_floor_amount is None
+
+
+@pytest.mark.requirement("G05-06")
+def test_the_floor_of_the_summary_follows_the_newest_decision_and_never_falls() -> None:
+    summary = _walk(_protected(T0, "5000"), _protected(LATER, "6000", "9000", seq=1, attempt=1))
+    assert summary.profit_floor_amount == D("6000")
+    assert summary.last_decision_time_ns == LATER
+    rule = _refused_advance(summary, _protected(LATER + 1, "5999.999999999999", seq=2, attempt=2))
+    assert rule == "the daily profit floor may not decrease"
+    rule = _refused_advance(summary, _at(LATER + 1, seq=2, attempt=2))
+    assert rule == "a daily profit floor, once established, may not disappear"
+    # Refused decisions change nothing: the summary is still the one that was passed in.
+    assert summary.profit_floor_amount == D("6000")
+    assert advance_daily_risk(
+        summary, _protected(LATER + 1, "6000", seq=2, attempt=2)
+    ).profit_floor_amount == D("6000")
+
+
+@pytest.mark.requirement("G05-04", "G05-06")
+def test_a_halt_after_a_floor_carries_the_floor_and_both_stay() -> None:
+    summary = _walk(_protected(T0, "5000"))
+    rule = _refused_advance(summary, _halt(LATER, seq=1, attempt=1))
+    assert rule == "a daily profit floor, once established, may not disappear"
+    halted = advance_daily_risk(summary, _halt(LATER, seq=1, attempt=1, profit_floor_amount=D("5000")))
+    assert halted.halted is True
+    assert halted.profit_floor_amount == D("5000")
+    later_halt = _halt(LATER + 1, seq=2, attempt=2, profit_floor_amount=D("5000"))
+    assert advance_daily_risk(halted, later_halt).halted is True
+    rule = _refused_advance(halted, _protected(LATER + 2, "5000", seq=2, attempt=2))
+    assert rule == "an emergency halt stays in force until the next trading day"
+    rule = _refused_advance(
+        halted, _rejected_at(LATER + 2, seq=2, attempt=2, daily_state=PROTECT, profit_floor_amount=D("5000"))
+    )
+    assert rule == "an emergency halt stays in force until the next trading day"
+
+
+@pytest.mark.requirement("G05-10")
+@pytest.mark.parametrize(
+    ("field", "value", "rule"),
+    [
+        (
+            "reference_equity_amount",
+            D("100000.01"),
+            "reference_equity_amount may not change within a trading day",
+        ),
+        (
+            "reference_equity_amount",
+            D("99999.99"),
+            "reference_equity_amount may not change within a trading day",
+        ),
+        ("account_currency", "EUR", "account_currency may not change within a trading day"),
+    ],
+)
+def test_reference_equity_and_currency_are_frozen_within_the_day(
+    field: str, value: object, rule: str
+) -> None:
+    summary = _walk(_at(T0))
+    same = advance_daily_risk(summary, _at(LATER, seq=1, attempt=1))
+    assert same.reference_equity_amount == D("100000.00")
+    assert _refused_advance(summary, _at(LATER, seq=1, attempt=1, **{field: value})) == rule
+    # On the next Prague trading day the value may be different.
+    tomorrow = advance_daily_risk(
+        summary, _at(NEXT_DAY, seq=1, attempt=1, trading_day="2026-11-27", **{field: value})
+    )
+    assert getattr(tomorrow, field) == value
+
+
+@pytest.mark.requirement("G05-04", "G05-06", "G05-10")
+def test_a_new_trading_day_starts_fresh_after_a_halt_with_a_floor() -> None:
+    summary = _walk(_protected(T0, "5000"), _halt(LATER, seq=1, attempt=1, profit_floor_amount=D("5000")))
+    assert summary.halted is True
+    fresh = advance_daily_risk(summary, _at(NEXT_DAY, seq=2, attempt=2, trading_day="2026-11-27"))
+    assert fresh == DailyRiskSummary(
+        trading_day="2026-11-27",
+        account_currency="USD",
+        reference_equity_amount=D("100000.00"),
+        halted=False,
+        profit_floor_amount=None,
+        last_decision_time_ns=NEXT_DAY,
+    )
+
+
+@pytest.mark.requirement("G05-10")
+def test_the_summary_refuses_an_earlier_decision_time_or_trading_day() -> None:
+    summary = _walk(_at(NEXT_DAY, trading_day="2026-11-27"))
+    assert _refused_advance(summary, _at(NEXT_DAY - 1, seq=1, attempt=1, trading_day="2026-11-27")) == (
+        "decision_time_ns may not decrease"
+    )
+    assert _refused_advance(summary, _at(T0, seq=1, attempt=1)) == "decision_time_ns may not decrease"
+
+
+@pytest.mark.requirement("G05-06")
+def test_the_pairwise_wrapper_sees_only_the_pair_while_the_summary_sees_the_day() -> None:
+    # validate_daily_state_sequence judges two decisions; advance_daily_risk keeps what the day has
+    # established.  A halt two decisions back is invisible to the pair but not to the summary.
+    halt = _halt(T0)
+    repeated = _halt(LATER, seq=1, attempt=1)
+    approval = _at(LATER + 1, seq=2, attempt=2)
+    validate_daily_state_sequence(halt, repeated)
+    with pytest.raises(IllegalTransitionError):
+        validate_daily_state_sequence(repeated, approval)
+    summary = _walk(halt, repeated)
+    assert "halt" in _refused_advance(summary, approval)
+    # Pairs that the summary of the first decision decides the same way.
+    validate_daily_state_sequence(None, approval)
+    validate_daily_state_sequence(_at(T0), approval)
+    error = _refused_sequence(_protected(T0, "5000"), approval)
+    assert error.details.get("rule") == "a daily profit floor, once established, may not disappear"

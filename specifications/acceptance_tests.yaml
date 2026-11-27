@@ -76,6 +76,7 @@ acceptance_tests:
   test_modules:
   - tests/gie/tools/test_protected_paths.py
   - tests/gie/tools/test_baseline_audit.py
+  - tests/gie/baseline/test_baseline_regression.py
   status: planned
   blockers: [B-001]
   notes: ''

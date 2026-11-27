@@ -1,0 +1,73 @@
+# Registry of the baselines of the existing system (G02-08, G02-09, M-AUTH-12, S00-ACC-05).
+#
+# Written by tools/baseline_freeze.py - edit only through 'freeze' (which needs owner approval
+# after the audit of the production tree). The artifacts are not reachable from the development
+# session (blocker B-001): every entry stays not_frozen, with include and manifest null, until
+# the audit has established which files make up the baseline. The numbers the specification
+# quotes about these baselines are unverified claims (specifications/baselines/claims.yaml).
+schema_version: 1
+baselines:
+- id: gce-b
+  title: GCE-B baseline
+  description: 'Baseline of the existing system that the master specification (G02) requires to be preserved:
+    ''Preserve GCE-B''. G09 quotes Round 2 evidence about GCE-B; those numbers are unverified claims (claims
+    BL-GCEB-TRADES, BL-GCEB-R, BL-GCEB-COVERAGE, BL-GCEB-DRAWDOWN in specifications/baselines/claims.yaml)
+    and are not part of this entry. Location, file names and file set are unknown until the audit of the
+    production tree (blocker B-001); no path is assumed here.'
+  requirement_ids:
+  - G02-08
+  - M-AUTH-12
+  - S00-ACC-05
+  - G09-02
+  - G09-11
+  - G09-12
+  - G09-13
+  root_env: GIE_BASELINE_ROOT
+  include: null
+  manifest: null
+  status: not_frozen
+  blocker: B-001
+- id: round-1
+  title: Exact Round 1 baselines
+  description: 'The master specification (G02) requires: ''Preserve GCE-B and exact Round 1 baselines''.
+    It does not say what the Round 1 baselines consist of. Location, file names and file set are unknown
+    until the audit of the production tree (blocker B-001); no path is assumed here.'
+  requirement_ids:
+  - G02-09
+  - S00-ACC-05
+  root_env: GIE_BASELINE_ROOT
+  include: null
+  manifest: null
+  status: not_frozen
+  blocker: B-001
+- id: round-2
+  title: Round 2 setups and evidence
+  description: 'Round 2 evidence quoted by the master specification (G09): a setup count (claim BL-R2-SETUPS,
+    unverified) and the statement that raw ticks were not stored in Round 2. The specification calls existing
+    history research only; this entry exists so that the evidence can be frozen before it is reconciled
+    (sessions 02 and 10). Location, file names and file set are unknown until the audit of the production
+    tree (blocker B-001); no path is assumed here.'
+  requirement_ids:
+  - G09-01
+  - G09-03
+  - G09-05
+  - G09-06
+  root_env: GIE_BASELINE_ROOT
+  include: null
+  manifest: null
+  status: not_frozen
+  blocker: B-001
+- id: cavemen-trades
+  title: Cavemen trade sets to be reconciled
+  description: The master specification (G09) requires reconciling two Cavemen trade counts that differ
+    (claim BL-CAVEMEN-TRADES, unverified). Which two trade sets report them is unknown; both are to be
+    frozen so that the reconciliation (sessions 02 and 10) works on fixed inputs. Location, file names
+    and file set are unknown until the audit of the production tree (blocker B-001); no path is assumed
+    here.
+  requirement_ids:
+  - G09-07
+  root_env: GIE_BASELINE_ROOT
+  include: null
+  manifest: null
+  status: not_frozen
+  blocker: B-001

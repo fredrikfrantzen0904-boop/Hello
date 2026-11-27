@@ -7,6 +7,10 @@ invented.  Nothing here is market data or evidence about latency or performance.
 Expected behaviour: ``specifications/SHARED_CONTRACTS.md`` (revision 2) section 6 - the table of
 section 6.1 (stream name, ordering time, rank per contract, two ranks for ``OrderEvent``) and the
 rule of section 6.2 that the ranks follow the data flow so that the key is a causal fallback order.
+Rework 2 (change notice sections 2 and 6, docstring of ``gie.contracts.ordering``): the ordering
+time of a ``RunManifest`` is ``data_start_ns`` in a replay (which has no creation time) and
+``created_time_ns`` in a paper run; a broker report is observed strictly later than the request it
+answers.
 """
 
 from __future__ import annotations
@@ -23,6 +27,7 @@ from gie.contracts import (
     OrderEventType,
     OrderState,
     Record,
+    RunMode,
     Tick,
     all_contracts,
     identity,
@@ -32,7 +37,7 @@ from gie.contracts import (
     validate_order_transition,
 )
 from gie.contracts.ordering import STREAMS
-from gie.core.errors import UnknownContractError
+from gie.core.errors import ContractValidationError, IllegalTransitionError, UnknownContractError
 from gie.core.ordering import EventKey, StreamRank, merge_ordered
 from tests.gie import samples
 from tests.gie.samples import T0
@@ -43,7 +48,7 @@ SPECIFICATION = Path(__file__).resolve().parents[3] / "specifications" / "SHARED
 
 #: SHARED_CONTRACTS.md section 6.1: contract -> (stream prefix, ordering-time field, rank).
 EXPECTED = {
-    "RunManifest": ("run_manifest", "created_time_ns", 0),
+    "RunManifest": ("run_manifest", "data_start_ns | created_time_ns", 0),
     "Clock": ("clock", "wall_time_ns", 5),
     "Tick": ("tick", "receive_time_ns", 10),
     "OrderEvent": ("order_event", "receive_time_ns", 20),
@@ -55,6 +60,8 @@ EXPECTED = {
     "ModelVersion": ("model_version", "status_time_ns", 90),
 }
 ORDER_REQUEST_RANK = 80
+#: Rework 2: the two alternative ordering-time fields of a RunManifest (replay | paper).
+MANIFEST_TIME_FIELDS = ("data_start_ns", "created_time_ns")
 
 #: Built once: records are immutable.
 ALL_VARIANTS = samples.variants()
@@ -65,6 +72,15 @@ VARIANTS = [
 
 def _variant(name: str, key: str) -> Any:
     return ALL_VARIANTS[name][key]
+
+
+def _documented_time(name: str, record: Any) -> int:
+    """The ordering time the table documents for *record*."""
+    if name == "RunManifest":
+        # A replay has a data period and no creation time; a paper run the reverse (RUN-2).
+        field = "data_start_ns" if record.mode is RunMode.REPLAY else "created_time_ns"
+        return int(getattr(record, field))
+    return int(getattr(record, EXPECTED[name][1]))
 
 
 def _order_event_of_type(event_type: OrderEventType) -> OrderEvent:
@@ -99,7 +115,10 @@ def _order_event_of_type(event_type: OrderEventType) -> OrderEvent:
 
 
 def _same_instant_records() -> dict[str, Record]:
-    """One record per row of the section 6.1 table, all available at the instant T0."""
+    """One record per row of the section 6.1 table, all available at the instant T0.
+
+    The records are independent samples (the broker report does not answer the request listed here).
+    """
     plan = samples.trade_plan(decision_time_ns=T0, as_of_time_ns=T0)
     request = samples.order_event(event_time_ns=T0, receive_time_ns=T0)
     report = samples.order_event(
@@ -112,7 +131,7 @@ def _same_instant_records() -> dict[str, Record]:
         broker_order_id=identity.broker_order_id(request.client_order_id),
     )
     return {
-        "RunManifest": samples.run_manifest(created_time_ns=T0),
+        "RunManifest": samples.run_manifest(data_start_ns=T0),  # a replay: ordered by its data start
         "Clock": samples.clock_reading(wall_time_ns=T0),
         "Tick": samples.tick(event_time_ns=T0, receive_time_ns=T0),
         "OrderEvent (broker report)": report,
@@ -130,21 +149,33 @@ def _same_instant_records() -> dict[str, Record]:
 def test_expected_table_is_the_table_of_the_specification() -> None:
     text = SPECIFICATION.read_text(encoding="utf-8")
     section = text.split("### 6.1 Streams and sequence numbers", 1)[1].split("### 6.2", 1)[0]
-    row = re.compile(r"^\| `(\w+)`(?: \(([^)]+)\))? \| `(\w+)/<(\w+)>(/<symbol>)?` \| `(\w+)` \| (\d+) \|$")
+    row = re.compile(r"^\| `(\w+)`(?: \(([^)]+)\))? \| `(\w+)/<(\w+)>(/<symbol>)?` \| ([^|]+?) \| (\d+) \|$")
     parsed: dict[str, tuple[str, str, int]] = {}
     request_rows = []
+    manifest_time: set[str] = set()
     for line in section.splitlines():
         match = row.match(line)
         if match is None:
             continue
-        contract, qualifier, prefix, scope, symbol_part, time_field, rank = match.groups()
+        contract, qualifier, prefix, scope, symbol_part, time_cell, rank = match.groups()
         assert (scope, symbol_part) == (("source", "/<symbol>") if contract == "Tick" else ("producer", None))
+        time_fields = re.findall(r"`(\w+)`", time_cell)
+        if contract == "RunManifest":
+            manifest_time = set(time_fields)
+            time_field = EXPECTED["RunManifest"][1]
+        else:
+            assert time_cell == f"`{time_fields[0]}`"
+            time_field = time_fields[0]
         if qualifier == "`*_REQUESTED`":
             request_rows.append((contract, prefix, time_field, int(rank)))
             continue
         assert contract not in parsed
         parsed[contract] = (prefix, time_field, int(rank))
     assert parsed == EXPECTED
+    # SHARED_CONTRACTS.md is being rewritten for rework 2: the manifest row names the paper-run field
+    # (revision 2) or both fields of the rework-2 rule; it never names any other field.
+    assert "created_time_ns" in manifest_time
+    assert manifest_time <= set(MANIFEST_TIME_FIELDS)
     assert request_rows == [("OrderEvent", "order_event", "receive_time_ns", ORDER_REQUEST_RANK)]
 
 
@@ -159,7 +190,9 @@ def test_streams_entry_equals_the_documented_row(name: str) -> None:
     prefix, time_field, rank = STREAMS[all_contracts()[name]]
     assert (prefix, time_field, int(rank)) == EXPECTED[name]
     assert isinstance(rank, StreamRank)
-    assert time_field in {spec.name for spec in all_contracts()[name].FIELD_SPECS}
+    fields = {spec.name for spec in all_contracts()[name].FIELD_SPECS}
+    names = MANIFEST_TIME_FIELDS if name == "RunManifest" else (time_field,)
+    assert set(names) <= fields
 
 
 def test_stream_prefixes_and_ranks_are_unique() -> None:
@@ -195,7 +228,7 @@ def test_stream_name_of_every_sample(name: str, key: str) -> None:
 @pytest.mark.parametrize(("name", "key"), VARIANTS)
 def test_ordering_time_of_every_sample_is_the_documented_field(name: str, key: str) -> None:
     record = _variant(name, key)
-    assert ordering_time_ns(record) == getattr(record, EXPECTED[name][1])
+    assert ordering_time_ns(record) == _documented_time(name, record)
     assert isinstance(ordering_time_ns(record), int)
 
 
@@ -208,7 +241,7 @@ def test_ordering_key_of_every_sample(name: str, key: str) -> None:
     key_value = ordering_key(record)
     assert isinstance(key_value, EventKey)
     assert key_value == EventKey(
-        getattr(record, EXPECTED[name][1]), expected_rank, stream_name(record), record.seq
+        _documented_time(name, record), expected_rank, stream_name(record), record.seq
     )
     assert (key_value.time_ns, int(key_value.rank), key_value.stream, key_value.seq) == (
         ordering_time_ns(record),
@@ -347,7 +380,7 @@ def test_inputs_at_an_instant_sort_before_the_decisions_made_at_that_instant() -
 def test_availability_time_dominates_the_rank() -> None:
     request_earlier = samples.order_event(event_time_ns=T0 - 1, receive_time_ns=T0 - 1)
     tick_later = samples.tick(event_time_ns=T0, receive_time_ns=T0)
-    manifest_latest = samples.run_manifest(created_time_ns=T0 + 1)
+    manifest_latest = samples.run_manifest(data_start_ns=T0 + 1)
     assert int(ordering_key(request_earlier).rank) == 80
     assert ordering_key(request_earlier) < ordering_key(tick_later) < ordering_key(manifest_latest)
     assert sorted([manifest_latest, tick_later, request_earlier], key=ordering_key) == [
@@ -425,30 +458,57 @@ def test_sample_order_chains_form_one_stream_with_non_decreasing_ordering_time()
     assert times == sorted(times), "ordering time decreases between consecutive records of one stream"
 
 
-def test_request_and_report_of_one_stream_at_the_same_instant_keep_their_stream_order() -> None:
-    # In replay virtual time does not advance while code runs (section 3.1), so the simulated broker's
-    # report can carry the same receive instant as the request it answers.  The pair is a valid
-    # sequence of ONE stream (consecutive seq, non-decreasing ordering time, legal transition), so its
-    # ordering keys must ascend with seq: section 6.1 gives a stream position as (stream, seq), section
-    # 6.2 makes EventKey the causal fallback order and merge_ordered refuses a descending input.
+def test_a_report_at_the_instant_of_its_request_is_refused_and_one_later_sorts_after_it() -> None:
+    # Rework 2 (change notice section 6): a report is observed strictly later than the request it
+    # answers, so within one order the ordering key (request rank 80, report rank 20) can never sort a
+    # report in front of its request.  The same-instant pair that revision 2 allowed is now refused.
     request = samples.order_event(event_time_ns=T0, receive_time_ns=T0)
-    report = samples.order_event(
-        seq=1,
-        order_seq=1,
-        event_type=OrderEventType.ACCEPTED,
-        order_state=OrderState.WORKING,
-        event_time_ns=T0,
-        receive_time_ns=T0,
-        broker_order_id=identity.broker_order_id(request.client_order_id),
-    )
+    broker = identity.broker_order_id(request.client_order_id)
+
+    def report(receive_time_ns: int) -> OrderEvent:
+        return samples.order_event(
+            seq=1,
+            order_seq=1,
+            event_type=OrderEventType.ACCEPTED,
+            order_state=OrderState.WORKING,
+            event_time_ns=T0,
+            receive_time_ns=receive_time_ns,
+            broker_order_id=broker,
+        )
+
     validate_order_transition(None, request)
-    validate_order_transition(request, report)  # a legal continuation of the same order
-    assert stream_name(request) == stream_name(report)
-    assert report.seq == request.seq + 1
-    assert ordering_time_ns(request) == ordering_time_ns(report)
-    assert ordering_key(request) < ordering_key(report), "the report sorts before the request it answers"
-    merged = list(merge_ordered([(ordering_key(record), record) for record in (request, report)]))
-    assert [record for _key, record in merged] == [request, report]
+    with pytest.raises(IllegalTransitionError) as caught:
+        validate_order_transition(request, report(T0))
+    assert caught.value.details["rule"] == "a report is observed strictly later than the request it follows"
+    later = report(T0 + 1)  # one nanosecond later: the smallest legal step
+    validate_order_transition(request, later)
+    assert stream_name(request) == stream_name(later)
+    assert ordering_key(request) < ordering_key(later)
+    merged = list(merge_ordered([(ordering_key(record), record) for record in (request, later)]))
+    assert [record for _key, record in merged] == [request, later]
+
+
+def test_ordering_time_of_a_manifest_is_the_data_start_in_a_replay_and_the_creation_time_in_paper() -> None:
+    replay = samples.run_manifest(data_start_ns=T0 - 5, data_end_ns=T0 + 5)
+    assert replay.mode is RunMode.REPLAY
+    assert replay.created_time_ns is None
+    assert ordering_time_ns(replay) == T0 - 5
+    assert ordering_key(replay) == EventKey(T0 - 5, StreamRank.RUN_MANIFEST, "run_manifest/app.run", 0)
+    paper = _variant("RunManifest", "paper_primary")
+    assert paper.mode is RunMode.PAPER
+    assert paper.data_start_ns is None
+    assert paper.created_time_ns is not None
+    assert ordering_time_ns(paper) == paper.created_time_ns
+    assert ordering_key(paper) == EventKey(
+        paper.created_time_ns, StreamRank.RUN_MANIFEST, "run_manifest/app.run", 0
+    )
+    # A manifest that would need both or neither of the two times cannot exist (RUN-2).
+    with pytest.raises(ContractValidationError) as caught:
+        samples.run_manifest(created_time_ns=T0)
+    assert caught.value.details["invariant"] == "RUN-2"
+    with pytest.raises(ContractValidationError) as caught:
+        samples.run_manifest(mode=RunMode.PAPER, created_time_ns=T0)  # keeps the data period
+    assert caught.value.details["invariant"] == "RUN-2"
 
 
 # =========================================================================== unknown record types

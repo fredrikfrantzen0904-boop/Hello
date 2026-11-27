@@ -12,7 +12,7 @@ same identifiers byte for byte.
 identifier          identity parts                                        names one ... in
 ==================  ====================================================  ==============
 run_id              mode, SHA-256 of every other manifest field           run, everywhere
-market_event_id     kind, symbol, timeframe, anchor time, identity levels event, everywhere
+market_event_id     kind, symbol, timeframe, anchor, identity levels      event, everywhere
 evaluation_slot_id  engine, kind, symbol, timeframe, anchor time          slot, everywhere
 evidence_id         engine, market event (or slot), revision              record, one run
 opportunity_id      setup type, side, horizon, market events              opportunity, one run
