@@ -37,7 +37,8 @@ from collections.abc import Iterable
 from decimal import Decimal
 from typing import Final
 
-from gie.core.errors import ContractValidationError
+from gie.core.canonical import decimal_to_str
+from gie.core.errors import CanonicalEncodingError, ContractValidationError
 from gie.core.ids import make_id, require_id
 from gie.core.routing_lock import parse_run_mode
 
@@ -58,21 +59,20 @@ def _count(value: object, what: str) -> int:
     return value
 
 
-def run_id(mode: object, config_sha256: str, label: str) -> str:
-    """Run identity: mode, SHA-256 of the complete run configuration, operator label.
+def run_id(mode: object, manifest_sha256: str) -> str:
+    """Run identity: the mode and the hash of everything else the run manifest states.
 
-    The configuration hash must cover data sources and range, seeds, parameter
-    hash, model schedule and code commit, so identical inputs always give the
-    identical run id (see the RunManifest contract, which records and verifies it).
+    ``manifest_sha256`` is the content hash of every field of the ``RunManifest``
+    except ``run_id`` itself (see ``gie.contracts.run.derive_run_id``), so the
+    role, the configuration hash, code commit, data sources and period, seed,
+    parameter hash and model schedule are all bound: a run id cannot be claimed
+    for a run that differs in any of them, and two replays with identical
+    manifests are, by definition, the same run.
     """
     run_mode = parse_run_mode(mode)
-    if not isinstance(config_sha256, str) or not _SHA256_RE.fullmatch(config_sha256):
-        raise ContractValidationError("config_sha256 must be 64 lower-case hex characters")
-    if not isinstance(label, str) or not _LABEL_RE.fullmatch(label):
-        raise ContractValidationError(
-            "run label must match [a-z0-9][a-z0-9_.-]{0,63}", value=repr(label)[:64]
-        )
-    return make_id("run", run_mode.value, config_sha256, label)
+    if not isinstance(manifest_sha256, str) or not _SHA256_RE.fullmatch(manifest_sha256):
+        raise ContractValidationError("manifest_sha256 must be 64 lower-case hex characters")
+    return make_id("run", run_mode.value, manifest_sha256)
 
 
 def market_event_id(
@@ -89,17 +89,39 @@ def market_event_id(
     prices, obtain the same identifier.  Exact evidence de-duplication (G02-02)
     is equality of this identifier.
     """
-    prices = list(identity_prices)
-    if any(not isinstance(price, Decimal) for price in prices):
-        raise ContractValidationError("identity prices must be Decimal values")
     return make_id(
         "mev",
         _text(kind, "kind"),
         _text(symbol, "symbol"),
         _text(timeframe, "timeframe"),
         _count(anchor_time_ns, "anchor_time_ns"),
-        sorted(set(prices)),
+        _price_set(identity_prices),
     )
+
+
+def _price_set(identity_prices: Iterable[Decimal]) -> list[Decimal]:
+    """Identity level prices as a sorted list without duplicates (numerically equal = same level).
+
+    Every price is validated *before* the set is built: NaN cannot be ordered, a signalling NaN
+    cannot even be hashed, and neither they nor infinities or values outside the wire range are
+    prices.  They are refused with a contract error instead of a ``decimal`` or ``TypeError``.
+    """
+    try:
+        prices = list(identity_prices)
+    except TypeError as exc:
+        raise ContractValidationError("identity prices must be an iterable of Decimal values") from exc
+    for price in prices:
+        if not isinstance(price, Decimal):
+            raise ContractValidationError(
+                "identity prices must be Decimal values", actual_type=type(price).__name__
+            )
+        try:
+            decimal_to_str(price)
+        except CanonicalEncodingError as exc:
+            raise ContractValidationError(
+                "identity prices must be finite decimals within the supported range", value=str(price)[:64]
+            ) from exc
+    return sorted(set(prices))
 
 
 def evaluation_slot_id(engine: str, kind: str, symbol: str, timeframe: str, anchor_time_ns: int) -> str:

@@ -8,6 +8,7 @@ changes go through a change request to the coordinator.
 from gie.contracts import identity
 from gie.contracts._spec import Record
 from gie.contracts.authorization import (
+    EXECUTABLE_MODEL_STATUSES,
     validate_entry_authorization,
     validate_protective_cancel,
     validate_reducing_order,
@@ -63,8 +64,8 @@ from gie.contracts.evidence import (
     group_by_market_event,
     validate_evidence_transition,
 )
-from gie.contracts.guarded import GuardedExecutionAdapter
-from gie.contracts.journal import FileJournal, JournalEntry, MemoryJournal, repair_torn_tail
+from gie.contracts.guarded import GuardedExecutionAdapter, PollResult
+from gie.contracts.journal import FileJournal, JournalEntry, JournalReader, MemoryJournal, repair_torn_tail
 from gie.contracts.ledger import LifecycleLedger
 from gie.contracts.model_version import (
     MODEL_STATUS_TRANSITIONS,
@@ -72,6 +73,7 @@ from gie.contracts.model_version import (
     ModelKind,
     ModelStatus,
     ModelVersion,
+    RegistryHistory,
     is_out_of_sample,
     validate_model_transition,
     validate_registry_history,
@@ -82,6 +84,7 @@ from gie.contracts.order_event import (
     OrderEvent,
     OrderEventType,
     OrderIntent,
+    OrderOriginator,
     OrderState,
     validate_order_transition,
 )
@@ -94,12 +97,14 @@ from gie.contracts.position import (
 )
 from gie.contracts.registry import all_contracts, get_contract
 from gie.contracts.risk_decision import (
+    DailyRiskSummary,
     DailyState,
     RiskDecision,
     RiskOutcome,
+    advance_daily_risk,
     validate_daily_state_sequence,
 )
-from gie.contracts.run import RunContext, RunManifest, RunRole
+from gie.contracts.run import RiskRegime, RunContext, RunManifest, RunModel, RunRole, derive_run_id
 from gie.contracts.tick import Tick, TickFlag, feed_silence_ns
 from gie.contracts.trade_plan import (
     PLAN_STATUS_TRANSITIONS,
@@ -110,6 +115,7 @@ from gie.contracts.trade_plan import (
     TradePlan,
     validate_plan_transition,
 )
+from gie.core.clock import ClockView, PaperClock, SchedulerView
 
 #: Version of the contract *set* (bumped whenever any contract version changes).
 CONTRACT_SET_VERSION = "1.0.0"
@@ -117,6 +123,7 @@ CONTRACT_SET_VERSION = "1.0.0"
 __all__ = [
     "CANDIDATE_STATUS_TRANSITIONS",
     "CONTRACT_SET_VERSION",
+    "EXECUTABLE_MODEL_STATUSES",
     "GOLD_SYMBOL",
     "MODEL_STATUS_TRANSITIONS",
     "ORDER_TRANSITIONS",
@@ -131,8 +138,10 @@ __all__ = [
     "Clock",
     "ClockMode",
     "ClockReading",
+    "ClockView",
     "ContractRef",
     "Contribution",
+    "DailyRiskSummary",
     "DailyState",
     "DataOrigin",
     "Destination",
@@ -146,6 +155,7 @@ __all__ = [
     "GuardedExecutionAdapter",
     "Horizon",
     "JournalEntry",
+    "JournalReader",
     "LifecycleLedger",
     "MarketSession",
     "MemoryJournal",
@@ -156,10 +166,13 @@ __all__ = [
     "OrderEvent",
     "OrderEventType",
     "OrderIntent",
+    "OrderOriginator",
     "OrderState",
     "OrderType",
+    "PaperClock",
     "PlanEstimate",
     "PlanStatus",
+    "PollResult",
     "PollingScheduler",
     "Position",
     "PositionOwner",
@@ -171,14 +184,18 @@ __all__ = [
     "ProducerClass",
     "QuantilePoint",
     "Record",
+    "RegistryHistory",
     "ReplayClock",
     "RiskDecision",
     "RiskOutcome",
+    "RiskRegime",
     "RunContext",
     "RunManifest",
     "RunMode",
+    "RunModel",
     "RunRole",
     "Scheduler",
+    "SchedulerView",
     "Side",
     "SystemClock",
     "Target",
@@ -186,9 +203,11 @@ __all__ = [
     "TickFlag",
     "Timeframe",
     "TradePlan",
+    "advance_daily_risk",
     "all_contracts",
     "check_derivation",
     "derive_origin",
+    "derive_run_id",
     "feed_silence_ns",
     "fingerprint",
     "from_json",

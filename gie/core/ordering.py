@@ -230,8 +230,8 @@ class SequenceTracker:
         if last_time_ns is not None:
             self._last_time[stream] = last_time_ns
 
-    def observe(self, stream: str, seq: int, fingerprint: str, time_ns: int | None = None) -> SeqResult:
-        """Classify one arrival.  ``time_ns`` is the record's ordering time, if the caller has it."""
+    def check(self, stream: str, seq: int, fingerprint: str, time_ns: int | None = None) -> SeqResult:
+        """Classify one arrival **without recording it** (same result and errors as :meth:`observe`)."""
         self._check_arguments(stream, seq, fingerprint, time_ns)
         last = self._last.get(stream)
         if last is not None and seq <= last:
@@ -266,16 +266,23 @@ class SequenceTracker:
                     seq=seq,
                     expected=self._first_seq,
                 )
-            self._accept(stream, seq, fingerprint, time_ns)
             return SeqResult(SeqOutcome.ACCEPTED)
         if seq == last + 1:
-            self._accept(stream, seq, fingerprint, time_ns)
             return SeqResult(SeqOutcome.ACCEPTED)
         missing = seq - last - 1
         if not self._allow_gaps:
             raise SequenceGapError("sequence gap", stream=stream, seq=seq, expected=last + 1, missing=missing)
-        self._accept(stream, seq, fingerprint, time_ns)
         return SeqResult(SeqOutcome.ACCEPTED_AFTER_GAP, missing=missing)
+
+    def observe(self, stream: str, seq: int, fingerprint: str, time_ns: int | None = None) -> SeqResult:
+        """Classify one arrival and record it (``time_ns``: the ordering time, if the caller has it).
+
+        A refused arrival (an error is raised) and a duplicate never change the state.
+        """
+        result = self.check(stream, seq, fingerprint, time_ns)
+        if result.outcome is not SeqOutcome.DUPLICATE:
+            self._accept(stream, seq, fingerprint, time_ns)
+        return result
 
     def _accept(self, stream: str, seq: int, fingerprint: str, time_ns: int | None) -> None:
         self._last[stream] = seq

@@ -21,6 +21,7 @@ from gie.contracts.common import (
     symbol_field,
 )
 from gie.contracts.registry import contract
+from gie.contracts.tick import SOURCE_PATTERN
 from gie.core.canonical import EXACT
 from gie.core.errors import IllegalTransitionError
 
@@ -39,6 +40,20 @@ class OrderIntent(str, Enum):
     PROTECTIVE_STOP = "PROTECTIVE_STOP"
     TAKE_PROFIT = "TAKE_PROFIT"
     EXIT = "EXIT"
+
+
+class OrderOriginator(str, Enum):
+    """Who created the order.
+
+    ``EXECUTION``: the execution engine of GIE (session 07), the only writer of
+    requests.  ``BROKER``: the simulated broker, which creates reduce-only orders
+    on GIE's behalf - the protective stop and take profit that were *attached* to
+    an entry, at the entry's first fill, and broker-side closes such as a margin
+    stop-out.  The broker never creates an entry.
+    """
+
+    EXECUTION = "EXECUTION"
+    BROKER = "BROKER"
 
 
 class OrderEventType(str, Enum):
@@ -116,10 +131,21 @@ def _build_transitions() -> dict[tuple[OrderState | None, OrderEventType], froze
     table[(_S.PENDING_REPLACE, _E.REPLACE_REJECTED)] = frozenset(_OPEN)
     # A cancel may be requested while a replace is pending.
     table[(_S.PENDING_REPLACE, _E.CANCEL_REQUESTED)] = frozenset({_S.PENDING_CANCEL})
+    # Reports that were already under way when the cancel was requested (latency races): the
+    # acknowledgement or rejection of a submit that was cancelled before it was acknowledged, and
+    # the outcome of a replacement that was still pending.  The cancel stays pending.
+    table[(_S.PENDING_CANCEL, _E.ACCEPTED)] = frozenset({_S.PENDING_CANCEL})
+    table[(_S.PENDING_CANCEL, _E.REJECTED)] = frozenset({_S.REJECTED})
+    table[(_S.PENDING_CANCEL, _E.REPLACED)] = frozenset({_S.PENDING_CANCEL})
+    table[(_S.PENDING_CANCEL, _E.REPLACE_REJECTED)] = frozenset({_S.PENDING_CANCEL})
     # Restart reconciliation adopts the simulated broker's authoritative state.
+    reconciled = frozenset(OrderState) - {_S.PENDING_SUBMIT, *_PENDING_CHANGE}
     for state in OrderState:
         if state not in TERMINAL_ORDER_STATES:
-            table[(state, _E.RECONCILED)] = frozenset(OrderState) - {_S.PENDING_SUBMIT, *_PENDING_CHANGE}
+            # Fills are never taken back: a partially filled order cannot be reconciled to WORKING.
+            table[(state, _E.RECONCILED)] = (
+                reconciled - {_S.WORKING} if state is _S.PARTIALLY_FILLED else reconciled
+            )
     return table
 
 
@@ -130,6 +156,8 @@ ORDER_TRANSITIONS: Final[dict[tuple[OrderState | None, OrderEventType], frozense
 )
 
 _FILL_EVENTS = (_E.PARTIALLY_FILLED, _E.FILLED)
+#: States in which a replacement can still be outstanding (its requested values are carried).
+_REPLACE_OUTSTANDING = (_S.PENDING_REPLACE, _S.PENDING_CANCEL)
 _REASON_EVENTS = (_E.REJECTED, _E.CANCEL_REJECTED, _E.REPLACE_REJECTED, _E.RECONCILED)
 _STATES_AFTER: Final[dict[OrderEventType, frozenset[OrderState]]] = {
     event: frozenset().union(*(after for (_, e), after in ORDER_TRANSITIONS.items() if e is event))
@@ -165,34 +193,58 @@ def _on_losing_side(side: Side, stop: Decimal, price: Decimal) -> bool:
 
 
 def _protection_geometry(event: OrderEvent) -> bool:
-    for price in (
-        _order_price(event),
-        event.average_fill_price if event.intent is OrderIntent.ENTRY else None,
+    """Attached protection against the prices GIE *asked for* (never against a fill price).
+
+    A fill can gap through the attached stop; that is a fact the venue reports,
+    not something an order may be refused for afterwards (see ``Position``).
+    """
+    price = _order_price(event)
+    if price is None:
+        return True
+    if event.attached_stop_price is not None and not _on_losing_side(
+        event.side, event.attached_stop_price, price
     ):
-        if price is None:
-            continue
-        if event.attached_stop_price is not None and not _on_losing_side(
-            event.side, event.attached_stop_price, price
-        ):
-            return False
-        if event.attached_take_profit_price is not None and _on_losing_side(
-            event.side, event.attached_take_profit_price, price
-        ):
-            return False
-        if event.attached_take_profit_price is not None and event.attached_take_profit_price == price:
-            return False
+        return False
+    return event.attached_take_profit_price is None or (
+        event.attached_take_profit_price != price
+        and not _on_losing_side(event.side, event.attached_take_profit_price, price)
+    )
+
+
+def _entry_price_geometry(event: OrderEvent) -> bool:
+    """A resting entry rests on the far side of the market it was priced against.
+
+    BUY LIMIT at or below the reference ask, SELL LIMIT at or above the reference
+    bid; BUY STOP at or above, SELL STOP at or below.  A limit through the market
+    would fill at once at a price that can lie beyond its own stop: such an entry
+    is a MARKET order and must be planned and approved as one.
+    """
+    if event.intent is not OrderIntent.ENTRY or event.reference_price is None:
+        return True
+    reference = event.reference_price
+    if event.limit_price is not None:
+        return event.limit_price <= reference if event.side is Side.BUY else event.limit_price >= reference
+    if event.trigger_price is not None:
+        return (
+            event.trigger_price >= reference if event.side is Side.BUY else event.trigger_price <= reference
+        )
     return True
 
 
 def _fill_consistency(event: OrderEvent) -> bool:
     is_fill = event.event_type in _FILL_EVENTS
-    if is_fill != (event.last_fill_lots is not None and event.last_fill_price is not None):
-        return False
-    if not is_fill and (
-        event.last_fill_lots is not None
-        or event.last_fill_price is not None
-        or event.last_fill_cost_amount is not None
+    may_report_fill = is_fill or event.event_type is _E.RECONCILED  # a fill found by reconciliation
+    has_fill = event.last_fill_lots is not None
+    fill_fields = (event.last_fill_price, event.fill_tick_source, event.fill_tick_seq)
+    if has_fill != all(value is not None for value in fill_fields) or (
+        not has_fill and any(value is not None for value in fill_fields)
     ):
+        return False
+    if is_fill and not has_fill:
+        return False
+    if has_fill and not may_report_fill:
+        return False
+    if event.last_fill_cost_amount is not None and not has_fill:
         return False
     if event.cumulative_filled_lots > event.volume_lots:
         return False
@@ -233,11 +285,12 @@ def _expiry_rules(event: OrderEvent) -> bool:
         and event.valid_until_ns is None
     ):
         return False
-    return not (
-        event.event_type is _E.SUBMIT_REQUESTED
-        and event.valid_until_ns is not None
-        and event.valid_until_ns <= event.event_time_ns
-    )
+    if event.valid_until_ns is None:
+        return True
+    if event.event_type is _E.SUBMIT_REQUESTED or event.last_fill_lots is not None:
+        # an order cannot be requested, and cannot fill, at or after the instant it expires
+        return event.event_time_ns < event.valid_until_ns
+    return True
 
 
 @final
@@ -252,12 +305,29 @@ class OrderEvent(RunScoped):
     an order is a complete description of it.  ``venue`` can only be SIMULATED:
     a live order cannot be represented in this contract version.
 
-    A replacement is asked for with ``REPLACE_REQUESTED``, which carries the
-    wanted values in the ``requested_*`` fields while the order's parameters stay
-    as they are; ``REPLACED`` then shows the new parameters.  The hard stop of a
-    position is its own ``PROTECTIVE_STOP`` order, created by the simulated
-    broker from ``attached_stop_price`` the instant the entry fills, so it can be
-    tightened by a replacement and never widened.
+    **Writers.**  Order events are written by session 07 only: its execution
+    engine issues the requests and its simulated broker the reports.  The reflex
+    engine never writes order events; it asks the execution engine through
+    ``gie.contracts.interfaces.ProtectionPort``.
+
+    **Replacement.**  A replacement is asked for with ``REPLACE_REQUESTED``, which
+    carries the wanted values in the ``requested_*`` fields while the order's
+    parameters stay as they are; ``REPLACED`` then shows the new parameters.
+    One replacement can be outstanding per order: a newer target waits for the
+    outcome of the pending one (the engine keeps only the newest target), and
+    protection that cannot wait is an ``EXIT``.
+
+    **Protection.**  The hard stop of a position is its own ``PROTECTIVE_STOP``
+    order.  It is created by the simulated broker (``originator`` BROKER) from
+    ``attached_stop_price`` at the first fill of the entry, so no position exists
+    without a stop order; the same holds for an attached take profit.  It can be
+    tightened by a replacement and never widened, it never expires, and its
+    volume follows the position.
+
+    **Prices.**  A LIMIT or STOP order is evaluated against the executable side
+    of the quote: a SELL against the bid, a BUY against the ask.  A report is
+    never observed at the instant of the request it answers: the simulated
+    broker delivers it at least one nanosecond later (modelled latency).
     """
 
     order_event_id: str = fld(Id("oev"), "identity.order_event_id(client_order_id, order_seq).")
@@ -265,6 +335,10 @@ class OrderEvent(RunScoped):
         Id("ord"),
         "Idempotency key: identity.client_order_id(run_id, origin, intent, attempt), where origin is "
         "the risk decision for an entry and the position otherwise.",
+    )
+    originator: OrderOriginator = fld(
+        EnumOf(OrderOriginator),
+        "Who created the order: EXECUTION (GIE) or BROKER (attached protection, broker-side close).",
     )
     attempt: int = fld(
         Int(ge=0, le=65535, label="attempt"),
@@ -297,7 +371,14 @@ class OrderEvent(RunScoped):
     )
     reference_price: Decimal | None = fld(
         Opt(PRICE),
-        "Executable price when the order was requested (ask for BUY, bid for SELL); mandatory for entries.",
+        "Executable price when the order was requested (ask for BUY, bid for SELL); mandatory for "
+        "entries and for every MARKET order.",
+        unit="USD per troy ounce",
+    )
+    max_slippage: Decimal | None = fld(
+        Opt(Dec(ge="0", label="price distance")),
+        "Entry only: largest adverse distance between the price asked for and a fill that the "
+        "simulated broker may accept (copied from the plan); null = no limit was planned.",
         unit="USD per troy ounce",
     )
     attached_stop_price: Decimal | None = fld(
@@ -353,6 +434,15 @@ class OrderEvent(RunScoped):
         Opt(Dec(ge="0", label="money")),
         "Commission and fees charged for this fill.",
         unit="account currency",
+    )
+    fill_tick_source: str | None = fld(
+        Opt(Str(pattern=SOURCE_PATTERN, max_len=64, label="feed id")),
+        "Feed of the quote this fill was matched against (stream tick/<symbol>/<source>).",
+    )
+    fill_tick_seq: int | None = fld(
+        Opt(Int(ge=0, label="sequence number")),
+        "Sequence number of that quote in its stream; with fill_tick_source it makes every fill "
+        "traceable to the market data that produced it.",
     )
     reason_code: str | None = fld(
         Opt(Str(pattern=REASON_CODE_PATTERN, max_len=48, label="reason code")),
@@ -429,9 +519,12 @@ class OrderEvent(RunScoped):
         ),
         inv(
             "OEV-9",
-            "fill fields are consistent: last_fill_* only on fill events, 0 <= cumulative <= volume, "
-            "average_fill_price iff cumulative > 0, order_state is FILLED iff cumulative = volume, "
-            "PENDING_SUBMIT and WORKING have no fills, PARTIALLY_FILLED has some",
+            "fill fields are consistent: last_fill_lots, last_fill_price and the matched quote "
+            "(fill_tick_source, fill_tick_seq) are set together, always on PARTIALLY_FILLED and FILLED, "
+            "optionally on RECONCILED (a fill found by reconciliation) and never otherwise; "
+            "last_fill_cost_amount only with a fill; 0 <= cumulative <= volume; average_fill_price iff "
+            "cumulative > 0; order_state is FILLED iff cumulative = volume; PENDING_SUBMIT and WORKING "
+            "have no fills, PARTIALLY_FILLED has some",
             _fill_consistency,
         ),
         inv(
@@ -441,9 +534,9 @@ class OrderEvent(RunScoped):
         ),
         inv(
             "OEV-11",
-            "attached protection is on the correct side of the order price (limit, trigger, or the "
-            "reference price of a market order) and of the average fill price: stop on the losing "
-            "side, take profit on the winning side",
+            "attached protection is on the correct side of the price asked for (limit, trigger, or the "
+            "reference price of a market order): stop on the losing side, take profit on the winning "
+            "side; a fill price is a fact and is not judged",
             _protection_geometry,
         ),
         inv(
@@ -454,16 +547,53 @@ class OrderEvent(RunScoped):
         ),
         inv(
             "OEV-13",
-            "a LIMIT or STOP entry has valid_until_ns; a protective stop never has one; on "
-            "SUBMIT_REQUESTED valid_until_ns is later than event_time_ns",
+            "a LIMIT or STOP entry has valid_until_ns; a protective stop never has one; an order is "
+            "requested, and fills, strictly before valid_until_ns",
             _expiry_rules,
         ),
         inv(
             "OEV-14",
-            "requested_* values are present if and only if order_state is PENDING_REPLACE",
+            "requested_* values are carried while a replacement is outstanding: always in "
+            "PENDING_REPLACE, possibly in PENDING_CANCEL (cancel requested before the replacement "
+            "was answered), never in any other state",
             lambda r: (
                 any(getattr(r, name) is not None for name in _REQUESTED)
-                == (r.order_state is _S.PENDING_REPLACE)
+                if r.order_state is _S.PENDING_REPLACE
+                else (
+                    r.order_state is _S.PENDING_CANCEL or all(getattr(r, name) is None for name in _REQUESTED)
+                )
+            ),
+        ),
+        inv(
+            "OEV-15",
+            "only GIE's execution engine creates an ENTRY (originator EXECUTION); an order created by "
+            "the simulated broker states why (reason_code)",
+            lambda r: (
+                r.originator is OrderOriginator.EXECUTION
+                if r.intent is OrderIntent.ENTRY
+                else (r.originator is OrderOriginator.EXECUTION or r.reason_code is not None)
+            ),
+        ),
+        inv(
+            "OEV-16",
+            "a MARKET order carries the reference price it was requested against; max_slippage only "
+            "on an ENTRY",
+            lambda r: (
+                (r.order_type is not OrderType.MARKET or r.reference_price is not None)
+                and (r.max_slippage is None or r.intent is OrderIntent.ENTRY)
+            ),
+        ),
+        inv(
+            "OEV-17",
+            "a resting entry rests beyond the market it was priced against: BUY LIMIT <= reference, "
+            "SELL LIMIT >= reference, BUY STOP >= reference, SELL STOP <= reference",
+            _entry_price_geometry,
+        ),
+        inv(
+            "OEV-18",
+            "broker_order_id, when present, equals identity.broker_order_id(client_order_id)",
+            lambda r: (
+                r.broker_order_id is None or r.broker_order_id == identity.broker_order_id(r.client_order_id)
             ),
         ),
     )
@@ -474,13 +604,18 @@ class OrderEvent(RunScoped):
 
     @property
     def is_request(self) -> bool:
-        """True for events that originate in GIE (``*_REQUESTED``)."""
+        """True for ``*_REQUESTED`` events; all other events are reports of the simulated broker."""
         return self.event_type in ORDER_REQUEST_EVENTS
+
+    @property
+    def is_report(self) -> bool:
+        return self.event_type not in ORDER_REQUEST_EVENTS
 
 
 #: Fields that never change during the life of an order.
 ORDER_IMMUTABLE_FIELDS: Final[tuple[str, ...]] = (
     "client_order_id",
+    "originator",
     "attempt",
     "run_id",
     "mode",
@@ -490,6 +625,7 @@ ORDER_IMMUTABLE_FIELDS: Final[tuple[str, ...]] = (
     "intent",
     "order_type",
     "reference_price",
+    "max_slippage",
     "plan_id",
     "risk_decision_id",
     "alternative_group_id",
@@ -521,17 +657,21 @@ def _check_no_added_risk(
 ) -> None:
     """Rules for what a replacement or reconciliation may change: it can never add risk.
 
-    * No order may grow: ``volume_lots`` never increases.
-    * An ENTRY order is bound to the plan and stop that risk approved, so its
-      prices and attached protection are fixed; only its volume (down) and its
-      expiry (earlier) may change.  A different entry or stop is a new plan and
-      needs a new risk decision and a new order.
+    * An ENTRY order is bound to the plan and stop that risk approved: its volume
+      never increases, its prices and attached protection are fixed, and its
+      expiry may only be moved earlier.  A different entry or stop is a new plan
+      and needs a new risk decision and a new order.
     * A PROTECTIVE_STOP may only be tightened: the trigger of a SELL stop
-      (protecting a long position) may only rise, that of a BUY stop only fall.
+      (protecting a long position) may only rise, that of a BUY stop only fall,
+      and it never gets an expiry.
+    * The volume of a reduce-only order (PROTECTIVE_STOP, TAKE_PROFIT, EXIT) may
+      change in either direction: it follows the position.  That it never
+      exceeds the open volume is checked against the position where the order is
+      authorised (``gie.contracts.authorization``), not here.
     """
-    if volume_lots > previous.volume_lots:
-        raise fail("volume_lots may not increase")
     if previous.intent is OrderIntent.ENTRY:
+        if volume_lots > previous.volume_lots:
+            raise fail("volume_lots of an ENTRY order may not increase")
         fixed = (
             ("limit_price", limit_price),
             ("trigger_price", trigger_price),
@@ -576,12 +716,23 @@ def _requested_values(event: OrderEvent, current: OrderEvent) -> dict[str, Decim
     }
 
 
+def _replacement_outstanding(event: OrderEvent) -> bool:
+    return any(getattr(event, name) is not None for name in _REQUESTED)
+
+
 def validate_order_transition(previous: OrderEvent | None, event: OrderEvent) -> None:
     """Check that *event* may follow *previous* in the life of one order.
 
-    Raises :class:`IllegalTransitionError` naming the violated rule.  The
-    execution engine and every journal call it (through the lifecycle ledger)
-    before an event becomes part of the history; QA runs it over recorded traces.
+    Raises :class:`IllegalTransitionError` naming the violated rule.  Every
+    journal and the order gateway call it (through the lifecycle ledger) before
+    an event becomes part of the history; QA runs it over recorded traces.
+
+    Time: ``receive_time_ns`` - when GIE observed the event - never decreases
+    along an order, and a report is observed strictly later than the request
+    that precedes it.  ``event_time_ns`` of a report is the broker's time and
+    may lie before an earlier request of GIE (a fill that happened while the
+    cancel was on its way).  ``seq`` is compared only between events of the same
+    producer.
     """
 
     def fail(rule: str) -> IllegalTransitionError:
@@ -609,14 +760,26 @@ def validate_order_transition(previous: OrderEvent | None, event: OrderEvent) ->
             f"{previous.order_state.value} --{event.event_type.value}--> "
             f"{event.order_state.value} is not allowed"
         )
+    if event.intent is OrderIntent.PROTECTIVE_STOP and event.event_type is _E.EXPIRED:
+        raise fail("a protective stop never expires")
     for name in ORDER_IMMUTABLE_FIELDS:
         if getattr(previous, name) != getattr(event, name):
             raise fail(f"{name} may not change during the life of an order")
     if event.broker_order_id != previous.broker_order_id and previous.broker_order_id is not None:
         raise fail("broker_order_id may not change once assigned")
-    for name in ("event_time_ns", "receive_time_ns", "seq"):
-        if getattr(event, name) < getattr(previous, name):
-            raise fail(f"{name} may not decrease")
+    if event.receive_time_ns < previous.receive_time_ns:
+        raise fail("receive_time_ns may not decrease")
+    if previous.is_request and event.is_report and event.receive_time_ns <= previous.receive_time_ns:
+        raise fail("a report is observed strictly later than the request it follows")
+    if event.producer == previous.producer and event.seq < previous.seq:
+        raise fail("seq may not decrease within the stream of one producer")
+
+    # ---- reports that were under way when a cancel was requested ---------------------------
+    if previous.order_state is _S.PENDING_CANCEL:
+        if event.event_type in (_E.ACCEPTED, _E.REJECTED) and previous.broker_order_id is not None:
+            raise fail("an order that was already acknowledged cannot be acknowledged or rejected again")
+        if event.event_type in (_E.REPLACED, _E.REPLACE_REJECTED) and not _replacement_outstanding(previous):
+            raise fail("no replacement is outstanding for this order")
 
     # ---- parameters -----------------------------------------------------------------------
     if event.event_type is _E.REPLACED:
@@ -670,16 +833,22 @@ def validate_order_transition(previous: OrderEvent | None, event: OrderEvent) ->
             attached_take_profit_price=previous.attached_take_profit_price,
             fail=fail,
         )
-    elif previous.order_state is _S.PENDING_REPLACE and event.order_state is _S.PENDING_REPLACE:
+    elif event.event_type in (_E.REPLACED, _E.REPLACE_REJECTED):
+        if _replacement_outstanding(event):
+            raise fail("the outcome of a replacement ends it: requested_* values are cleared")
+    elif previous.order_state in _REPLACE_OUTSTANDING and event.order_state in _REPLACE_OUTSTANDING:
+        # A fill, the cancel request or a late acknowledgement while the replacement is still
+        # outstanding: its requested values are carried unchanged.
         for name in _REQUESTED:
             if getattr(previous, name) != getattr(event, name):
-                raise fail(f"{name} may not change while the replacement is pending")
+                raise fail(f"{name} may not change while the replacement is outstanding")
+    elif _replacement_outstanding(event):
+        raise fail("requested_* values may only be carried while a replacement is outstanding")
 
     # ---- fills ----------------------------------------------------------------------------
     if event.cumulative_filled_lots < previous.cumulative_filled_lots:
         raise fail("cumulative_filled_lots may not decrease")
-    if event.event_type in _FILL_EVENTS:
-        assert event.last_fill_lots is not None
+    if event.last_fill_lots is not None:
         if EXACT.add(previous.cumulative_filled_lots, event.last_fill_lots) != event.cumulative_filled_lots:
             raise fail("cumulative_filled_lots must equal the previous value plus last_fill_lots")
     elif event.event_type is not _E.RECONCILED and (

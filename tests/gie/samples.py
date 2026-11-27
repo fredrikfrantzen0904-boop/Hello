@@ -8,6 +8,7 @@ evidence of any trading performance.
 
 from __future__ import annotations
 
+import dataclasses
 from decimal import Decimal as D
 from typing import Any
 
@@ -35,6 +36,7 @@ from gie.contracts import (
     OrderEvent,
     OrderEventType,
     OrderIntent,
+    OrderOriginator,
     OrderState,
     OrderType,
     PlanStatus,
@@ -50,8 +52,10 @@ from gie.contracts import (
     Record,
     RiskDecision,
     RiskOutcome,
+    RiskRegime,
     RunManifest,
     RunMode,
+    RunModel,
     RunRole,
     Side,
     Target,
@@ -59,9 +63,11 @@ from gie.contracts import (
     TickFlag,
     Timeframe,
     TradePlan,
+    derive_run_id,
     fingerprint,
     identity,
 )
+from gie.core.canonical import fraction_of
 from gie.core.params import load_research_parameters
 from gie.core.timeutil import NS_PER_MS, NS_PER_SECOND, trading_day
 
@@ -72,11 +78,54 @@ T0 = 1_795_685_400 * NS_PER_SECOND
 ORIGIN = DataOrigin.SYNTHETIC_FIXTURE
 CONFIG_SHA = "0" * 64
 RUN_LABEL = "fixture"
-RUN_ID = identity.run_id("REPLAY", CONFIG_SHA, RUN_LABEL)
 CODE_COMMIT = "0123456789abcdef0123456789abcdef01234567"
 ARTIFACT_SHA = "ab" * 32
 MODEL_NAME = "fixture_net_r"
 MODEL_ID = identity.model_version_id(MODEL_NAME, "0.1.0", ARTIFACT_SHA)
+SHADOW_MODEL_ID = identity.model_version_id("fixture_shadow", "0.2.0", "cd" * 32)
+
+
+def _pinned(model_version_id: str, status: ModelStatus, **overrides: Any) -> RunModel:
+    fields: dict[str, Any] = {
+        "model_version_id": model_version_id,
+        "status": status,
+        "validated": False,  # fixture models rest on fixture data and are never validated
+        "valid_from_ns": None,
+        "valid_until_ns": None,
+    }
+    fields.update(overrides)
+    return RunModel(**fields)
+
+
+def _manifest_fields() -> dict[str, Any]:
+    return {
+        "producer": "app.run",
+        "seq": 0,
+        "mode": RunMode.REPLAY,
+        "role": RunRole.RESEARCH,
+        "risk_regime": RiskRegime.CHALLENGE_RULES,
+        "label": RUN_LABEL,
+        "config_sha256": CONFIG_SHA,
+        "code_commit": CODE_COMMIT,
+        "code_tree_dirty": False,
+        "contract_set_version": "1.0.0",
+        "parameters_sha256": load_research_parameters().parameters_sha256,
+        "data_origin": ORIGIN,
+        "data_sources": ("fixture",),
+        "data_start_ns": T0 - 3600 * NS_PER_SECOND,
+        "data_end_ns": T0 + 3600 * NS_PER_SECOND,
+        "seed": 7,
+        "models": (
+            _pinned(MODEL_ID, ModelStatus.RESEARCH),
+            _pinned(SHADOW_MODEL_ID, ModelStatus.SHADOW),
+        ),
+        "shadow_of_run_id": None,
+        "created_time_ns": None,
+    }
+
+
+#: Identity of the sample run: derived from the whole sample manifest (see ``run_manifest``).
+RUN_ID = derive_run_id(**_manifest_fields())
 #: Not an owner decision: a fixture reference used only to exercise the approval rules.
 FIXTURE_APPROVER = "FIXTURE-OWNER"
 FIXTURE_DECISION = "D-999"
@@ -95,27 +144,11 @@ def _header(producer: str, seq: int = 0, *, t: int = T0) -> dict[str, Any]:
 
 
 def run_manifest(**overrides: Any) -> RunManifest:
-    fields: dict[str, Any] = {
-        "producer": "app.run",
-        "seq": 0,
-        "mode": RunMode.REPLAY,
-        "role": RunRole.RESEARCH,
-        "label": RUN_LABEL,
-        "config_sha256": CONFIG_SHA,
-        "code_commit": CODE_COMMIT,
-        "contract_set_version": "1.0.0",
-        "parameters_sha256": load_research_parameters().parameters_sha256,
-        "data_origin": ORIGIN,
-        "data_sources": ("fixture",),
-        "data_start_ns": T0 - 3600 * NS_PER_SECOND,
-        "data_end_ns": T0 + 3600 * NS_PER_SECOND,
-        "seed": 7,
-        "model_version_ids": (MODEL_ID,),
-        "shadow_of_run_id": None,
-        "created_time_ns": T0 + 86_400 * NS_PER_SECOND,
-    }
+    """The manifest of the sample run; ``run_id`` is derived from the other fields unless given."""
+    fields = _manifest_fields()
     fields.update(overrides)
-    fields.setdefault("run_id", identity.run_id(fields["mode"], fields["config_sha256"], fields["label"]))
+    if "run_id" not in fields:
+        return RunManifest.create(**fields)
     return RunManifest(**fields)
 
 
@@ -170,6 +203,7 @@ def model_version(**overrides: Any) -> ModelVersion:
         "metrics": (NamedValue(name="oos_mean_net_r", value=0.0),),
         "evaluation_report_uri": None,
         "evaluation_report_sha256": None,
+        "evaluation_data_origin": None,
         "promotion_criteria_sha256": None,
         "shadow_run_ids": (),
         "replaces_model_version_id": None,
@@ -413,14 +447,13 @@ def risk_decision(plan: TradePlan | None = None, **overrides: Any) -> RiskDecisi
         "reason_codes": (),
         "volume_lots": D("0.50"),
         "risk_amount": D("104.00"),
-        "risk_frac": D("0.00104"),
         "reference_equity_amount": D("100000.00"),
         "quality_validated": False,
         "quality_model_version_id": None,
         "account_currency": "USD",
         "daily_state": DailyState.NORMAL,
-        "daily_pnl_frac": D("0.004"),
-        "profit_floor_frac": None,
+        "daily_pnl_amount": D("400.00"),
+        "profit_floor_amount": None,
         "valid_until_ns": T0 + 30 * NS_PER_SECOND,
         "equity_amount": D("100400.00"),
         "open_risk_amount": D("0"),
@@ -430,6 +463,14 @@ def risk_decision(plan: TradePlan | None = None, **overrides: Any) -> RiskDecisi
         "gap_stress_loss_amount": D("310.00"),
     }
     fields.update(overrides)
+    # The fractions are derived from the amounts (RSK-9) unless a test supplies them.
+    equity = fields["reference_equity_amount"]
+    fields.setdefault("risk_frac", fraction_of(fields["risk_amount"], equity, round_up=True))
+    fields.setdefault("daily_pnl_frac", fraction_of(fields["daily_pnl_amount"], equity, round_up=False))
+    floor = fields["profit_floor_amount"]
+    fields.setdefault(
+        "profit_floor_frac", None if floor is None else fraction_of(floor, equity, round_up=True)
+    )
     fields.setdefault("trading_day", trading_day(fields["decision_time_ns"]))
     fields.setdefault(
         "decision_id",
@@ -450,7 +491,6 @@ def rejected_risk_decision(plan: TradePlan | None = None, **overrides: Any) -> R
         "reason_codes": ("FIXTURE_REJECTION",),
         "volume_lots": D("0"),
         "risk_amount": D("0"),
-        "risk_frac": D("0"),
         "margin_required_amount": None,
         "gap_stress_loss_amount": None,
     }
@@ -467,6 +507,7 @@ def order_event(**overrides: Any) -> OrderEvent:
         "run_id": RUN_ID,
         "mode": RunMode.REPLAY,
         "data_origin": ORIGIN,
+        "originator": OrderOriginator.EXECUTION,
         "attempt": 0,
         "order_seq": 0,
         "event_type": OrderEventType.SUBMIT_REQUESTED,
@@ -499,9 +540,13 @@ def order_event(**overrides: Any) -> OrderEvent:
         "last_fill_price": None,
         "average_fill_price": None,
         "last_fill_cost_amount": None,
+        "fill_tick_source": None,
+        "fill_tick_seq": None,
         "reason_code": None,
     }
     fields.update(overrides)
+    # Only an entry carries the plan's slippage limit.
+    fields.setdefault("max_slippage", D("0.10") if fields["intent"] is OrderIntent.ENTRY else None)
     if "client_order_id" not in fields:
         origin = (
             fields["risk_decision_id"] if fields["intent"] is OrderIntent.ENTRY else fields["position_id"]
@@ -547,9 +592,18 @@ def position(**overrides: Any) -> Position:
         "opening_client_order_id": entry.client_order_id,
     }
     fields.update(overrides)
-    fields.setdefault("peak_time_ns", fields["decision_time_ns"])
+    fields.setdefault("peak_time_ns", fields["as_of_time_ns"])
     if "position_id" not in fields:
         fields["position_id"] = identity.position_id(fields["run_id"], fields["opening_client_order_id"])
+    # An open GIE position names its working protective order (attempt 0 for the position).
+    protected = fields["owner"] is PositionOwner.GIE and fields["state"] is PositionState.OPEN
+    fields.setdefault(
+        "protective_client_order_id",
+        identity.client_order_id(fields["run_id"], fields["position_id"], "PROTECTIVE_STOP", 0)
+        if protected
+        else None,
+    )
+    fields.setdefault("unprotected_reason", None)
     return Position(**fields)
 
 
@@ -639,6 +693,8 @@ def order_lifecycle() -> list[OrderEvent]:
         last_fill_price=D("2649.80"),
         average_fill_price=D("2649.80"),
         last_fill_cost_amount=D("0.80"),
+        fill_tick_source="fixture",
+        fill_tick_seq=1,
     )
     filled = order_event(
         **common,
@@ -653,14 +709,18 @@ def order_lifecycle() -> list[OrderEvent]:
         last_fill_price=D("2649.78"),
         average_fill_price=D("2649.788"),
         last_fill_cost_amount=D("1.20"),
+        fill_tick_source="fixture",
+        fill_tick_seq=2,
     )
     return [submit, accepted, partial, filled]
 
 
 def protective_stop_lifecycle() -> list[OrderEvent]:
-    """The stop order of the sample position: created, working, tightened by a replacement."""
+    """The stop order of the sample position: created by the simulated broker when the entry
+    filled, working, then tightened by a replacement the execution engine asked for."""
     held = position()
     base: dict[str, Any] = {
+        "originator": OrderOriginator.BROKER,
         "side": Side.SELL,
         "order_type": OrderType.STOP,
         "intent": OrderIntent.PROTECTIVE_STOP,
@@ -675,11 +735,11 @@ def protective_stop_lifecycle() -> list[OrderEvent]:
         "position_id": held.position_id,
         "reason_code": "ENTRY_FILLED",
     }
-    t = T0 + 2 * NS_PER_SECOND
+    t = T0 + 2 * NS_PER_SECOND + NS_PER_MS  # the instant the FILLED report of the entry was observed
     submit = order_event(**base, seq=4, event_time_ns=t, receive_time_ns=t)
     broker = identity.broker_order_id(submit.client_order_id)
     working = order_event(
-        **{**base, "reason_code": None},
+        **{**base, "reason_code": "ENTRY_FILLED"},
         seq=5,
         order_seq=1,
         event_type=OrderEventType.ACCEPTED,
@@ -700,7 +760,7 @@ def protective_stop_lifecycle() -> list[OrderEvent]:
         receive_time_ns=T0 + 60 * NS_PER_SECOND,
     )
     replaced = order_event(
-        **{**base, "reason_code": None, "trigger_price": D("2649.90")},
+        **{**base, "reason_code": "RATCHET", "trigger_price": D("2649.90")},
         seq=7,
         order_seq=3,
         event_type=OrderEventType.REPLACED,
@@ -727,7 +787,7 @@ def position_lifecycle() -> list[Position]:
         realized_net_pnl_amount=D("72.00"),
         unrealized_net_pnl_amount=D("74.00"),
         peak_net_pnl_amount=D("146.00"),
-        peak_time_ns=t1,
+        peak_time_ns=t1 - NS_PER_MS,
         costs_amount=D("3.00"),
     )
     t2 = T0 + 300 * NS_PER_SECOND
@@ -743,7 +803,7 @@ def position_lifecycle() -> list[Position]:
         realized_net_pnl_amount=D("73.50"),
         unrealized_net_pnl_amount=D("0"),
         peak_net_pnl_amount=D("146.00"),
-        peak_time_ns=t1,
+        peak_time_ns=t1 - NS_PER_MS,
         costs_amount=D("4.00"),
         closed_time_ns=T0 + 299 * NS_PER_SECOND,
         close_reason="PROTECTIVE_STOP",
@@ -764,12 +824,266 @@ def model_lifecycle() -> list[ModelVersion]:
         status_time_ns=T0 - 600 * NS_PER_SECOND,
         evaluation_report_uri="models/research/fixture_net_r/0.1.0/model_card.md",
         evaluation_report_sha256="56" * 32,
+        evaluation_data_origin=ORIGIN,
         promotion_criteria_sha256="78" * 32,
         shadow_run_ids=(RUN_ID,),
         approved_by=FIXTURE_APPROVER,
         approval_reference=FIXTURE_DECISION,
     )
     return [research, shadow, active]
+
+
+def run_story() -> list[Record]:
+    """A small complete run in journal order - a coherent trace, not independent samples.
+
+    SYNTHETIC FIXTURE.  One opportunity is planned, approved and entered with a
+    limit order that fills in two parts; the simulated broker creates the
+    attached protective stop at the first fill and lets its volume follow the
+    second; the position is valued, half of it is closed at a target, the stop
+    is tightened and reduced, and the stop finally closes the rest.  Every
+    record can be published to a journal in this order (``MemoryJournal``), so
+    the trace exercises the chain, reference and aggregate rules of the run
+    ledger together.
+    """
+    ms = NS_PER_MS
+    sec = NS_PER_SECOND
+
+    def quote(seq: int, receive_ns: int, bid: str, ask: str) -> Tick:
+        return tick(
+            seq=seq, event_time_ns=receive_ns - 2 * ms, receive_time_ns=receive_ns, bid=D(bid), ask=D(ask)
+        )
+
+    plan = trade_plan()
+    decision = risk_decision(plan)
+    submit, accepted, partial, filled = order_lifecycle()
+    entry_id = submit.client_order_id
+    position_id = identity.position_id(RUN_ID, entry_id)
+
+    def order(seq: int, event: OrderEvent) -> OrderEvent:
+        return dataclasses.replace(event, seq=seq)
+
+    stop: dict[str, Any] = {
+        "originator": OrderOriginator.BROKER,
+        "side": Side.SELL,
+        "order_type": OrderType.STOP,
+        "intent": OrderIntent.PROTECTIVE_STOP,
+        "limit_price": None,
+        "trigger_price": D("2647.80"),
+        "reference_price": None,
+        "attached_stop_price": None,
+        "valid_until_ns": None,
+        "plan_id": None,
+        "risk_decision_id": None,
+        "alternative_group_id": None,
+        "position_id": position_id,
+        "volume_lots": D("0.20"),
+        "reason_code": "ENTRY_FILLED",
+    }
+    t_first = T0 + sec + ms  # first fill observed
+    stop_submit = order_event(**stop, seq=3, event_time_ns=t_first, receive_time_ns=t_first)
+    broker_stop = identity.broker_order_id(stop_submit.client_order_id)
+    stop_accepted = order_event(
+        **stop,
+        seq=4,
+        order_seq=1,
+        event_type=OrderEventType.ACCEPTED,
+        order_state=OrderState.WORKING,
+        broker_order_id=broker_stop,
+        event_time_ns=t_first,
+        receive_time_ns=t_first + ms,
+    )
+    t_second = T0 + 2 * sec + ms  # second fill observed
+    stop_grown = order_event(
+        **{**stop, "volume_lots": D("0.50")},
+        seq=6,
+        order_seq=2,
+        event_type=OrderEventType.RECONCILED,
+        order_state=OrderState.WORKING,
+        broker_order_id=broker_stop,
+        event_time_ns=t_second,
+        receive_time_ns=t_second,
+    )
+
+    held: dict[str, Any] = {
+        "opened_time_ns": T0 + sec,
+        "protective_client_order_id": stop_submit.client_order_id,
+    }
+    first = position(
+        **held,
+        revision=0,
+        seq=0,
+        decision_time_ns=t_first + ms,
+        as_of_time_ns=T0 + sec,
+        volume_lots=D("0.20"),
+        initial_volume_lots=D("0.20"),
+        average_entry_price=D("2649.80"),
+        initial_risk_amount=D("41.60"),
+        mark_price=D("2649.55"),
+        realized_net_pnl_amount=D("-0.80"),
+        unrealized_net_pnl_amount=D("-5.00"),
+        peak_net_pnl_amount=D("-5.80"),
+        peak_time_ns=T0 + sec,
+        trough_net_pnl_amount=D("-5.80"),
+        costs_amount=D("0.80"),
+    )
+    full = position(
+        **held,
+        revision=1,
+        seq=1,
+        decision_time_ns=t_second + ms,
+        as_of_time_ns=T0 + 2 * sec,
+        average_entry_price=D("2649.788"),
+        mark_price=D("2649.54"),
+        realized_net_pnl_amount=D("-2.00"),
+        unrealized_net_pnl_amount=D("-12.50"),
+        peak_net_pnl_amount=D("-5.80"),
+        peak_time_ns=T0 + sec,
+        trough_net_pnl_amount=D("-14.50"),
+    )
+    valued = position(**held, revision=2, seq=2, average_entry_price=D("2649.788"))
+
+    t_target = T0 + 60 * sec
+    exit_order: dict[str, Any] = {
+        "side": Side.SELL,
+        "order_type": OrderType.MARKET,
+        "intent": OrderIntent.EXIT,
+        "limit_price": None,
+        "reference_price": D("2652.80"),
+        "attached_stop_price": None,
+        "valid_until_ns": None,
+        "plan_id": None,
+        "risk_decision_id": None,
+        "alternative_group_id": None,
+        "position_id": position_id,
+        "volume_lots": D("0.25"),
+        "reason_code": "TARGET_REACHED",
+    }
+    exit_submit = order_event(**exit_order, seq=7, event_time_ns=t_target, receive_time_ns=t_target)
+    exit_filled = order_event(
+        **exit_order,
+        seq=8,
+        order_seq=1,
+        event_type=OrderEventType.FILLED,
+        order_state=OrderState.FILLED,
+        broker_order_id=identity.broker_order_id(exit_submit.client_order_id),
+        event_time_ns=t_target,
+        receive_time_ns=t_target + ms,
+        cumulative_filled_lots=D("0.25"),
+        last_fill_lots=D("0.25"),
+        last_fill_price=D("2652.80"),
+        average_fill_price=D("2652.80"),
+        last_fill_cost_amount=D("1.00"),
+        fill_tick_source="fixture",
+        fill_tick_seq=4,
+    )
+    reduced = position(
+        **held,
+        revision=3,
+        seq=3,
+        decision_time_ns=t_target + 2 * ms,
+        as_of_time_ns=t_target - ms,
+        average_entry_price=D("2649.788"),
+        volume_lots=D("0.25"),
+        stop_price=D("2649.90"),
+        mark_price=D("2652.80"),
+        realized_net_pnl_amount=D("72.00"),
+        unrealized_net_pnl_amount=D("74.00"),
+        peak_net_pnl_amount=D("146.00"),
+        peak_time_ns=t_target - ms,
+        costs_amount=D("3.00"),
+    )
+    tightened: dict[str, Any] = {**stop, "volume_lots": D("0.50"), "broker_order_id": broker_stop}
+    stop_request = order_event(
+        **{**tightened, "reason_code": "RATCHET"},
+        seq=9,
+        order_seq=3,
+        event_type=OrderEventType.REPLACE_REQUESTED,
+        order_state=OrderState.PENDING_REPLACE,
+        requested_trigger_price=D("2649.90"),
+        requested_volume_lots=D("0.25"),
+        event_time_ns=t_target + 2 * ms,
+        receive_time_ns=t_target + 2 * ms,
+    )
+    stop_replaced = order_event(
+        **{**tightened, "reason_code": "RATCHET", "trigger_price": D("2649.90"), "volume_lots": D("0.25")},
+        seq=10,
+        order_seq=4,
+        event_type=OrderEventType.REPLACED,
+        order_state=OrderState.WORKING,
+        event_time_ns=t_target + 2 * ms,
+        receive_time_ns=t_target + 3 * ms,
+    )
+    t_stop = T0 + 299 * sec
+    stop_filled = order_event(
+        **{
+            **tightened,
+            "reason_code": "STOP_TRIGGERED",
+            "trigger_price": D("2649.90"),
+            "volume_lots": D("0.25"),
+        },
+        seq=11,
+        order_seq=5,
+        event_type=OrderEventType.FILLED,
+        order_state=OrderState.FILLED,
+        event_time_ns=t_stop,
+        receive_time_ns=t_stop + ms,
+        cumulative_filled_lots=D("0.25"),
+        last_fill_lots=D("0.25"),
+        last_fill_price=D("2649.85"),
+        average_fill_price=D("2649.85"),
+        last_fill_cost_amount=D("1.00"),
+        fill_tick_source="fixture",
+        fill_tick_seq=5,
+    )
+    closed = position(
+        opened_time_ns=T0 + sec,
+        revision=4,
+        seq=4,
+        decision_time_ns=t_stop + 2 * ms,
+        as_of_time_ns=t_stop,
+        average_entry_price=D("2649.788"),
+        state=PositionState.CLOSED,
+        volume_lots=D("0"),
+        stop_price=D("2649.90"),
+        mark_price=None,
+        realized_net_pnl_amount=D("73.50"),
+        unrealized_net_pnl_amount=D("0"),
+        peak_net_pnl_amount=D("146.00"),
+        peak_time_ns=t_target - ms,
+        costs_amount=D("4.00"),
+        closed_time_ns=t_stop,
+        close_reason="PROTECTIVE_STOP",
+    )
+    return [
+        run_manifest(),
+        quote(0, T0 - ms, "2650.10", "2650.35"),
+        evidence(),
+        candidate(),
+        plan,
+        decision,
+        order(0, submit),
+        order(1, accepted),
+        quote(1, T0 + sec, "2649.55", "2649.80"),
+        order(2, partial),
+        stop_submit,
+        stop_accepted,
+        first,
+        quote(2, T0 + 2 * sec, "2649.54", "2649.78"),
+        order(5, filled),
+        stop_grown,
+        full,
+        quote(3, T0 + 5 * sec - ms, "2650.60", "2650.85"),
+        valued,
+        quote(4, t_target - ms, "2652.80", "2653.05"),
+        exit_submit,
+        exit_filled,
+        reduced,
+        stop_request,
+        stop_replaced,
+        quote(5, t_stop, "2649.85", "2650.10"),
+        stop_filled,
+        closed,
+    ]
 
 
 def variants() -> dict[str, dict[str, Record]]:
@@ -797,7 +1111,10 @@ def variants() -> dict[str, dict[str, Record]]:
                 label="fixture-paper",
                 data_start_ns=None,
                 data_end_ns=None,
+                created_time_ns=T0 + 86_400 * NS_PER_SECOND,
                 seed=None,
+                # a primary run uses owner-approved models only (here: the fixture approval)
+                models=(_pinned(MODEL_ID, ModelStatus.ACTIVE),),
             ),
             "replay_shadow": run_manifest(
                 role=RunRole.SHADOW, label="fixture-shadow", shadow_of_run_id=RUN_ID
@@ -926,7 +1243,7 @@ def variants() -> dict[str, dict[str, Record]]:
             "scored": candidate(),
             "unscored": unscored_candidate(),
             "scored_by_shadow_model": candidate(
-                model_version_id=identity.model_version_id("fixture_shadow", "0.2.0", "cd" * 32),
+                model_version_id=SHADOW_MODEL_ID,
                 model_status=ModelStatus.SHADOW,
                 expected_net_r=1.0,
                 net_r_stdev=None,
@@ -996,17 +1313,16 @@ def variants() -> dict[str, dict[str, Record]]:
                 reason_codes=("DEFENSIVE_STATE_REDUCTION",),
                 volume_lots=D("0.25"),
                 risk_amount=D("52.00"),
-                risk_frac=D("0.00052"),
                 daily_state=DailyState.DEFENSIVE,
-                daily_pnl_frac=D("-0.021"),
+                daily_pnl_amount=D("-2100.00"),
             ),
             "approved_within_surplus": risk_decision(
                 plan,
                 attempt=2,
                 seq=2,
                 daily_state=DailyState.PROFIT_PROTECTION,
-                daily_pnl_frac=D("0.062"),
-                profit_floor_frac=D("0.05"),
+                daily_pnl_amount=D("6200.00"),
+                profit_floor_amount=D("5000.00"),
             ),
             "rejected_at_floor": rejected_risk_decision(
                 plan,
@@ -1014,8 +1330,8 @@ def variants() -> dict[str, dict[str, Record]]:
                 seq=3,
                 reason_codes=("DAILY_PROFIT_FLOOR",),
                 daily_state=DailyState.PROFIT_PROTECTION,
-                daily_pnl_frac=D("0.05"),
-                profit_floor_frac=D("0.05"),
+                daily_pnl_amount=D("5000.00"),
+                profit_floor_amount=D("5000.00"),
             ),
             "rejected_halt": rejected_risk_decision(
                 plan,
@@ -1023,7 +1339,7 @@ def variants() -> dict[str, dict[str, Record]]:
                 seq=4,
                 reason_codes=("EMERGENCY_HALT",),
                 daily_state=DailyState.EMERGENCY_HALT,
-                daily_pnl_frac=D("-0.03"),
+                daily_pnl_amount=D("-3000.00"),
             ),
         },
         "OrderEvent": {

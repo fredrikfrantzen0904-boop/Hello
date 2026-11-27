@@ -74,15 +74,18 @@ def _owner_fields(position: Position) -> bool:
 
 
 def _stop_geometry(position: Position) -> bool:
-    if not _gie(position) or position.initial_stop_price is None:
+    if not _gie(position) or position.initial_stop_price is None or position.stop_price is None:
         return True
-    buy = position.side is Side.BUY
     initial = position.initial_stop_price
-    if not (initial < position.average_entry_price if buy else initial > position.average_entry_price):
-        return False
-    if position.stop_price is None:
-        return True
-    return position.stop_price >= initial if buy else position.stop_price <= initial
+    return position.stop_price >= initial if position.side is Side.BUY else position.stop_price <= initial
+
+
+def _protection_status(position: Position) -> bool:
+    protected = position.protective_client_order_id is not None
+    explained = position.unprotected_reason is not None
+    if _gie(position) and position.state is PositionState.OPEN:
+        return protected != explained  # exactly one: a working stop order, or the reason there is none
+    return not protected and not explained
 
 
 def _stop_tightened_or_equal(side: Side, before: Decimal | None, after: Decimal | None) -> bool:
@@ -107,6 +110,23 @@ class Position(Produced):
     estimated exit costs, plus everything already realised net of costs.
     ``peak_net_pnl_amount`` is its high-water mark and drives the profit ratchet;
     ``trough_net_pnl_amount`` is its low-water mark (adverse excursion).
+    ``peak_time_ns`` is the receive time of the quote at which the peak was
+    reached, so the high-water mark does not depend on how often snapshots are
+    written.
+
+    **Opening.**  A GIE position comes into existence with the first fill of its
+    entry order and grows only through further fills of that same order
+    (``initial_volume_lots`` is the volume opened so far); nothing else can add
+    to it.  Its entry price is a fact reported by the venue: after a gap it can
+    lie at or beyond the stop, in which case the stop closes it at once.
+
+    **Protection.**  ``stop_price`` is the hard stop GIE requires.
+    ``protective_client_order_id`` names the PROTECTIVE_STOP order that is
+    working at the simulated broker; if there is none, ``unprotected_reason``
+    says why - an unprotected position is reported as such, never assumed safe.
+
+    **Snapshots** are written at least on every change of volume, stop,
+    protection or state and whenever a new peak or trough is reached.
     """
 
     position_id: str = fld(
@@ -126,17 +146,30 @@ class Position(Produced):
     volume_lots: Decimal = fld(Dec(ge="0", label="volume"), "Open volume; 0 when closed.", unit="lots")
     initial_volume_lots: Decimal = fld(
         Dec(gt="0", label="volume"),
-        "Volume at opening (for EXTERNAL positions: the largest volume observed so far).",
+        "Volume opened so far by the entry order of a GIE position (for EXTERNAL positions: the "
+        "largest volume observed so far).",
         unit="lots",
     )
-    average_entry_price: Decimal = fld(PRICE, "Volume-weighted entry price.", unit="quote currency per unit")
+    average_entry_price: Decimal = fld(
+        PRICE, "Volume-weighted price of the entry fills.", unit="quote currency per unit"
+    )
     initial_stop_price: Decimal | None = fld(
         Opt(PRICE), "Hard stop at opening; mandatory for GIE positions.", unit="quote currency per unit"
     )
     stop_price: Decimal | None = fld(
         Opt(PRICE),
-        "Current hard protective stop (trigger of the working PROTECTIVE_STOP order).",
+        "Current hard protective stop that GIE requires for the position.",
         unit="quote currency per unit",
+    )
+    protective_client_order_id: str | None = fld(
+        Opt(Id("ord")),
+        "The PROTECTIVE_STOP order working at the simulated broker for an open GIE position; null "
+        "when no such order is working.",
+    )
+    unprotected_reason: str | None = fld(
+        Opt(Str(pattern=REASON_CODE_PATTERN, max_len=48, label="reason code")),
+        "Why an open GIE position has no working protective order (e.g. STOP_REJECTED, "
+        "STOP_PENDING); null when it is protected.",
     )
     take_profit_price: Decimal | None = fld(
         Opt(PRICE), "Current broker-side take profit, if any.", unit="quote currency per unit"
@@ -148,7 +181,7 @@ class Position(Produced):
     )
     initial_risk_amount: Decimal | None = fld(
         Opt(Dec(gt="0", label="money")),
-        "Amount risked at opening (1 R); mandatory for GIE positions.",
+        "Amount risked by the volume opened so far, as approved (1 R); mandatory for GIE positions.",
         unit="account currency",
     )
     realized_net_pnl_amount: Decimal = fld(
@@ -167,7 +200,9 @@ class Position(Produced):
         unit="account currency",
     )
     peak_time_ns: int = fld(
-        TimeNs(), "Decision time of the snapshot at which the peak was reached.", unit="ns since epoch, UTC"
+        TimeNs(),
+        "Receive time of the quote at which the peak was reached (the opening instant until then).",
+        unit="ns since epoch, UTC",
     )
     trough_net_pnl_amount: Decimal = fld(
         _MONEY,
@@ -193,8 +228,8 @@ class Position(Produced):
     )
     close_reason: str | None = fld(
         Opt(Str(pattern=REASON_CODE_PATTERN, max_len=48, label="reason code")),
-        "Why the position closed (e.g. PROTECTIVE_STOP, TAKE_PROFIT, RATCHET, TIME_EXIT); "
-        "set if and only if a GIE position is CLOSED.",
+        "Why the position closed (e.g. PROTECTIVE_STOP, TAKE_PROFIT, RATCHET, TIME_EXIT); null while "
+        "open, mandatory for a CLOSED GIE position, optional for a CLOSED EXTERNAL one.",
     )
     plan_id: str | None = fld(Opt(Id("pln")), "Plan revision that opened a GIE position.")
     opening_client_order_id: str | None = fld(Opt(Id("ord")), "Entry order of a GIE position.")
@@ -207,8 +242,9 @@ class Position(Produced):
         ),
         inv(
             "POS-2",
-            "volume_lots <= initial_volume_lots (a GIE position is never increased: no averaging "
-            "down; for EXTERNAL positions initial_volume_lots is the largest observed volume)",
+            "volume_lots <= initial_volume_lots (a GIE position holds at most what its entry order "
+            "opened: no averaging down, no adding; for EXTERNAL positions initial_volume_lots is the "
+            "largest observed volume)",
             lambda r: r.volume_lots <= r.initial_volume_lots,
         ),
         inv(
@@ -220,8 +256,9 @@ class Position(Produced):
         ),
         inv(
             "POS-4",
-            "for a GIE position the initial stop is on the losing side of the entry and the stop is "
-            "never wider than the initial stop (BUY: initial < entry and stop >= initial; SELL mirrored)",
+            "the stop of a GIE position is never wider than its initial stop (BUY: stop >= initial; "
+            "SELL: stop <= initial); the entry price is a reported fact and may lie beyond the stop "
+            "after a gap",
             _stop_geometry,
         ),
         inv(
@@ -256,6 +293,12 @@ class Position(Produced):
                 else (r.close_reason is not None or not _gie(r))
             ),
         ),
+        inv(
+            "POS-9",
+            "an OPEN GIE position names its working protective order or states why it has none "
+            "(exactly one of protective_client_order_id, unprotected_reason); any other position has neither",
+            _protection_status,
+        ),
     )
 
     @property
@@ -289,12 +332,10 @@ POSITION_IMMUTABLE_FIELDS: Final[tuple[str, ...]] = (
     "opening_client_order_id",
 )
 #: Further fields that never change during the life of a GIE-owned position.
-GIE_POSITION_IMMUTABLE_FIELDS: Final[tuple[str, ...]] = (
-    "initial_volume_lots",
-    "average_entry_price",
-    "initial_stop_price",
-    "initial_risk_amount",
-)
+GIE_POSITION_IMMUTABLE_FIELDS: Final[tuple[str, ...]] = ("initial_stop_price",)
+#: Fields of a GIE-owned position that change only while its entry order is still filling,
+#: i.e. together with an increase of ``initial_volume_lots``.
+GIE_POSITION_OPENING_FIELDS: Final[tuple[str, ...]] = ("average_entry_price", "initial_risk_amount")
 
 
 def validate_position_transition(previous: Position | None, snapshot: Position) -> None:
@@ -302,9 +343,12 @@ def validate_position_transition(previous: Position | None, snapshot: Position) 
 
     For GIE-owned positions it enforces the monotonic rules of the master
     specification: the stop never widens and is never removed (G04-11), the
-    executable net P&L peak never decreases (G04-13, G04-15) and the position is never
-    increased (G04-10).  For EXTERNAL positions, which GIE only observes, it
-    checks identity and time order and accepts whatever the other system did.
+    executable net P&L peak never decreases (G04-13, G04-15) and the position is
+    never increased beyond what its entry order opens (G04-10): the open volume
+    can grow only by as much as ``initial_volume_lots`` grows, and that grows
+    only with fills of the entry order (the lifecycle ledger checks it against
+    the order).  For EXTERNAL positions, which GIE only observes, it checks
+    identity and time order and accepts whatever the other system did.
     """
 
     def fail(rule: str) -> IllegalTransitionError:
@@ -326,9 +370,11 @@ def validate_position_transition(previous: Position | None, snapshot: Position) 
     for name in POSITION_IMMUTABLE_FIELDS:
         if getattr(previous, name) != getattr(snapshot, name):
             raise fail(f"{name} may not change during the life of a position")
-    for name in ("decision_time_ns", "as_of_time_ns", "seq"):
+    for name in ("decision_time_ns", "as_of_time_ns"):
         if getattr(snapshot, name) < getattr(previous, name):
             raise fail(f"{name} may not decrease")
+    if snapshot.producer == previous.producer and snapshot.seq < previous.seq:
+        raise fail("seq may not decrease within the stream of one producer")
     if snapshot.peak_net_pnl_amount < previous.peak_net_pnl_amount:
         raise fail("peak_net_pnl_amount may not decrease")
     if snapshot.trough_net_pnl_amount > previous.trough_net_pnl_amount:
@@ -336,8 +382,11 @@ def validate_position_transition(previous: Position | None, snapshot: Position) 
     if snapshot.peak_net_pnl_amount == previous.peak_net_pnl_amount:
         if snapshot.peak_time_ns != previous.peak_time_ns:
             raise fail("peak_time_ns may only change when a new peak is reached")
-    elif snapshot.peak_time_ns != snapshot.decision_time_ns:
-        raise fail("a new peak is stamped with the decision time of the snapshot that reached it")
+    elif not previous.as_of_time_ns <= snapshot.peak_time_ns <= snapshot.as_of_time_ns:
+        raise fail(
+            "a new peak is stamped with the receive time of the quote that made it: later than "
+            "everything the previous snapshot had seen and not later than this snapshot's watermark"
+        )
     if snapshot.owner is not PositionOwner.GIE:
         if snapshot.initial_volume_lots < previous.initial_volume_lots:
             raise fail("the largest observed volume of an external position may not decrease")
@@ -345,8 +394,23 @@ def validate_position_transition(previous: Position | None, snapshot: Position) 
     for name in GIE_POSITION_IMMUTABLE_FIELDS:
         if getattr(previous, name) != getattr(snapshot, name):
             raise fail(f"{name} may not change during the life of a GIE position")
-    if snapshot.volume_lots > previous.volume_lots:
-        raise fail("volume_lots may not increase (no averaging down, no adding to a position)")
+    opened = EXACT.subtract(snapshot.initial_volume_lots, previous.initial_volume_lots)
+    if opened < ZERO:
+        raise fail("initial_volume_lots may not decrease")
+    if EXACT.subtract(snapshot.volume_lots, previous.volume_lots) > opened:
+        raise fail(
+            "volume_lots may grow only by fills of the entry order "
+            "(no averaging down, no adding to a position)"
+        )
+    if opened == ZERO:
+        for name in GIE_POSITION_OPENING_FIELDS:
+            if getattr(previous, name) != getattr(snapshot, name):
+                raise fail(f"{name} may change only while the entry order is still filling")
+    else:
+        assert previous.initial_risk_amount is not None
+        assert snapshot.initial_risk_amount is not None
+        if snapshot.initial_risk_amount < previous.initial_risk_amount:
+            raise fail("initial_risk_amount may not decrease when the entry order fills further")
     if snapshot.state is PositionState.OPEN and not _stop_tightened_or_equal(
         snapshot.side, previous.stop_price, snapshot.stop_price
     ):

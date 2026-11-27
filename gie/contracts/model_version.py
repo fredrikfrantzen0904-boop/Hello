@@ -135,6 +135,7 @@ def _activation_evidence(model: ModelVersion) -> bool:
         model.evaluation_report_uri is not None
         and model.evaluation_report_sha256 is not None
         and model.promotion_criteria_sha256 is not None
+        and model.evaluation_data_origin is not None
         and bool(model.shadow_run_ids)
     )
 
@@ -246,6 +247,11 @@ class ModelVersion(Sequenced):
         Opt(_URI), "Model card / shadow report this status rests on; mandatory for ACTIVE."
     )
     evaluation_report_sha256: str | None = fld(Opt(_SHA), "SHA-256 of that report; mandatory for ACTIVE.")
+    evaluation_data_origin: DataOrigin | None = fld(
+        Opt(EnumOf(DataOrigin)),
+        "Least trustworthy origin of the data the evaluation report and the shadow runs rest on; "
+        "mandatory for ACTIVE.  A version evaluated on SYNTHETIC_FIXTURE data is never validated.",
+    )
     promotion_criteria_sha256: str | None = fld(
         Opt(_SHA), "Hash of the promotion criteria the report was judged against; mandatory for ACTIVE."
     )
@@ -320,8 +326,8 @@ class ModelVersion(Sequenced):
         ),
         inv(
             "MDL-7",
-            "ACTIVE cites its evidence: evaluation report with hash, promotion criteria hash and at "
-            "least one shadow run",
+            "ACTIVE cites its evidence: evaluation report with hash, promotion criteria hash, the "
+            "origin of the evaluation data and at least one shadow run",
             _activation_evidence,
         ),
         inv(
@@ -346,10 +352,17 @@ class ModelVersion(Sequenced):
 
     @property
     def validated(self) -> bool:
-        """True only for an owner-approved ACTIVE version that was not fitted on fixture data."""
+        """True only for an owner-approved ACTIVE version neither fitted nor evaluated on fixture data.
+
+        A rule set uses no training data, so its validation rests on its
+        evaluation alone; that is why the origin of the evaluation data is
+        recorded separately.
+        """
         return (
             self.status is ModelStatus.ACTIVE
             and self.training_data_origin is not DataOrigin.SYNTHETIC_FIXTURE
+            and self.evaluation_data_origin is not None
+            and self.evaluation_data_origin is not DataOrigin.SYNTHETIC_FIXTURE
         )
 
 
@@ -411,60 +424,122 @@ def validate_model_transition(previous: ModelVersion | None, entry: ModelVersion
             raise fail("rollback_of_model_version_id is set exactly when a RETIRED version is re-activated")
 
 
+class RegistryHistory:
+    """The family-level rules of the model registry, checked one entry at a time.
+
+    Beyond the per-version rules of :func:`validate_model_transition`, for every
+    model family (``kind``, ``model_name``):
+
+    * at most one version is ACTIVE at any time;
+    * an activation names, in ``replaces_model_version_id``, the version of the
+      family that was ACTIVE before it (none for the first);
+    * a re-activation of a RETIRED version is a rollback: its
+      ``rollback_of_model_version_id`` names exactly that last ACTIVE version of
+      the same family, and that version has been ROLLED_BACK;
+    * every activation carries an approval reference that was not used for an
+      activation of this version before;
+    * the components of a composite version are registered before it is.
+
+    ``check`` validates an entry without recording it; ``admit`` validates and
+    records it.  The lifecycle ledger keeps one instance per run, so these rules
+    hold for every journal; :func:`validate_registry_history` applies them to a
+    complete history.
+    """
+
+    __slots__ = ("_active", "_approvals", "_last_active", "_latest")
+
+    def __init__(self) -> None:
+        self._latest: dict[str, ModelVersion] = {}
+        self._active: dict[tuple[ModelKind, str], str] = {}
+        self._last_active: dict[tuple[ModelKind, str], str] = {}
+        self._approvals: dict[str, set[str]] = {}
+
+    def model(self, model_version_id: str) -> ModelVersion | None:
+        """Newest registry entry of a model version, if it is registered."""
+        return self._latest.get(model_version_id)
+
+    def active(self, kind: ModelKind, model_name: str) -> ModelVersion | None:
+        """The ACTIVE version of a model family, if any."""
+        active_id = self._active.get((kind, model_name))
+        return None if active_id is None else self._latest[active_id]
+
+    def check(self, entry: ModelVersion) -> bool:
+        """Validate *entry*; returns False when it is the newest entry of its version again."""
+        if type(entry) is not ModelVersion:
+            raise TypeError("the model registry holds ModelVersion records")
+
+        def fail(rule: str) -> IllegalTransitionError:
+            return IllegalTransitionError(
+                f"illegal registry history: {rule}",
+                model_version_id=entry.model_version_id,
+                revision=entry.revision,
+                rule=rule,
+            )
+
+        previous = self._latest.get(entry.model_version_id)
+        if previous is not None and previous == entry:
+            return False
+        validate_model_transition(previous, entry)
+        family = (entry.kind, entry.model_name)
+        for component in entry.component_model_version_ids:
+            if component not in self._latest:
+                raise fail("a component of a composite model is not registered")
+        if entry.status is ModelStatus.ACTIVE:
+            if family in self._active:
+                raise fail("the currently ACTIVE version must be RETIRED or ROLLED_BACK first")
+            before = self._last_active.get(family)
+            if entry.replaces_model_version_id != before:
+                raise fail("replaces_model_version_id must name the version that was ACTIVE before")
+            assert entry.approval_reference is not None
+            if entry.approval_reference in self._approvals.get(entry.model_version_id, ()):
+                raise fail("an activation needs its own approval; this reference was used before")
+            rolled_back = entry.rollback_of_model_version_id
+            if rolled_back is not None and (
+                rolled_back != before or self._latest[rolled_back].status is not ModelStatus.ROLLED_BACK
+            ):
+                raise fail(
+                    "rollback_of_model_version_id must name the version of this family that was ACTIVE "
+                    "last and has been ROLLED_BACK"
+                )
+        return True
+
+    def admit(self, entry: ModelVersion) -> bool:
+        """Validate *entry* and make it the newest entry of its version.  Returns False for a repeat."""
+        if not self.check(entry):
+            return False
+        family = (entry.kind, entry.model_name)
+        if entry.status is ModelStatus.ACTIVE:
+            assert entry.approval_reference is not None
+            self._approvals.setdefault(entry.model_version_id, set()).add(entry.approval_reference)
+            self._active[family] = entry.model_version_id
+            self._last_active[family] = entry.model_version_id
+        elif self._active.get(family) == entry.model_version_id:
+            del self._active[family]
+        self._latest[entry.model_version_id] = entry
+        return True
+
+
 def validate_registry_history(entries: Sequence[ModelVersion]) -> None:
     """Check a complete registry history (all versions, in registry order).
 
-    Beyond the per-version rules: at most one version of a model family
-    (``kind``, ``model_name``) is ACTIVE at any time; an activation names the
-    version it replaces; a re-activation names a successor that really was
-    rolled back and carries an approval that was not used for this version
-    before; component versions of a composite are registered.
+    Applies :class:`RegistryHistory` to every entry in turn and, because the
+    history is complete, also requires the registry ``seq`` to increase by
+    exactly 1.
     """
-
-    def fail(entry: ModelVersion, rule: str) -> IllegalTransitionError:
-        return IllegalTransitionError(
-            f"illegal registry history: {rule}",
-            model_version_id=entry.model_version_id,
-            revision=entry.revision,
-            rule=rule,
-        )
-
-    latest: dict[str, ModelVersion] = {}
-    active: dict[tuple[ModelKind, str], str] = {}
-    last_active: dict[tuple[ModelKind, str], str] = {}
-    approvals: dict[str, set[str]] = {}
+    history = RegistryHistory()
     last_seq: int | None = None
     for entry in entries:
         if type(entry) is not ModelVersion:
             raise TypeError("validate_registry_history expects ModelVersion records")
         if last_seq is not None and entry.seq != last_seq + 1:
-            raise fail(entry, "registry seq must increase by exactly 1")
+            raise IllegalTransitionError(
+                "illegal registry history: registry seq must increase by exactly 1",
+                model_version_id=entry.model_version_id,
+                revision=entry.revision,
+                rule="registry seq must increase by exactly 1",
+            )
         last_seq = entry.seq
-        validate_model_transition(latest.get(entry.model_version_id), entry)
-        family = (entry.kind, entry.model_name)
-        if entry.status is ModelStatus.ACTIVE:
-            if family in active:
-                raise fail(entry, "the currently ACTIVE version must be RETIRED or ROLLED_BACK first")
-            if entry.replaces_model_version_id != last_active.get(family):
-                raise fail(entry, "replaces_model_version_id must name the version that was ACTIVE before")
-            assert entry.approval_reference is not None
-            used = approvals.setdefault(entry.model_version_id, set())
-            if entry.approval_reference in used:
-                raise fail(entry, "an activation needs its own approval; this reference was used before")
-            used.add(entry.approval_reference)
-            rolled_back = entry.rollback_of_model_version_id
-            if rolled_back is not None and (
-                rolled_back not in latest or latest[rolled_back].status is not ModelStatus.ROLLED_BACK
-            ):
-                raise fail(entry, "rollback_of_model_version_id must name a ROLLED_BACK version")
-            for component in entry.component_model_version_ids:
-                if component not in latest:
-                    raise fail(entry, "a component of a composite model is not registered")
-            active[family] = entry.model_version_id
-            last_active[family] = entry.model_version_id
-        elif active.get(family) == entry.model_version_id:
-            del active[family]
-        latest[entry.model_version_id] = entry
+        history.admit(entry)
 
 
 def is_out_of_sample(as_of_time_ns: int, model: ModelVersion) -> bool:

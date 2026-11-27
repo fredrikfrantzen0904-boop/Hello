@@ -1,8 +1,9 @@
 """Stream names and ordering keys of contract records (see ``gie.core.ordering``).
 
-The key orders *inputs* of a run (ticks, clock readings, recorded broker
-reports) and is the fallback order for records of different journals.  Within
-one run the order of record is the journal order.
+The key orders the *inputs* of a run (ticks, clock readings) and gives records
+of different journals a deterministic order.  Within one run the order of
+record is the journal order; sorting derived records by this key is a
+deterministic tie-break, not a statement about cause and effect.
 """
 
 from __future__ import annotations
@@ -24,9 +25,11 @@ from gie.core.errors import UnknownContractError
 from gie.core.ordering import EventKey, StreamRank
 
 #: contract -> (stream prefix, name of the ordering-time field, rank).
-#: OrderEvent has two ranks: requests (GIE's own) and reports (the simulated broker's).
+#: OrderEvent has two ranks: requests and reports.  A report is always observed strictly later
+#: than the request it follows, so the key never contradicts the order of events of one order.
+#: RunManifest: the start of the data period for a replay, the creation time for a paper run.
 STREAMS: Final[dict[type[Record], tuple[str, str, StreamRank]]] = {
-    RunManifest: ("run_manifest", "created_time_ns", StreamRank.RUN_MANIFEST),
+    RunManifest: ("run_manifest", "data_start_ns | created_time_ns", StreamRank.RUN_MANIFEST),
     ClockReading: ("clock", "wall_time_ns", StreamRank.CLOCK),
     Tick: ("tick", "receive_time_ns", StreamRank.TICK),
     OrderEvent: ("order_event", "receive_time_ns", StreamRank.ORDER_REPORT),
@@ -57,6 +60,10 @@ def stream_name(value: Record) -> str:
 def ordering_time_ns(value: Record) -> int:
     """Availability instant of a record: when its information could first be known to GIE."""
     _, time_field, _ = _entry(value)
+    if isinstance(value, RunManifest):
+        start = value.data_start_ns if value.created_time_ns is None else value.created_time_ns
+        assert start is not None  # RUN-2: a replay has a data period, a paper run a creation time
+        return start
     time_ns: int = getattr(value, time_field)
     return time_ns
 

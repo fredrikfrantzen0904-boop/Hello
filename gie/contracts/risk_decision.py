@@ -24,7 +24,7 @@ from gie.contracts._spec import (
 )
 from gie.contracts.common import CURRENCY_PATTERN, SHA256_PATTERN, ZERO, Produced, reason_codes_field
 from gie.contracts.registry import contract
-from gie.core.canonical import EXACT
+from gie.core.canonical import EXACT, fraction_of
 from gie.core.errors import IllegalTransitionError
 from gie.core.timeutil import trading_day
 
@@ -54,10 +54,44 @@ def _approved(decision: RiskDecision) -> bool:
 
 
 def _within_surplus(decision: RiskDecision) -> bool:
-    if not _approved(decision) or decision.profit_floor_frac is None:
+    if not _approved(decision) or decision.profit_floor_amount is None:
         return True
-    surplus = EXACT.subtract(decision.daily_pnl_frac, decision.profit_floor_frac)
-    return decision.risk_frac <= surplus
+    if decision.open_risk_amount is None or decision.pending_risk_amount is None:
+        return False  # unknown exposure: the surplus cannot be shown, so nothing is approved
+    surplus = EXACT.subtract(decision.daily_pnl_amount, decision.profit_floor_amount)
+    committed = EXACT.add(
+        EXACT.add(decision.risk_amount, decision.open_risk_amount), decision.pending_risk_amount
+    )
+    return committed <= surplus
+
+
+def _aggregates_stated(decision: RiskDecision) -> bool:
+    if not _approved(decision):
+        return True
+    stated = (
+        decision.equity_amount,
+        decision.open_risk_amount,
+        decision.pending_risk_amount,
+        decision.margin_required_amount,
+        decision.margin_free_amount,
+        decision.gap_stress_loss_amount,
+    )
+    if any(value is None for value in stated):
+        return False
+    assert decision.margin_required_amount is not None
+    assert decision.margin_free_amount is not None
+    return decision.margin_required_amount <= decision.margin_free_amount
+
+
+def _fractions_derived(decision: RiskDecision) -> bool:
+    base = decision.reference_equity_amount
+    if decision.daily_pnl_frac != fraction_of(decision.daily_pnl_amount, base, round_up=False):
+        return False
+    if decision.risk_frac != fraction_of(decision.risk_amount, base, round_up=True):
+        return False
+    if decision.profit_floor_amount is None:
+        return decision.profit_floor_frac is None
+    return decision.profit_floor_frac == fraction_of(decision.profit_floor_amount, base, round_up=True)
 
 
 @final
@@ -73,13 +107,25 @@ class RiskDecision(Produced):
       risk atomically (``reservation_id``) and expires at ``valid_until_ns``.
       It can be spent by exactly one entry order (the order's identity is derived
       from ``decision_id``).
-    * All fractions are relative to ``reference_equity_amount``, the equity the
-      account's daily limits are measured against (defined by the account rules,
-      session 08).  ``risk_frac`` is rounded **up**, so that
-      ``risk_amount <= risk_frac * reference_equity_amount`` always holds and a
-      limit checked on the fraction is never understated.
-    * ``daily_pnl_frac`` is account-wide: it includes open positions and the
+    * **Amounts decide, fractions report.**  The daily result, the profit floor
+      and the granted risk are exact money amounts, and every boundary - "at
+      exactly the floor no new risk", the surplus above the floor - is decided
+      on them.  The ``*_frac`` fields are derived from the amounts and
+      ``reference_equity_amount`` (the equity the account's daily limits are
+      measured against, fixed for the trading day) with a stated rounding
+      (``gie.core.canonical.fraction_of``): the daily result is rounded down,
+      the floor and the risk up, so a fraction never looks better than the
+      amounts.  The thresholds of the daily states are research parameters; the
+      risk engine converts them to amounts with the same reference equity.
+    * ``daily_pnl_amount`` is account-wide: it includes open positions and the
       positions of every other system on the account.
+    * **Profit floor.**  Once a floor has been established on a trading day it is
+      carried by every later decision of that day, never decreases and never
+      disappears; the state is then PROFIT_PROTECTION (or EMERGENCY_HALT).  New
+      risk is approved only above the floor and only up to the surplus that is
+      left after the risk of open positions and pending orders.
+    * **An approval states what it rests on**: equity, open and pending risk,
+      margin and the gap-stress loss.  Unknown is not approved.
     """
 
     decision_id: str = fld(Id("rsk"), "identity.risk_decision_id(run_id, plan_id, attempt).")
@@ -107,12 +153,13 @@ class RiskDecision(Produced):
     )
     risk_frac: Decimal = fld(
         Dec(ge="0", le="1", label="fraction"),
-        "risk_amount as a fraction of reference_equity_amount, rounded up; 0 when rejected.",
+        "risk_amount as a fraction of reference_equity_amount, rounded up (derived); 0 when rejected.",
         unit="fraction",
     )
     reference_equity_amount: Decimal = fld(
         Dec(gt="0", label="money"),
-        "Equity that the day's fractions refer to (per the account rules).",
+        "Equity that the day's fractions and thresholds refer to (per the account rules); the same "
+        "for every decision of a trading day.",
         unit="account currency",
     )
     quality_validated: bool = fld(
@@ -127,14 +174,25 @@ class RiskDecision(Produced):
     )
     trading_day: str = fld(TradingDay(), "Prague trading day of decision_time_ns.")
     daily_state: DailyState = fld(EnumOf(DailyState), "Daily risk state at decision time.")
+    daily_pnl_amount: Decimal = fld(
+        _MONEY,
+        "Account-wide net result of the trading day including open positions of all systems.",
+        unit="account currency",
+    )
     daily_pnl_frac: Decimal = fld(
         _FRACTION,
-        "Account-wide net result of the trading day including open positions of all systems.",
+        "daily_pnl_amount as a fraction of reference_equity_amount, rounded down (derived).",
         unit="fraction of reference equity",
+    )
+    profit_floor_amount: Decimal | None = fld(
+        Opt(Dec(gt="0", label="money")),
+        "Protected daily profit floor once established: never decreases and never disappears within "
+        "the trading day; mandatory in PROFIT_PROTECTION.",
+        unit="account currency",
     )
     profit_floor_frac: Decimal | None = fld(
         Opt(_FRACTION),
-        "Protected, non-decreasing daily profit floor; set if and only if daily_state is PROFIT_PROTECTION.",
+        "profit_floor_amount as a fraction of reference_equity_amount, rounded up (derived).",
         unit="fraction of reference equity",
     )
     reservation_id: str | None = fld(
@@ -215,28 +273,36 @@ class RiskDecision(Produced):
         ),
         inv(
             "RSK-6",
-            "profit_floor_frac is set if and only if daily_state is PROFIT_PROTECTION",
-            lambda r: (r.profit_floor_frac is not None) == (r.daily_state is DailyState.PROFIT_PROTECTION),
+            "PROFIT_PROTECTION carries a profit floor; a floor is carried only in PROFIT_PROTECTION "
+            "or EMERGENCY_HALT (once established it stays for the trading day)",
+            lambda r: (
+                r.profit_floor_amount is not None
+                if r.daily_state is DailyState.PROFIT_PROTECTION
+                else (r.profit_floor_amount is None or r.daily_state is DailyState.EMERGENCY_HALT)
+            ),
         ),
         inv(
             "RSK-7",
-            "at or below the profit floor no new risk is approved (G05: at exactly the floor no new risk)",
+            "at or below the profit floor no new risk is approved, decided on exact amounts "
+            "(G05: at exactly the floor no new risk)",
             lambda r: (
-                r.profit_floor_frac is None
-                or r.daily_pnl_frac > r.profit_floor_frac
+                r.profit_floor_amount is None
+                or r.daily_pnl_amount > r.profit_floor_amount
                 or r.outcome is RiskOutcome.REJECTED
             ),
         ),
         inv(
             "RSK-8",
-            "above the profit floor an approval risks at most the surplus: "
-            "risk_frac <= daily_pnl_frac - profit_floor_frac",
+            "above the profit floor an approval stays within the surplus after open exposure: "
+            "risk_amount + open_risk_amount + pending_risk_amount <= daily_pnl_amount - "
+            "profit_floor_amount (both aggregates must be stated)",
             _within_surplus,
         ),
         inv(
             "RSK-9",
-            "risk_amount <= risk_frac * reference_equity_amount (the fraction is rounded up, never down)",
-            lambda r: r.risk_amount <= EXACT.multiply(r.risk_frac, r.reference_equity_amount),
+            "the fractions are derived from the amounts and reference_equity_amount: daily_pnl_frac "
+            "rounded down, profit_floor_frac and risk_frac rounded up, 12 fractional digits",
+            _fractions_derived,
         ),
         inv(
             "RSK-10",
@@ -253,6 +319,13 @@ class RiskDecision(Produced):
             "quality_model_version_id is set if and only if quality_validated is true",
             lambda r: (r.quality_model_version_id is not None) == r.quality_validated,
         ),
+        inv(
+            "RSK-13",
+            "an approval states the aggregates it rests on - equity, open risk, pending risk, margin "
+            "required and free, gap-stress loss - and margin_required_amount <= margin_free_amount "
+            "(unknown is never approved)",
+            _aggregates_stated,
+        ),
     )
 
     @property
@@ -260,13 +333,33 @@ class RiskDecision(Produced):
         return _approved(self)
 
 
-def validate_daily_state_sequence(previous: RiskDecision | None, decision: RiskDecision) -> None:
-    """Check two consecutive decisions of one risk gate against the daily-state rules of G05.
+@dataclass(frozen=True, slots=True)
+class DailyRiskSummary:
+    """What the risk decisions of one run have established for one trading day so far."""
 
-    Within one trading day: an emergency halt stays in force, and a profit floor
-    never decreases.  The full state machine (thresholds, recovery level) is the
-    risk engine's; these are the parts the master specification states without
-    exception.
+    trading_day: str
+    account_currency: str
+    reference_equity_amount: Decimal
+    halted: bool
+    profit_floor_amount: Decimal | None
+    last_decision_time_ns: int
+
+
+def advance_daily_risk(summary: DailyRiskSummary | None, decision: RiskDecision) -> DailyRiskSummary:
+    """Check *decision* against what the day has established and return the updated summary.
+
+    These are the parts of the daily-state rules that the master specification
+    states without exception (G05); the thresholds and the full state machine
+    are the risk engine's.  Within one trading day, for every risk producer of
+    the run together:
+
+    * an emergency halt stays in force until the next trading day;
+    * a profit floor, once established, never decreases and never disappears -
+      so no later decision of the day can approve risk at or below it (RSK-7)
+      or beyond the surplus above it (RSK-8);
+    * the reference equity and the account currency do not change.
+
+    Raises :class:`IllegalTransitionError`; a refused decision changes nothing.
     """
 
     def fail(rule: str) -> IllegalTransitionError:
@@ -274,24 +367,42 @@ def validate_daily_state_sequence(previous: RiskDecision | None, decision: RiskD
             f"illegal daily-state sequence: {rule}", decision_id=decision.decision_id, rule=rule
         )
 
-    if previous is None:
-        return
-    if decision.decision_time_ns < previous.decision_time_ns:
-        raise fail("decision_time_ns may not decrease")
-    if decision.trading_day < previous.trading_day:
-        raise fail("trading_day may not go backwards")
-    if decision.trading_day != previous.trading_day:
-        return
-    if decision.account_currency != previous.account_currency:
-        raise fail("account_currency may not change within a trading day")
-    if (
-        previous.daily_state is DailyState.EMERGENCY_HALT
-        and decision.daily_state is not DailyState.EMERGENCY_HALT
-    ):
-        raise fail("an emergency halt stays in force until the next trading day")
-    if (
-        previous.profit_floor_frac is not None
-        and decision.profit_floor_frac is not None
-        and decision.profit_floor_frac < previous.profit_floor_frac
-    ):
-        raise fail("the daily profit floor may not decrease")
+    floor = decision.profit_floor_amount
+    halted = decision.daily_state is DailyState.EMERGENCY_HALT
+    if summary is not None:
+        if decision.decision_time_ns < summary.last_decision_time_ns:
+            raise fail("decision_time_ns may not decrease")
+        if decision.trading_day < summary.trading_day:
+            raise fail("trading_day may not go backwards")
+    if summary is not None and decision.trading_day == summary.trading_day:
+        if decision.account_currency != summary.account_currency:
+            raise fail("account_currency may not change within a trading day")
+        if decision.reference_equity_amount != summary.reference_equity_amount:
+            raise fail("reference_equity_amount may not change within a trading day")
+        if summary.halted and not halted:
+            raise fail("an emergency halt stays in force until the next trading day")
+        if summary.profit_floor_amount is not None:
+            if floor is None:
+                raise fail("a daily profit floor, once established, may not disappear")
+            if floor < summary.profit_floor_amount:
+                raise fail("the daily profit floor may not decrease")
+        halted = halted or summary.halted
+    return DailyRiskSummary(
+        trading_day=decision.trading_day,
+        account_currency=decision.account_currency,
+        reference_equity_amount=decision.reference_equity_amount,
+        halted=halted,
+        profit_floor_amount=floor,
+        last_decision_time_ns=decision.decision_time_ns,
+    )
+
+
+def validate_daily_state_sequence(previous: RiskDecision | None, decision: RiskDecision) -> None:
+    """Check two consecutive decisions against the daily-state rules (see :func:`advance_daily_risk`).
+
+    Judging pairs is enough only when every decision of the day is presented in
+    order; the lifecycle ledger keeps the day's summary across all risk
+    producers of a run and should be preferred.
+    """
+    summary = None if previous is None else advance_daily_risk(None, previous)
+    advance_daily_risk(summary, decision)
