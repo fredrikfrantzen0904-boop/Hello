@@ -69,7 +69,7 @@ None.
 ## Open blockers, change requests and open items
 
 - blockers: 1 open of 1
-- change requests: 5 open of 6
+- change requests: 7 open of 8
 - open items: 18 open of 18
 
 | id | type | status | title | requirements |
@@ -80,6 +80,8 @@ None.
 | CR-004 | change request | OPEN | Interpretations built into the contracts need confirmation | G04-10, G04-11, G05-03, M-AUTH-13 |
 | CR-005 | change request | OPEN | One shared policy for what may be done with a flagged tick | S01-ASG-06, S01-ASG-08, G03-12, G08-06, S06-ACC-03 |
 | CR-006 | change request | OPEN | Additions to the shared contracts beyond the nine named by the brief | S00-ASG-11, S00-ASG-12, S00-ASG-13, S00-ASG-14, S00-ASG-15, S00-ASG-16, S00-ASG-17, S00-ASG-18, S00-ASG-19, S00-ASG-25, COM-06 |
+| CR-007 | change request | OPEN | Evidence fields of a risk decision proposed by session 08 | S08-ASG-01, S08-ASG-05, G04-02, G04-03, G04-08 |
+| CR-008 | change request | OPEN | Attribution of an estimate is recorded but not yet checked | S05-ACC-07, S11-ASG-05, S02-DEL-01, S04-ASG-08 |
 | U-01 | open item | OPEN | Access to the existing system `D:\ftmo_eurusd` | S00-ASG-01, S00-DEL-04 |
 | U-02 | open item | OPEN | Where will GIE finally live? | COM-03, S11-ACC-05 |
 | U-03 | open item | OPEN | Meaning of "proposed recovery at -1.75%" | G05-03, S08-ASG-11, S08-ACC-02 |
@@ -101,7 +103,7 @@ None.
 
 ## Decisions
 
-- PROPOSED: 21
+- PROPOSED: 26
 - APPROVED: 1
 - REJECTED: 0
 - SUPERSEDED: 1
@@ -131,3 +133,8 @@ None.
 | D-021 | PROPOSED | One order gateway enforces authorisation, lifecycle and the routing lock | G08-03, G08-07, G08-10, G04-09, G04-10, G04-11, G04-12, G04-13, S07-ACC-06, S08-ACC-06, M-AUTH-19, OWN-14 |
 | D-022 | PROPOSED | Timers come from an injected scheduler; there are no timer threads | S00-ASG-19, S00-ACC-03, G03-12, G08-06, S06-ASG-06, S10-ASG-01 |
 | D-023 | PROPOSED | Tests and reviews are written by someone other than the implementer | OWN-04, OWN-09, M-AUTH-06, M-AUTH-08, S12-ASG-08, COM-10 |
+| D-024 | PROPOSED | Step time: a component sees the instant of the input it is processing | S00-ASG-19, S00-ASG-21, S00-ACC-03, S10-ASG-01, S10-ACC-01, S10-ACC-02, S06-ASG-01, G03-10, G03-11 |
+| D-025 | PROPOSED | Order events have one writer; the broker may create protective orders | S07-ASG-01, S07-ASG-06, S07-ASG-09, S07-ACC-02, S06-ASG-03, G08-07, G08-08, G04-12 |
+| D-026 | PROPOSED | Which model may lead to a paper order depends on the role of the run | G07-08, G07-09, G07-10, G07-12, G04-08 |
+| D-027 | PROPOSED | A run is identified by the content of its manifest | S10-ACC-01, S10-DEL-03, S10-DEL-04, S10-ASG-10, M-AUTH-16, M-GATE-05, S08-ASG-09 |
+| D-028 | PROPOSED | Amounts decide, fractions report | S08-ASG-06, S08-ASG-07, S08-ACC-01, S08-ACC-02, S08-ACC-03, S08-ACC-04, S08-ACC-05, G05-02, G05-04, G05-06 |
