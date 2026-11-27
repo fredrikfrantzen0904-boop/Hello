@@ -132,6 +132,9 @@ _RunModeWithLiveAlias = Enum(
     "_RunModeWithLiveAlias", {"REPLAY": "REPLAY", "PAPER": "PAPER", "LIVE": "PAPER"}, type=str
 )
 _VenueWithLiveAlias = Enum("_VenueWithLiveAlias", {"SIMULATED": "SIMULATED", "LIVE": "SIMULATED"}, type=str)
+# The genuine wire values under other member names: PAPER is called LIVE, SIMULATED is called LIVE.
+_RunModeWithRenamedMember = Enum("_RunModeWithRenamedMember", {"REPLAY": "REPLAY", "LIVE": "PAPER"}, type=str)
+_VenueWithRenamedMember = Enum("_VenueWithRenamedMember", {"LIVE": "SIMULATED"}, type=str)
 
 
 @pytest.fixture(autouse=True)
@@ -647,6 +650,36 @@ def test_authorize_goes_by_type_identity_not_by_name() -> None:
 
 @pytest.mark.requirement("G08-03", "G08-10", "M-AUTH-13", "M-AUTH-14", "OWN-14")
 @pytest.mark.acceptance("S00-ACC-04")
+def test_authorize_is_not_fooled_by_a_class_that_compares_equal_to_a_registered_class() -> None:
+    registered = _registered_adapter_class()
+
+    class Impersonating(type):
+        """SYNTHETIC FIXTURE metaclass: its classes hash and compare like the registered class."""
+
+        def __hash__(cls) -> int:
+            return hash(registered)
+
+        def __eq__(cls, other: object) -> bool:
+            return True
+
+    class NeverRegistered(metaclass=Impersonating):
+        """Declares everything a simulator declares, but was never registered."""
+
+        venue = ExecutionVenue.SIMULATED
+        sends_real_orders = False
+
+    impersonator: Any = NeverRegistered
+    assert impersonator == registered  # an == / set-membership check would be fooled
+    assert hash(impersonator) == hash(registered)
+    assert impersonator is not registered
+    guard = RoutingGuard("PAPER")
+    guard.authorize(registered())
+    with pytest.raises(LiveRoutingLockedError):
+        guard.authorize(NeverRegistered())
+
+
+@pytest.mark.requirement("G08-03", "G08-10", "M-AUTH-13", "M-AUTH-14", "OWN-14")
+@pytest.mark.acceptance("S00-ACC-04")
 def test_authorize_is_not_fooled_by_an_object_that_claims_to_be_of_a_registered_class() -> None:
     registered = _registered_adapter_class()
 
@@ -922,15 +955,25 @@ def test_the_self_check_raises_when_a_vocabulary_is_replaced_by_an_extended_one(
 @pytest.mark.acceptance("S00-ACC-04")
 @pytest.mark.parametrize(
     ("attribute", "tampered"),
-    [("RunMode", _RunModeWithLiveAlias), ("ExecutionVenue", _VenueWithLiveAlias)],
-    ids=["RunMode.LIVE-alias-of-PAPER", "ExecutionVenue.LIVE-alias-of-SIMULATED"],
+    [
+        ("RunMode", _RunModeWithLiveAlias),
+        ("ExecutionVenue", _VenueWithLiveAlias),
+        ("RunMode", _RunModeWithRenamedMember),
+        ("ExecutionVenue", _VenueWithRenamedMember),
+    ],
+    ids=[
+        "RunMode.LIVE-alias-of-PAPER",
+        "ExecutionVenue.LIVE-alias-of-SIMULATED",
+        "RunMode.PAPER-renamed-to-LIVE",
+        "ExecutionVenue.SIMULATED-renamed-to-LIVE",
+    ],
 )
 def test_the_self_check_raises_when_a_vocabulary_gains_a_live_name_as_an_alias(
     monkeypatch: pytest.MonkeyPatch, attribute: str, tampered: Any
 ) -> None:
     # "RunMode only contains REPLAY and PAPER and ExecutionVenue only contains SIMULATED."  A
-    # vocabulary to which the *name* LIVE was added contains more than that, even if the new name
-    # is an alias and the set of wire values is unchanged: ``RunMode.LIVE`` then resolves.
+    # vocabulary in which the *name* LIVE appears contains something else, even if that name is an
+    # alias or a renamed member and the set of wire values is unchanged: ``RunMode.LIVE`` resolves.
     assert "LIVE" in tampered.__members__
     assert {member.value for member in tampered} <= {"REPLAY", "PAPER", "SIMULATED"}
     with monkeypatch.context() as patch:

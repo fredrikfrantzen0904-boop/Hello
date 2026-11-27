@@ -23,6 +23,7 @@ import itertools
 import json
 import re
 import struct
+from collections import deque
 from collections.abc import Callable
 from decimal import (
     Context,
@@ -40,6 +41,7 @@ import pytest
 from hypothesis import HealthCheck, example, given, settings
 from hypothesis import strategies as st
 
+from gie.core import canonical as canonical_module
 from gie.core.canonical import (
     DECIMAL_PATTERN,
     EXACT,
@@ -472,6 +474,9 @@ def test_non_string_keys_are_rejected(key: Any) -> None:
         dt.date(2026, 11, 27),
         dt.datetime(2026, 11, 27, tzinfo=dt.UTC),
         len,
+        range(3),
+        deque([1, 2]),
+        memoryview(b"ab"),
     ],
     ids=lambda value: type(value).__name__,
 )
@@ -514,22 +519,45 @@ def test_cyclic_structure_is_refused_with_a_gie_error() -> None:
     assert _raised_type(canonical_dumps, cyclic_object) is CanonicalEncodingError
 
 
-@pytest.mark.requirement("S00-ASG-24")
-def test_deeply_nested_value_is_encoded_or_refused_with_a_gie_error() -> None:
-    """Encoding a value nested 3000 deep must work or fail with the documented error type.
+def _nested(levels: int, kind: str, leaf: Any = None) -> Any:
+    """*levels* containers inside each other: arrays, objects, or both alternating."""
+    value: Any = leaf
+    for level in range(levels):
+        as_object = kind == "objects" or (kind == "mixed" and level % 2 == 0)
+        if as_object:
+            value = {} if value is None and level == 0 else {"k": value}
+        else:
+            value = [] if value is None and level == 0 else [value]
+    return value
 
-    (On CPython 3.13 ``strict_loads`` accepts this depth, so such a value can come straight
-    from a journal line; the value is built directly here to keep the test independent of the
-    parser's own limits.)
-    """
-    depth = 3000
-    value: list[Any] = []
-    for _ in range(depth):
-        value = [value]
-    raised = _raised_type(canonical_dumps, value)
-    assert raised in (None, CanonicalEncodingError)
-    if raised is None:
-        assert canonical_dumps(value) == "[" * (depth + 1) + "]" * (depth + 1)
+
+@pytest.mark.requirement("S00-ASG-22", "S00-ASG-24")
+def test_max_depth_is_64() -> None:
+    assert canonical_module.MAX_DEPTH == 64
+
+
+@pytest.mark.requirement("S00-ASG-22")
+def test_nesting_up_to_the_maximum_depth_is_encoded() -> None:
+    assert canonical_dumps(_nested(64, "arrays")) == "[" * 64 + "]" * 64
+    assert canonical_dumps(_nested(64, "arrays", leaf=7)) == "[" * 64 + "7" + "]" * 64
+    assert canonical_dumps(_nested(64, "objects", leaf="x")) == '{"k":' * 64 + '"x"' + "}" * 64
+    mixed = canonical_dumps(_nested(64, "mixed", leaf=None))
+    assert mixed.count("[") + mixed.count("{") == 64
+    assert strict_loads(mixed) == _nested(64, "mixed", leaf=None)
+    # what the parser accepts at this depth can be written back unchanged
+    text = "[" * 64 + "7" + "]" * 64
+    assert canonical_dumps(strict_loads(text)) == text
+
+
+@pytest.mark.requirement("S00-ASG-24")
+@pytest.mark.parametrize("kind", ["arrays", "objects", "mixed"])
+@pytest.mark.parametrize("levels", [65, 66, 200, 3000])
+def test_nesting_beyond_the_maximum_depth_is_refused_with_a_gie_error(kind: str, levels: int) -> None:
+    """Too deep for canonical JSON: a ``CanonicalEncodingError``, never a ``RecursionError``."""
+    value = _nested(levels, kind, leaf=1)
+    assert _raised_type(canonical_dumps, value) is CanonicalEncodingError
+    assert _raised_type(canonical_bytes, value) is CanonicalEncodingError
+    assert _raised_type(content_hash, value) is CanonicalEncodingError
 
 
 # =========================================================================== determinism and hashing
@@ -686,20 +714,68 @@ def test_strict_loads_rejects_nan_and_infinity_tokens(text: str) -> None:
 @pytest.mark.parametrize(
     "text",
     [
-        "9223372036854775808",
+        "9223372036854775808",  # 2**63: one beyond the largest instant
         "-9223372036854775809",
-        "18446744073709551616",
+        "18446744073709551616",  # 2**64
+        "9223372036854775809",
+        "100000000000000000001",
+        "1000000000000000000000",  # 1e21 written as digits (its canonical form is 1e+21)
         "123456789012345678901234567890",
         "-123456789012345678901234567890",
+        "1" + "0" * 400,
         "1" + "0" * 5000,
         "[9223372036854775808]",
         '{"time_ns":9223372036854775808}',
     ],
-    ids=["max+1", "min-1", "2**64", "30-digits", "-30-digits", "5001-digits", "in-array", "in-object"],
+    ids=[
+        "max+1",
+        "min-1",
+        "2**64",
+        "max+2",
+        "1e20+1",
+        "1e21-as-digits",
+        "30-digits",
+        "-30-digits",
+        "401-digits",
+        "5001-digits",
+        "in-array",
+        "in-object",
+    ],
 )
 def test_strict_loads_rejects_integers_beyond_64_bits(text: str) -> None:
+    """No integer beyond 64 bits exists in GIE JSON.
+
+    The only longer digit strings a reader may meet are canonical renderings of integral
+    doubles (see the next test); none of these literals is one, so each would have to be
+    rounded and must be refused instead.
+    """
     with pytest.raises(CanonicalEncodingError):
         strict_loads(text)
+
+
+@pytest.mark.requirement("S00-ASG-20", "S00-ASG-22")
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("10000000000000000000", 1e19),
+        ("-10000000000000000000", -1e19),
+        ("100000000000000000000", 1e20),
+        ("9223372036854776000", 9223372036854775808.0),  # the double 2**63
+        ("-9223372036854776000", -9223372036854775808.0),  # the double -2**63, not the int INT64_MIN
+        ("12345678901234567000", 1.2345678901234567e19),
+        ("295147905179352830000", 295147905179352830000.0),  # RFC 8785 Appendix B (2**68)
+        ("999999999999999900000", 9.999999999999999e20),
+    ],
+)
+def test_strict_loads_reads_canonical_integral_doubles_beyond_int64_as_floats(
+    text: str, expected: float
+) -> None:
+    """RFC 8785 writes an integral double below 1e21 as plain digits; the reader must take it back."""
+    assert canonical_dumps(expected) == text  # the literal is the canonical form of that double
+    parsed = strict_loads(text)
+    assert type(parsed) is float
+    assert parsed == expected
+    assert canonical_dumps(parsed) == text
 
 
 @pytest.mark.requirement("S00-ASG-20", "S00-ASG-24")
@@ -945,11 +1021,6 @@ def _json_values(floats: st.SearchStrategy[float]) -> st.SearchStrategy[Any]:
 _FINITE_FLOATS = st.floats(allow_nan=False, allow_infinity=False)
 
 
-def _is_written_as_an_integer_beyond_int64(value: float) -> bool:
-    """Doubles that ECMAScript formatting writes as an integer literal of more than 64 bits."""
-    return 2.0**63 <= abs(value) < 1e21
-
-
 def _assert_round_trip(value: Any) -> None:
     text = canonical_dumps(value)
     parsed = strict_loads(text)
@@ -963,36 +1034,52 @@ def _assert_round_trip(value: Any) -> None:
 @pytest.mark.requirement("S00-ASG-20", "S00-ASG-22")
 @PROPERTY
 @example(1e20)
-@example({"metric": [9.3e18, -1e19]})
+@example(9223372036854775808.0)
+@example(-9223372036854775808.0)
+@example({"metric": [9.3e18, -1e19, 1.2345678901234567e19, 9.999999999999999e20, 1e21]})
+@example([2**63 - 1, -(2**63), 9007199254740993, 9007199254740993.0, 0.1, -0.0, 5e-324])
 @given(_json_values(_FINITE_FLOATS))
 def test_round_trip_property_for_all_json_values(value: Any) -> None:
     """``strict_loads(canonical_dumps(x)) == x`` for every JSON value with finite floats."""
     _assert_round_trip(value)
 
 
+#: Integral doubles from 2**63 up to (not including) 1e21: RFC 8785 writes them as digit strings
+#: longer than any 64-bit integer.  Random floats almost never land here, so the window gets
+#: its own strategy.
+_LARGE_INTEGRAL_DOUBLES = st.floats(min_value=2.0**63, max_value=1e21, exclude_max=True).flatmap(
+    lambda value: st.sampled_from([value, -value])
+)
+
+
 @pytest.mark.requirement("S00-ASG-20", "S00-ASG-22")
 @PROPERTY
-@given(_json_values(_FINITE_FLOATS.filter(lambda value: not _is_written_as_an_integer_beyond_int64(value))))
-def test_round_trip_property_outside_the_large_integral_float_window(value: Any) -> None:
-    """The same property on the part of the domain not affected by the 2**63..1e21 float defect.
-
-    This keeps the rest of the domain verified while
-    ``test_round_trip_property_for_all_json_values`` documents the defect.
-    """
-    _assert_round_trip(value)
-
-
-@pytest.mark.requirement("S00-ASG-20", "S00-ASG-22")
-@pytest.mark.parametrize("value", [9223372036854775808.0, 1e20, -1e19])
-def test_integral_floats_beyond_int64_can_be_read_back(value: float) -> None:
+@example(9223372036854775808.0)
+@example(1e19)
+@example(1e20)
+@example(-1.2345678901234567e19)
+@example(9.999999999999999e20)
+@given(_LARGE_INTEGRAL_DOUBLES)
+def test_integral_doubles_beyond_int64_round_trip(value: float) -> None:
     """Whatever ``canonical_dumps`` writes for a finite double, ``strict_loads`` must read back."""
-    parsed = strict_loads(canonical_dumps(value))
-    assert float(parsed) == value
+    text = canonical_dumps(value)
+    assert re.fullmatch(r"-?[1-9][0-9]{18,20}", text), text  # plain digits, no exponent
+    parsed = strict_loads(text)
+    assert type(parsed) is float
+    assert struct.pack(">d", parsed) == struct.pack(">d", value)
+    assert canonical_dumps(parsed) == text
+    assert strict_loads(canonical_dumps({"x": [value]})) == {"x": [value]}
 
 
 @pytest.mark.requirement("S00-ASG-20", "S00-ASG-22")
 @PROPERTY
-@given(_FINITE_FLOATS.filter(lambda value: not _is_written_as_an_integer_beyond_int64(value)))
+@example(0.0)
+@example(-0.0)
+@example(5e-324)
+@example(1.7976931348623157e308)
+@example(9007199254740993.0)
+@example(9223372036854774784.0)
+@given(_FINITE_FLOATS)
 def test_float_round_trip_is_bit_exact_up_to_the_sign_of_zero(value: float) -> None:
     parsed = float(strict_loads(canonical_dumps(value)))
     if value == 0:
@@ -1341,6 +1428,13 @@ def _exact_decimal(integer: int, exponent: int) -> Decimal:
     """Exact Decimal equal to ``integer * 10**exponent`` (built from digits, no context arithmetic)."""
     digits = tuple(int(character) for character in str(abs(integer)))
     return Decimal((1 if integer < 0 else 0, digits, exponent))
+
+
+@pytest.mark.requirement("S00-ASG-20")
+def test_decimal_range_constants() -> None:
+    assert canonical_module.MAX_DECIMAL_INTEGER_DIGITS == 18
+    assert canonical_module.MAX_DECIMAL_FRACTION_DIGITS == 12
+    assert decimal_to_str(Decimal("9" * 18 + "." + "9" * 12)) == "9" * 18 + "." + "9" * 12
 
 
 @pytest.mark.requirement("S00-ASG-20")

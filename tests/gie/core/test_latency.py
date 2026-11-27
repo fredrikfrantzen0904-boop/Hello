@@ -21,6 +21,8 @@ import dataclasses
 import json
 import time
 from collections.abc import Sequence
+from decimal import Decimal
+from typing import Any
 
 import pytest
 from hypothesis import example, given, settings
@@ -33,6 +35,7 @@ from gie.core.latency import LatencyRecorder, LatencySummary, nearest_rank
 _PROPERTY = settings(derandomize=True, database=None, deadline=None, max_examples=250)
 
 _ONE_TO_HUNDRED = list(range(1, 101))
+_ONE_TO_THOUSAND = list(range(1, 1001))
 _FIVE = [15, 20, 35, 40, 50]
 
 _SUMMARY_FIELDS = {
@@ -143,6 +146,14 @@ def _recorded(samples: Sequence[int], capacity: int | None = None, name: str = "
         (_ONE_TO_HUNDRED, 99, 99),
         (_ONE_TO_HUNDRED, 99.5, 100),
         (_ONE_TO_HUNDRED, 100, 100),
+        # n = 1000 with the samples 1..1000: rank = ceil(10 * p).
+        (_ONE_TO_THOUSAND, 0.1, 1),
+        (_ONE_TO_THOUSAND, 0.11, 2),
+        (_ONE_TO_THOUSAND, 50, 500),
+        (_ONE_TO_THOUSAND, 99, 990),
+        (_ONE_TO_THOUSAND, 99.9, 999),
+        (_ONE_TO_THOUSAND, 99.91, 1000),
+        (_ONE_TO_THOUSAND, 100, 1000),
     ],
 )
 def test_nearest_rank_matches_hand_computed_examples(
@@ -163,6 +174,29 @@ def test_whole_percentiles_use_the_exact_nearest_rank() -> None:
             if reported != _exact_rank(percentile, size):
                 wrong.append((size, percentile, reported, _exact_rank(percentile, size)))
     assert wrong == [], f"(n, percentile, reported, nearest rank): {wrong[:12]}"
+
+
+@pytest.mark.requirement("G03-10")
+def test_percentiles_with_one_decimal_use_the_exact_nearest_rank() -> None:
+    # A percentile written as k / 10 (0.1, 0.2, ..., 99.9, 100.0) means exactly that decimal number:
+    # with the samples 1..n the result must be ceil(k * n / 1000), e.g. p99.9 of 1000 samples is the
+    # 999th sample, not the 1000th.
+    wrong: list[tuple[int, float, int, int]] = []
+    for size in (1, 10, 100, 250, 1000, 2000):
+        samples = list(range(1, size + 1))
+        for tenths in range(1, 1001):
+            reported = nearest_rank(samples, tenths / 10)
+            expected = -(-tenths * size // 1000)
+            if reported != expected:
+                wrong.append((size, tenths / 10, reported, expected))
+    assert wrong == [], f"(n, percentile, reported, nearest rank): {wrong[:12]}"
+
+
+@pytest.mark.requirement("G03-10")
+@pytest.mark.parametrize("percentile", [True, False, "50", b"50", None, [50], (50,), {"p": 50}])
+def test_nearest_rank_rejects_percentiles_that_are_not_numbers(percentile: Any) -> None:
+    with pytest.raises(ContractValidationError):
+        nearest_rank(_ONE_TO_HUNDRED, percentile)
 
 
 @pytest.mark.requirement("G03-10")
@@ -359,6 +393,29 @@ def test_a_negative_duration_is_rejected_and_not_recorded(duration_ns: int) -> N
     assert recorder.summary() == before
     recorder.record(40)  # still usable
     assert recorder.summary().max_ns == 40
+
+
+@pytest.mark.requirement("G03-10", "G03-11")
+@pytest.mark.parametrize(
+    "duration_ns",
+    [1.5, 1.0, 0.0, float("nan"), float("inf"), float("-inf"), True, False, "5", b"5", None, [5], Decimal(5)],
+)
+def test_a_duration_that_is_not_an_int_of_nanoseconds_is_rejected_and_not_recorded(duration_ns: Any) -> None:
+    # Durations are int nanoseconds; NaN and infinities are invalid everywhere; bool is not an int
+    # here.  Accepting such a value would poison min, max and mean for the rest of the run.
+    empty = LatencyRecorder("fixture")
+    with pytest.raises(ContractValidationError):
+        empty.record(duration_ns)
+    assert empty.count == 0
+    assert empty.summary() == LatencyRecorder("fixture").summary()
+
+    recorder = _recorded([10, 20, 30])
+    before = recorder.summary()
+    with pytest.raises(ContractValidationError):
+        recorder.record(duration_ns)
+    assert recorder.count == 3
+    assert recorder.summary() == before
+    assert json.loads(json.dumps(recorder.summary().to_dict(), allow_nan=False)) == before.to_dict()
 
 
 @pytest.mark.requirement("G03-10", "G03-11")
