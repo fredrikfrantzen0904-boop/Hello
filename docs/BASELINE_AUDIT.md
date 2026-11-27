@@ -64,8 +64,11 @@ not findings of this audit (see `specifications/baselines/claims.yaml`, decision
    python tools\audit\gie_baseline_audit.py audit --root D:\ftmo_eurusd --out C:\gie_audit\run1 --processes
    ```
 
-   It only reads; it writes nothing under `D:\ftmo_eurusd`, uses no network, and emits no file
-   contents or credentials (details and limits: `tools/audit/README.md`).
+   It only reads; it writes nothing under `D:\ftmo_eurusd`, uses no network and emits no
+   credentials. It copies no file contents except three narrow kinds the inventory needs: package
+   names and version specifiers from dependency files, the column names of CSV / TSV files, and
+   Python version strings. Files with secret-like names, files in excluded directories and files
+   above the size cap are listed but not hashed (details and limits: `tools/audit/README.md`).
 2. The owner reviews the output folder and uploads it to this session.
 3. The coordinator writes the inventory (languages, processes, data, tests, hardware, broker
    interfaces) from `inventory.json` / `processes.json`, identifies the baseline artifacts, and the

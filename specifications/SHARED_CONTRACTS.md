@@ -388,6 +388,11 @@ increasing by exactly 1 per record of that stream:
 | `OrderEvent` (`*_REQUESTED`) | `order_event/<producer>` | `receive_time_ns` | 80 |
 | `ModelVersion` | `model_version/<producer>` | `status_time_ns` | 90 |
 
+An order-event stream holds requests and reports.  They have different ranks because a broker
+report is an *input* of a run while a request is one of GIE's own records; `EventKey` is therefore
+not monotonic in `seq` within an order-event stream, and the order of the stream itself is `seq`
+(the order of the run is the journal, section 6.2).
+
 Within a stream the ordering time MUST be non-decreasing.  A new shared contract obtains its
 stream prefix, ordering-time field and rank in `gie.contracts.ordering.STREAMS` when the coordinator
 adds it.  `gie.core.ordering.SequenceTracker` classifies each arrival: next in sequence - accepted;

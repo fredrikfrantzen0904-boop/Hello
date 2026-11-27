@@ -857,7 +857,7 @@ def build(evidence_dir: Path, out: Path, reviewed_commit: str, allow_dirty: bool
         [
             f"languages, processes, data, tests, hardware, broker interfaces of {esc(tree)}",
             status_text("blocked"),
-            "read-only audit tool for the owner to run: tools/audit/gie_baseline_audit.py (standard library only, no network, no file contents, no credentials; tested to leave the audited tree byte-identical)",
+            "read-only audit tool for the owner to run: tools/audit/gie_baseline_audit.py (standard library only, no network, no credentials, no file contents except package names and versions, CSV column names and Python version strings; tested to leave the audited tree byte-identical)",
         ],
         [
             "baseline regression (GCE-B, Round 1, Round 2, Cavemen trade sets)",
