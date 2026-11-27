@@ -942,24 +942,27 @@ def test_every_failing_callback_stops_its_own_advance_only() -> None:
 #   ("call_at", delay, child_delays)  register a timer at now + delay whose callback registers one
 #                                     further timer per child delay (relative to its own due time)
 #   ("cancel", index)                 cancel the index-th handle issued so far (modulo their number)
+#   ("cancel_unknown", number)        cancel a handle that has not been issued so far (must be ignored)
 #   ("advance", delta)                advance the clock by delta
 _Script = Sequence[tuple[Any, ...]]
 
 _OPERATIONS = st.one_of(
     st.tuples(st.just("call_at"), st.integers(0, 40), st.lists(st.integers(0, 25), max_size=3).map(tuple)),
     st.tuples(st.just("cancel"), st.integers(0, 60)),
+    st.tuples(st.just("cancel_unknown"), st.integers(0, 60)),
     st.tuples(st.just("advance"), st.integers(0, 50)),
 )
 _SCRIPTS = st.lists(_OPERATIONS, max_size=40)
 
 _EXAMPLE_SCRIPT: list[tuple[Any, ...]] = [
-    ("call_at", 5, (0, 3, 30)),
-    ("call_at", 5, ()),
-    ("call_at", 8, (0,)),
-    ("call_at", 2, ()),
-    ("cancel", 3),
+    ("call_at", 5, (0, 3, 30)),  # operation 0
+    ("call_at", 5, ()),  # operation 1
+    ("cancel_unknown", 0),  # a handle nobody holds yet - possibly the next one to be issued
+    ("call_at", 8, (0,)),  # operation 3
+    ("call_at", 2, ()),  # operation 4, the fourth handle
+    ("cancel", 3),  # cancels the fourth handle
     ("advance", 10),
-    ("cancel", 0),
+    ("cancel", 0),  # the first handle has fired by now
     ("advance", 0),
     ("advance", 50),
 ]
@@ -986,6 +989,12 @@ def _drive(start_ns: int, script: _Script) -> list[tuple[Any, ...]]:
         elif kind == "cancel":
             if handles:
                 clock.cancel(handles[amount % len(handles)])
+        elif kind == "cancel_unknown":
+            never_issued = amount
+            while never_issued in handles:
+                never_issued += 1
+            clock.cancel(never_issued)
+            clock.cancel(-1 - amount)
         else:
             trace.append(("advanced", clock.advance_by(amount)))
         trace.append(
@@ -1020,6 +1029,8 @@ def _reference(start_ns: int, script: _Script) -> list[tuple[Any, ...]]:
         elif kind == "cancel":
             if timers:
                 timers[amount % len(timers)].pending = False
+        elif kind == "cancel_unknown":
+            pass  # documented as ignored: no effect on any timer, now or later
         else:
             target = now + amount
             while True:
@@ -1045,14 +1056,16 @@ def _reference(start_ns: int, script: _Script) -> list[tuple[Any, ...]]:
 @pytest.mark.acceptance("S00-ACC-03")
 def test_the_example_script_exercises_nested_scheduling_and_cancellation() -> None:
     # Guards the property tests below against being vacuous: this script fires timers, fires
-    # timers scheduled by callbacks, cancels a pending timer and leaves one timer pending.
+    # timers scheduled by callbacks, cancels a pending timer, cancels a handle that was never
+    # issued and cancels one that has already fired.  Timers are labelled by the position of the
+    # operation that registered them; children append their own position.
     trace = _drive(START, _EXAMPLE_SCRIPT)
     fired = [entry[1] for entry in trace if entry[0] == "fired"]
     # Hand-derived: at +5 timers 0 and 1 (registered first) run before the child (0, 0) that timer 0
-    # registered for the same instant; at +8 timer 2 runs before (0, 1) and its own child (2, 0),
+    # registered for the same instant; at +8 timer 3 runs before (0, 1) and its own child (3, 0),
     # which were registered in that order; (0, 2) is due at +35 and fires in the last advance.
-    assert fired == [(0,), (1,), (0, 0), (2,), (0, 1), (2, 0), (0, 2)]
-    assert (3,) not in fired  # cancelled before it was due
+    assert fired == [(0,), (1,), (0, 0), (3,), (0, 1), (3, 0), (0, 2)]
+    assert (4,) not in fired  # cancelled before it was due
     assert trace[-1] == ("state", START + 60, 60, 0, None)
     assert trace == _reference(START, _EXAMPLE_SCRIPT)
 
@@ -1253,11 +1266,44 @@ def test_system_clock_monotonic_scale_is_the_running_maximum_of_its_readings(rea
     assert [clock.monotonic_ns() for _ in readings] == list(itertools.accumulate(readings, max))
 
 
+class _YieldingInt(int):
+    """SYNTHETIC FIXTURE reading that gives other threads a chance to run whenever it is compared.
+
+    A clock has to compare a new reading with the last value it handed out before it stores the
+    reading.  Yielding inside that comparison puts a thread switch exactly between "check" and
+    "store", which is where an unsynchronised clock goes wrong; a clock that serialises its
+    readers is unaffected.  The value itself is an ordinary ``int``.
+    """
+
+    __hash__ = int.__hash__
+
+    def __lt__(self, other: int) -> bool:
+        result = int.__lt__(self, other)
+        time.sleep(0)
+        return result
+
+    def __le__(self, other: int) -> bool:
+        result = int.__le__(self, other)
+        time.sleep(0)
+        return result
+
+    def __gt__(self, other: int) -> bool:
+        result = int.__gt__(self, other)
+        time.sleep(0)
+        return result
+
+    def __ge__(self, other: int) -> bool:
+        result = int.__ge__(self, other)
+        time.sleep(0)
+        return result
+
+
 class _SawtoothSource:
     """SYNTHETIC FIXTURE time source for the thread tests (thread-safe, deterministic by call index).
 
     The n-th reading is ``base + 10 * n - 25 * (7919 * n % 13)``: it rises on average but steps
-    backwards by up to 300 ns again and again, like an unstable operating-system clock.
+    backwards by up to 300 ns again and again, like an unstable operating-system clock.  Readings
+    are handed out as :class:`_YieldingInt` so that threads interleave at the critical point.
     """
 
     def __init__(self, base: int) -> None:
@@ -1272,10 +1318,10 @@ class _SawtoothSource:
         with self._lock:
             index = self.calls
             self.calls += 1
-        return self.reading(index)
+        return _YieldingInt(self.reading(index))
 
 
-def _hammer(read: Callable[[], int], threads: int = 8, reads: int = 2_500) -> list[list[int]]:
+def _hammer(read: Callable[[], int], threads: int = 8, reads: int = 300) -> list[list[int]]:
     """Call *read* from several threads at once; return what each thread saw, in its own order."""
     barrier = threading.Barrier(threads)
     seen: list[list[int]] = [[] for _ in range(threads)]
