@@ -1,0 +1,844 @@
+schema_version: 1
+title: GIE acceptance test register
+description: 'One entry per acceptance requirement of the session briefs. ''status'' is maintained by tools/gie_registers.py
+  from recorded pytest evidence: planned (no tests yet), passing (all marked tests passed), failing (any marked
+  test failed or errored), blocked (cannot be executed; see blockers), partial (tests pass but part of the scope
+  is blocked or skipped). It is never set by hand to passing.'
+status_values:
+- planned
+- passing
+- failing
+- blocked
+- partial
+acceptance_tests:
+- id: AT-S00-ACC-01
+  requirement: S00-ACC-01
+  session: S00
+  title: Contract round-trip tests
+  verification: pytest tests marked @pytest.mark.acceptance("S00-ACC-01")
+  test_modules:
+  - tests/gie/contracts/test_roundtrip.py
+  - tests/gie/contracts/test_roundtrip_property.py
+  - tests/gie/contracts/test_golden.py
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S00-ACC-02
+  requirement: S00-ACC-02
+  session: S00
+  title: Contract compatibility tests
+  verification: pytest tests marked @pytest.mark.acceptance("S00-ACC-02")
+  test_modules:
+  - tests/gie/contracts/test_compatibility.py
+  - tests/gie/contracts/test_schema_lock.py
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S00-ACC-03
+  requirement: S00-ACC-03
+  session: S00
+  title: Replay clock
+  verification: pytest tests marked @pytest.mark.acceptance("S00-ACC-03")
+  test_modules:
+  - tests/gie/core/test_clock.py
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S00-ACC-04
+  requirement: S00-ACC-04
+  session: S00
+  title: Paper-only routing lock
+  verification: pytest tests marked @pytest.mark.acceptance("S00-ACC-04")
+  test_modules:
+  - tests/gie/core/test_routing_lock.py
+  - tests/gie/tools/test_check_live_lock.py
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S00-ACC-05
+  requirement: S00-ACC-05
+  session: S00
+  title: Baseline regression
+  verification: pytest tests marked @pytest.mark.acceptance("S00-ACC-05")
+  test_modules:
+  - tests/gie/baseline/test_baseline_regression.py
+  - tests/gie/tools/test_baseline_freeze.py
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S00-ACC-06
+  requirement: S00-ACC-06
+  session: S00
+  title: No production changes
+  verification: pytest tests marked @pytest.mark.acceptance("S00-ACC-06")
+  test_modules:
+  - tests/gie/tools/test_protected_paths.py
+  - tests/gie/tools/test_baseline_audit.py
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S01-ACC-01
+  requirement: S01-ACC-01
+  session: S01
+  title: Out-of-order tick tests
+  verification: pytest tests marked @pytest.mark.acceptance("S01-ACC-01")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S01-ACC-02
+  requirement: S01-ACC-02
+  session: S01
+  title: Duplicate tick tests
+  verification: pytest tests marked @pytest.mark.acceptance("S01-ACC-02")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S01-ACC-03
+  requirement: S01-ACC-03
+  session: S01
+  title: Missing tick tests
+  verification: pytest tests marked @pytest.mark.acceptance("S01-ACC-03")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S01-ACC-04
+  requirement: S01-ACC-04
+  session: S01
+  title: Stale tick tests
+  verification: pytest tests marked @pytest.mark.acceptance("S01-ACC-04")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S01-ACC-05
+  requirement: S01-ACC-05
+  session: S01
+  title: DST tests
+  verification: pytest tests marked @pytest.mark.acceptance("S01-ACC-05")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S01-ACC-06
+  requirement: S01-ACC-06
+  session: S01
+  title: Holiday tests
+  verification: pytest tests marked @pytest.mark.acceptance("S01-ACC-06")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S01-ACC-07
+  requirement: S01-ACC-07
+  session: S01
+  title: Rollover tests
+  verification: pytest tests marked @pytest.mark.acceptance("S01-ACC-07")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S01-ACC-08
+  requirement: S01-ACC-08
+  session: S01
+  title: Deterministic replay
+  verification: pytest tests marked @pytest.mark.acceptance("S01-ACC-08")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S01-ACC-09
+  requirement: S01-ACC-09
+  session: S01
+  title: Throughput distributions
+  verification: pytest tests marked @pytest.mark.acceptance("S01-ACC-09")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S01-ACC-10
+  requirement: S01-ACC-10
+  session: S01
+  title: Latency distributions
+  verification: pytest tests marked @pytest.mark.acceptance("S01-ACC-10")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S02-ACC-01
+  requirement: S02-ACC-01
+  session: S02
+  title: Prefix invariance
+  verification: pytest tests marked @pytest.mark.acceptance("S02-ACC-01")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S02-ACC-02
+  requirement: S02-ACC-02
+  session: S02
+  title: Exact event deduplication
+  verification: pytest tests marked @pytest.mark.acceptance("S02-ACC-02")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S02-ACC-03
+  requirement: S02-ACC-03
+  session: S02
+  title: Inactive vs missing evidence
+  verification: pytest tests marked @pytest.mark.acceptance("S02-ACC-03")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S02-ACC-04
+  requirement: S02-ACC-04
+  session: S02
+  title: Baseline parity
+  verification: pytest tests marked @pytest.mark.acceptance("S02-ACC-04")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S02-ACC-05
+  requirement: S02-ACC-05
+  session: S02
+  title: No five-minute notification delay
+  verification: pytest tests marked @pytest.mark.acceptance("S02-ACC-05")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S03-ACC-01
+  requirement: S03-ACC-01
+  session: S03
+  title: No future data leakage
+  verification: pytest tests marked @pytest.mark.acceptance("S03-ACC-01")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S03-ACC-02
+  requirement: S03-ACC-02
+  session: S03
+  title: No revised release leakage
+  verification: pytest tests marked @pytest.mark.acceptance("S03-ACC-02")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S03-ACC-03
+  requirement: S03-ACC-03
+  session: S03
+  title: Delayed-feed rejection
+  verification: pytest tests marked @pytest.mark.acceptance("S03-ACC-03")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S03-ACC-04
+  requirement: S03-ACC-04
+  session: S03
+  title: Missing-source degradation
+  verification: pytest tests marked @pytest.mark.acceptance("S03-ACC-04")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S03-ACC-05
+  requirement: S03-ACC-05
+  session: S03
+  title: Incremental out-of-period value versus gold-only
+  verification: pytest tests marked @pytest.mark.acceptance("S03-ACC-05")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S04-ACC-01
+  requirement: S04-ACC-01
+  session: S04
+  title: Purged chronological splits
+  verification: pytest tests marked @pytest.mark.acceptance("S04-ACC-01")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S04-ACC-02
+  requirement: S04-ACC-02
+  session: S04
+  title: Calibration by setup and session
+  verification: pytest tests marked @pytest.mark.acceptance("S04-ACC-02")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S04-ACC-03
+  requirement: S04-ACC-03
+  session: S04
+  title: Leakage mutation tests
+  verification: pytest tests marked @pytest.mark.acceptance("S04-ACC-03")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S04-ACC-04
+  requirement: S04-ACC-04
+  session: S04
+  title: Cost stress
+  verification: pytest tests marked @pytest.mark.acceptance("S04-ACC-04")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S04-ACC-05
+  requirement: S04-ACC-05
+  session: S04
+  title: Model inference latency
+  verification: pytest tests marked @pytest.mark.acceptance("S04-ACC-05")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S04-ACC-06
+  requirement: S04-ACC-06
+  session: S04
+  title: Reproducibility
+  verification: pytest tests marked @pytest.mark.acceptance("S04-ACC-06")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S05-ACC-01
+  requirement: S05-ACC-01
+  session: S05
+  title: No future candidate ranking
+  verification: pytest tests marked @pytest.mark.acceptance("S05-ACC-01")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S05-ACC-02
+  requirement: S05-ACC-02
+  session: S05
+  title: Expiry tests
+  verification: pytest tests marked @pytest.mark.acceptance("S05-ACC-02")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S05-ACC-03
+  requirement: S05-ACC-03
+  session: S05
+  title: Contradiction tests
+  verification: pytest tests marked @pytest.mark.acceptance("S05-ACC-03")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S05-ACC-04
+  requirement: S05-ACC-04
+  session: S05
+  title: Duplicate plan handling
+  verification: pytest tests marked @pytest.mark.acceptance("S05-ACC-04")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S05-ACC-05
+  requirement: S05-ACC-05
+  session: S05
+  title: Positive expectancy gate
+  verification: pytest tests marked @pytest.mark.acceptance("S05-ACC-05")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S05-ACC-06
+  requirement: S05-ACC-06
+  session: S05
+  title: Session coverage
+  verification: pytest tests marked @pytest.mark.acceptance("S05-ACC-06")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S05-ACC-07
+  requirement: S05-ACC-07
+  session: S05
+  title: Explainability
+  verification: pytest tests marked @pytest.mark.acceptance("S05-ACC-07")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S06-ACC-01
+  requirement: S06-ACC-01
+  session: S06
+  title: Burst replay
+  verification: pytest tests marked @pytest.mark.acceptance("S06-ACC-01")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S06-ACC-02
+  requirement: S06-ACC-02
+  session: S06
+  title: Gap/slippage
+  verification: pytest tests marked @pytest.mark.acceptance("S06-ACC-02")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S06-ACC-03
+  requirement: S06-ACC-03
+  session: S06
+  title: Stale tick
+  verification: pytest tests marked @pytest.mark.acceptance("S06-ACC-03")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S06-ACC-04
+  requirement: S06-ACC-04
+  session: S06
+  title: Slow-model isolation
+  verification: pytest tests marked @pytest.mark.acceptance("S06-ACC-04")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S06-ACC-05
+  requirement: S06-ACC-05
+  session: S06
+  title: No stop widening
+  verification: pytest tests marked @pytest.mark.acceptance("S06-ACC-05")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S06-ACC-06
+  requirement: S06-ACC-06
+  session: S06
+  title: p99/max latency
+  verification: pytest tests marked @pytest.mark.acceptance("S06-ACC-06")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S06-ACC-07
+  requirement: S06-ACC-07
+  session: S06
+  title: Profit giveback comparisons
+  verification: pytest tests marked @pytest.mark.acceptance("S06-ACC-07")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S06-ACC-08
+  requirement: S06-ACC-08
+  session: S06
+  title: Premature-exit comparisons
+  verification: pytest tests marked @pytest.mark.acceptance("S06-ACC-08")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S07-ACC-01
+  requirement: S07-ACC-01
+  session: S07
+  title: Duplicate messages
+  verification: pytest tests marked @pytest.mark.acceptance("S07-ACC-01")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S07-ACC-02
+  requirement: S07-ACC-02
+  session: S07
+  title: Partial fill races
+  verification: pytest tests marked @pytest.mark.acceptance("S07-ACC-02")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S07-ACC-03
+  requirement: S07-ACC-03
+  session: S07
+  title: Rejected orders
+  verification: pytest tests marked @pytest.mark.acceptance("S07-ACC-03")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S07-ACC-04
+  requirement: S07-ACC-04
+  session: S07
+  title: Reconnect
+  verification: pytest tests marked @pytest.mark.acceptance("S07-ACC-04")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S07-ACC-05
+  requirement: S07-ACC-05
+  session: S07
+  title: Crash recovery
+  verification: pytest tests marked @pytest.mark.acceptance("S07-ACC-05")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S07-ACC-06
+  requirement: S07-ACC-06
+  session: S07
+  title: Stale plans
+  verification: pytest tests marked @pytest.mark.acceptance("S07-ACC-06")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S07-ACC-07
+  requirement: S07-ACC-07
+  session: S07
+  title: No real orders
+  verification: pytest tests marked @pytest.mark.acceptance("S07-ACC-07")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S07-ACC-08
+  requirement: S07-ACC-08
+  session: S07
+  title: Deterministic replay
+  verification: pytest tests marked @pytest.mark.acceptance("S07-ACC-08")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S08-ACC-01
+  requirement: S08-ACC-01
+  session: S08
+  title: Boundary tests at -2%
+  verification: pytest tests marked @pytest.mark.acceptance("S08-ACC-01")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S08-ACC-02
+  requirement: S08-ACC-02
+  session: S08
+  title: Boundary tests at proposed -1.75%
+  verification: pytest tests marked @pytest.mark.acceptance("S08-ACC-02")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S08-ACC-03
+  requirement: S08-ACC-03
+  session: S08
+  title: Boundary tests at -3%
+  verification: pytest tests marked @pytest.mark.acceptance("S08-ACC-03")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S08-ACC-04
+  requirement: S08-ACC-04
+  session: S08
+  title: Boundary tests at +5%
+  verification: pytest tests marked @pytest.mark.acceptance("S08-ACC-04")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S08-ACC-05
+  requirement: S08-ACC-05
+  session: S08
+  title: Exact-floor no new risk
+  verification: pytest tests marked @pytest.mark.acceptance("S08-ACC-05")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S08-ACC-06
+  requirement: S08-ACC-06
+  session: S08
+  title: Simultaneous reservations atomic
+  verification: pytest tests marked @pytest.mark.acceptance("S08-ACC-06")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S08-ACC-07
+  requirement: S08-ACC-07
+  session: S08
+  title: Gap stress
+  verification: pytest tests marked @pytest.mark.acceptance("S08-ACC-07")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S08-ACC-08
+  requirement: S08-ACC-08
+  session: S08
+  title: Other-account-position handling
+  verification: pytest tests marked @pytest.mark.acceptance("S08-ACC-08")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S09-ACC-01
+  requirement: S09-ACC-01
+  session: S09
+  title: Active model immutable during training
+  verification: pytest tests marked @pytest.mark.acceptance("S09-ACC-01")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S09-ACC-02
+  requirement: S09-ACC-02
+  session: S09
+  title: Resource isolation
+  verification: pytest tests marked @pytest.mark.acceptance("S09-ACC-02")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S09-ACC-03
+  requirement: S09-ACC-03
+  session: S09
+  title: Leakage tests
+  verification: pytest tests marked @pytest.mark.acceptance("S09-ACC-03")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S09-ACC-04
+  requirement: S09-ACC-04
+  session: S09
+  title: Promotion rejection for weak evidence
+  verification: pytest tests marked @pytest.mark.acceptance("S09-ACC-04")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S09-ACC-05
+  requirement: S09-ACC-05
+  session: S09
+  title: Rollback
+  verification: pytest tests marked @pytest.mark.acceptance("S09-ACC-05")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S09-ACC-06
+  requirement: S09-ACC-06
+  session: S09
+  title: Reproducibility
+  verification: pytest tests marked @pytest.mark.acceptance("S09-ACC-06")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S10-ACC-01
+  requirement: S10-ACC-01
+  session: S10
+  title: Deterministic replay
+  verification: pytest tests marked @pytest.mark.acceptance("S10-ACC-01")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S10-ACC-02
+  requirement: S10-ACC-02
+  session: S10
+  title: No lookahead
+  verification: pytest tests marked @pytest.mark.acceptance("S10-ACC-02")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S10-ACC-03
+  requirement: S10-ACC-03
+  session: S10
+  title: Tick ordering
+  verification: pytest tests marked @pytest.mark.acceptance("S10-ACC-03")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S10-ACC-04
+  requirement: S10-ACC-04
+  session: S10
+  title: Costs
+  verification: pytest tests marked @pytest.mark.acceptance("S10-ACC-04")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S10-ACC-05
+  requirement: S10-ACC-05
+  session: S10
+  title: Overlapping positions
+  verification: pytest tests marked @pytest.mark.acceptance("S10-ACC-05")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S10-ACC-06
+  requirement: S10-ACC-06
+  session: S10
+  title: Daily denominator checks
+  verification: pytest tests marked @pytest.mark.acceptance("S10-ACC-06")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S10-ACC-07
+  requirement: S10-ACC-07
+  session: S10
+  title: Purged walk-forward
+  verification: pytest tests marked @pytest.mark.acceptance("S10-ACC-07")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S10-ACC-08
+  requirement: S10-ACC-08
+  session: S10
+  title: Block bootstrap
+  verification: pytest tests marked @pytest.mark.acceptance("S10-ACC-08")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S10-ACC-09
+  requirement: S10-ACC-09
+  session: S10
+  title: Multiplicity
+  verification: pytest tests marked @pytest.mark.acceptance("S10-ACC-09")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S11-ACC-01
+  requirement: S11-ACC-01
+  session: S11
+  title: Replay UI with real event payloads
+  verification: pytest tests marked @pytest.mark.acceptance("S11-ACC-01")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S11-ACC-02
+  requirement: S11-ACC-02
+  session: S11
+  title: Stale/disconnect state
+  verification: pytest tests marked @pytest.mark.acceptance("S11-ACC-02")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S11-ACC-03
+  requirement: S11-ACC-03
+  session: S11
+  title: No hardcoded metrics
+  verification: pytest tests marked @pytest.mark.acceptance("S11-ACC-03")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S11-ACC-04
+  requirement: S11-ACC-04
+  session: S11
+  title: No blocking of reflex
+  verification: pytest tests marked @pytest.mark.acceptance("S11-ACC-04")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S11-ACC-05
+  requirement: S11-ACC-05
+  session: S11
+  title: Existing tabs unaffected
+  verification: pytest tests marked @pytest.mark.acceptance("S11-ACC-05")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S12-ACC-01
+  requirement: S12-ACC-01
+  session: S12
+  title: Full integration replay
+  verification: pytest tests marked @pytest.mark.acceptance("S12-ACC-01")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S12-ACC-02
+  requirement: S12-ACC-02
+  session: S12
+  title: Restart/disconnect
+  verification: pytest tests marked @pytest.mark.acceptance("S12-ACC-02")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S12-ACC-03
+  requirement: S12-ACC-03
+  session: S12
+  title: Stale feed
+  verification: pytest tests marked @pytest.mark.acceptance("S12-ACC-03")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S12-ACC-04
+  requirement: S12-ACC-04
+  session: S12
+  title: Burst load
+  verification: pytest tests marked @pytest.mark.acceptance("S12-ACC-04")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S12-ACC-05
+  requirement: S12-ACC-05
+  session: S12
+  title: Risk races
+  verification: pytest tests marked @pytest.mark.acceptance("S12-ACC-05")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S12-ACC-06
+  requirement: S12-ACC-06
+  session: S12
+  title: Overnight reset
+  verification: pytest tests marked @pytest.mark.acceptance("S12-ACC-06")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S12-ACC-07
+  requirement: S12-ACC-07
+  session: S12
+  title: Regression
+  verification: pytest tests marked @pytest.mark.acceptance("S12-ACC-07")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''
+- id: AT-S12-ACC-08
+  requirement: S12-ACC-08
+  session: S12
+  title: Paper-only end-to-end tests
+  verification: pytest tests marked @pytest.mark.acceptance("S12-ACC-08")
+  test_modules: []
+  status: planned
+  blockers: []
+  notes: ''

@@ -1,0 +1,63 @@
+# GIE research parameters
+#
+# Every number here is a PROPOSED RESEARCH PARAMETER taken from the master specification.
+# None of them is an approved production limit (requirement M-DIR-08), none is established
+# performance (G01-11) and all are "configurable and subject to validation" (G05-05).
+# Code reads them through gie.core.params; it never hard-codes them.
+
+schema_version = 1
+approval_status = "PROPOSED_RESEARCH_PARAMETERS"
+
+[parameters.tick_processing_target_ns]
+value = 1_000_000
+unit = "ns"
+requirement = "G03-07"
+description = "Proposed local target for processing one tick (< 1 ms). A target to measure against, not a guarantee."
+
+[parameters.protection_decision_target_ns]
+value = 5_000_000
+unit = "ns"
+requirement = "G03-08"
+description = "Proposed local target for one protective (reflex) decision (< 5 ms)."
+
+[parameters.tactical_decision_target_ns]
+value = 20_000_000
+unit = "ns"
+requirement = "G03-09"
+description = "Proposed local target for one tactical decision (< 20 ms)."
+
+[parameters.daily_defensive_threshold_frac]
+value = "-0.02"
+unit = "fraction of the day's reference equity"
+requirement = "G05-02"
+description = "Daily result at which the account turns DEFENSIVE (reduced risk, stricter quality)."
+
+[parameters.daily_recovery_threshold_frac]
+value = "-0.0175"
+unit = "fraction of the day's reference equity"
+requirement = "G05-03"
+description = "Proposed recovery level (-1.75 %). Its exact meaning is open item U-03 for the owner."
+
+[parameters.daily_emergency_halt_threshold_frac]
+value = "-0.03"
+unit = "fraction of the day's reference equity"
+requirement = "G05-04"
+description = "Proposed daily result at which trading halts for the day (EMERGENCY_HALT)."
+
+[parameters.daily_profit_protection_threshold_frac]
+value = "0.05"
+unit = "fraction of the day's reference equity"
+requirement = "G05-06"
+description = "Daily result above which a non-decreasing daily profit floor is protected."
+
+[parameters.target_min_trades_per_eligible_day]
+value = 1
+unit = "trades per eligible day"
+requirement = "G01-07"
+description = "Research goal: at least one valid trade per eligible day. Misses are reported; trades are never forced."
+
+[parameters.target_average_daily_net_roi_frac]
+value = "0.05"
+unit = "fraction per eligible day"
+requirement = "G01-08"
+description = "Research goal: average daily net ROI of at least 5 %. A goal, not established performance."

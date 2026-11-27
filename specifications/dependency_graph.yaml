@@ -1,0 +1,100 @@
+# GIE dependency graph (requirement S00-ASG-10, deliverable S00-DEL-03).
+# Source: "Launch and dependencies" of each session brief and the implementation directive of
+# the master specification.  Checked in CI by tools/check_architecture.py.
+schema_version: 1
+status: PROPOSED   # layout and import rules await owner approval (decision D-002, D-006)
+
+# ---------------------------------------------------------------------------------------------
+# Sessions: who must be approved before whom.
+#   depends_on        - the dependency's review package must be approved before integration
+#   contract_only     - only the shared contracts of that session are needed (already in 00)
+#   optional          - used when available; labelled fixtures otherwise (COM-07)
+# ---------------------------------------------------------------------------------------------
+sessions:
+  S00: {name: Project Coordinator, wave: 1, depends_on: [], contract_only: [], optional: [],
+        owns: [gie/core/, gie/contracts/, specifications/, docs/, tools/, .github/, tests/gie/core/,
+               tests/gie/contracts/, tests/gie/tools/, tests/gie/baseline/, reviews/session_00/,
+               CLAUDE.md, pyproject.toml]}
+  S01: {name: Market Data, wave: 2, depends_on: [S00], contract_only: [], optional: [],
+        owns: [gie/market_data/, tests/gie/market_data/, reviews/session_01/]}
+  S02: {name: Strategy Intelligence, wave: 2, depends_on: [S00], contract_only: [S01], optional: [],
+        owns: [gie/strategy_intelligence/, tests/gie/strategy_intelligence/, reviews/session_02/]}
+  S07: {name: Execution Engine, wave: 2, depends_on: [S00, S01], contract_only: [S08], optional: [],
+        owns: [gie/execution/, tests/gie/execution/, reviews/session_07/]}
+  S08: {name: Risk Intelligence, wave: 2, depends_on: [S00], contract_only: [S01, S07], optional: [],
+        owns: [gie/risk/, tests/gie/risk/, reviews/session_08/]}
+  S03: {name: Intermarket Intelligence, wave: 3, depends_on: [S00, S01], contract_only: [], optional: [],
+        owns: [gie/intermarket/, tests/gie/intermarket/, reviews/session_03/]}
+  S04: {name: Predictive Intelligence, wave: 3, depends_on: [S00, S01, S02], contract_only: [], optional: [S03],
+        owns: [gie/prediction/, models/research/, tests/gie/prediction/, reviews/session_04/]}
+  S05: {name: Decision Engine, wave: 3, depends_on: [S00, S02, S04], contract_only: [S08], optional: [],
+        owns: [gie/decision/, tests/gie/decision/, reviews/session_05/]}
+  S06: {name: Reflex Engine, wave: 3, depends_on: [S00, S01, S07, S08], contract_only: [], optional: [],
+        owns: [gie/reflex/, tests/gie/reflex/, reviews/session_06/]}
+  S09: {name: Learning Laboratory, wave: 4, depends_on: [S00, S04, S05, S10], contract_only: [], optional: [],
+        owns: [gie/learning/, tests/gie/learning/, reviews/session_09/]}
+  S10: {name: Research and Backtesting, wave: 4, depends_on: [S00], contract_only: [], optional: [],
+        early_scaffolding: true,
+        owns: [gie/backtesting/, tests/gie/backtesting/, reviews/session_10/]}
+  S11: {name: Dashboard, wave: 4, depends_on: [S00], contract_only: [S01, S02, S03, S04, S05, S06, S07, S08, S09, S10],
+        optional: [],
+        owns: [dashboard/gie/, tests/gie/dashboard/, reviews/session_11/]}
+  S12: {name: Quality Assurance, wave: 4, depends_on: [S00], contract_only: [], optional: [],
+        early_scaffolding: true,
+        owns: [tests/gie/qa/, reviews/qa/]}
+
+# ---------------------------------------------------------------------------------------------
+# Brief path -> repository path (COM-03: "paths are proposed until coordinator approves").
+# ---------------------------------------------------------------------------------------------
+path_mapping:
+  core/: gie/core/
+  contracts/: gie/contracts/
+  specifications/: specifications/
+  market_data/: gie/market_data/
+  strategy_intelligence/: gie/strategy_intelligence/
+  intermarket/: gie/intermarket/
+  prediction/: gie/prediction/
+  models/research/: models/research/
+  decision/: gie/decision/
+  reflex/: gie/reflex/
+  execution/: gie/execution/
+  risk/: gie/risk/
+  learning/: gie/learning/
+  backtesting/: gie/backtesting/
+  dashboard/gie/: dashboard/gie/
+  tests/gie/: tests/gie/<subsystem>/ per session; tests/gie/qa/ for session 12
+  reviews/qa/: reviews/qa/
+
+# ---------------------------------------------------------------------------------------------
+# Python import rules.  A package may import the standard library, its own sub-modules and the
+# packages listed.  Subsystems never import each other: they exchange contract records and call
+# each other only through gie.contracts.interfaces.  The composition root gie.app (created by
+# the coordinator at integration time) is the only place that wires implementations together.
+# ---------------------------------------------------------------------------------------------
+packages:
+  gie.core: {session: S00, may_import: []}
+  gie.contracts: {session: S00, may_import: [gie.core]}
+  gie.market_data: {session: S01, may_import: [gie.core, gie.contracts]}
+  gie.strategy_intelligence: {session: S02, may_import: [gie.core, gie.contracts]}
+  gie.intermarket: {session: S03, may_import: [gie.core, gie.contracts]}
+  gie.prediction: {session: S04, may_import: [gie.core, gie.contracts]}
+  gie.decision: {session: S05, may_import: [gie.core, gie.contracts]}
+  gie.reflex: {session: S06, may_import: [gie.core, gie.contracts]}
+  gie.execution: {session: S07, may_import: [gie.core, gie.contracts]}
+  gie.risk: {session: S08, may_import: [gie.core, gie.contracts]}
+  gie.learning: {session: S09, may_import: [gie.core, gie.contracts]}
+  gie.backtesting: {session: S10, may_import: [gie.core, gie.contracts]}
+  gie.app: {session: S00, may_import: ["gie.*"]}
+
+# Third-party imports allowed per package (the standard library is always allowed).
+# gie.core and gie.contracts are standard-library only by design (decision D-004).
+third_party:
+  gie.core: []
+  gie.contracts: []
+
+# Paths that existed before the project and must stay byte-identical (OWN-13, M-AUTH-12).
+protected_paths:
+  base_commit: 35e32cff311eef08294540fd88d9a01a5a2f7c41
+  # path -> git blob SHA-1 of the file content at base_commit
+  paths:
+    Start: ff972e3e86e8628ee696ede5ca1a3c8f92fe1197
