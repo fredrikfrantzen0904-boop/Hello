@@ -1,0 +1,33 @@
+{
+  "approval_status": "PROPOSED",
+  "contracts": {
+    "Candidate": {
+      "1.0.0": "9115a46a2366e5d7346879d247deafd2466914f36d1b8ae221947355425142b2"
+    },
+    "Clock": {
+      "1.0.0": "cf023e7568ae9a0538a647eaec1c447c710110720f92d0dbfb24c2802b3a68a7"
+    },
+    "Evidence": {
+      "1.0.0": "8b6fc8b4fe5c231830e92b1132a3c6962656607fe2c4512b46ebf606b64ee735"
+    },
+    "ModelVersion": {
+      "1.0.0": "49e50b5bb89a1d552de514fb98d6dba593ad45245dd6263ea69e9a997f6d86e1"
+    },
+    "OrderEvent": {
+      "1.0.0": "8d62b196357680c1d123d1c84df93aacea18fd5a64bfe7b7c783e41cff9e64b5"
+    },
+    "Position": {
+      "1.0.0": "15767bf3b765581a293b0c2219454d7f5c75e98f83a9345942e18e373b17d37b"
+    },
+    "RiskDecision": {
+      "1.0.0": "dfb0e74f7447fa6501e5cb8f45a64df8f9e4b968ec97255139195d7dbd825f5b"
+    },
+    "Tick": {
+      "1.0.0": "0529d66dbebc160ade1fc72b51143f5558df422383b5280212ae0ec2429ee95c"
+    },
+    "TradePlan": {
+      "1.0.0": "ca07a9269e24dae7647b5bdc8b8d17ee02b0556315fb759986a1b979e36ad7c1"
+    }
+  },
+  "lock_version": 1
+}

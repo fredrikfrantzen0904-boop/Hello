@@ -1,0 +1,152 @@
+{
+  "$id": "urn:gie:contract:Tick:1.0.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Raw bid/ask quote exactly as observed, plus ingest metadata.",
+  "properties": {
+    "ask": {
+      "description": "Best ask.",
+      "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
+      "type": "string",
+      "x-gie-exclusiveMinimum": "0",
+      "x-gie-type": "decimal",
+      "x-gie-unit": "quote currency per unit (USD per troy ounce for XAUUSD)"
+    },
+    "ask_volume": {
+      "anyOf": [
+        {
+          "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
+          "type": "string",
+          "x-gie-minimum": "0",
+          "x-gie-type": "decimal"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Size at the best ask; null when the feed does not provide it.",
+      "x-gie-unit": "lots"
+    },
+    "bid": {
+      "description": "Best bid.",
+      "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
+      "type": "string",
+      "x-gie-exclusiveMinimum": "0",
+      "x-gie-type": "decimal",
+      "x-gie-unit": "quote currency per unit (USD per troy ounce for XAUUSD)"
+    },
+    "bid_volume": {
+      "anyOf": [
+        {
+          "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
+          "type": "string",
+          "x-gie-minimum": "0",
+          "x-gie-type": "decimal"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Size at the best bid; null when the feed does not provide it.",
+      "x-gie-unit": "lots"
+    },
+    "contract": {
+      "const": "Tick",
+      "description": "Contract name."
+    },
+    "event_time_ns": {
+      "description": "Timestamp given by the source, converted to UTC.",
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "type": "integer",
+      "x-gie-unit": "ns since epoch, UTC"
+    },
+    "flags": {
+      "description": "Data-quality flags (empty when nothing is wrong).",
+      "items": {
+        "enum": [
+          "CROSSED",
+          "EVENT_AFTER_RECEIVE",
+          "OUT_OF_ORDER",
+          "DUPLICATE",
+          "GAP_BEFORE",
+          "STALE",
+          "OUTLIER",
+          "OFF_SESSION"
+        ],
+        "type": "string"
+      },
+      "maxItems": 16,
+      "minItems": 0,
+      "type": "array",
+      "x-gie-canonical-order": "sorted by value",
+      "x-gie-unique": true
+    },
+    "origin": {
+      "description": "Whether the quote is a live broker observation, imported history or a fixture.",
+      "enum": [
+        "BROKER_FEED",
+        "HISTORICAL",
+        "SYNTHETIC_FIXTURE"
+      ],
+      "type": "string"
+    },
+    "receive_time_ns": {
+      "description": "Local clock reading when GIE received the quote.  For imported history without a recorded receive time it equals event_time_ns plus the modelled feed delay.",
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "type": "integer",
+      "x-gie-unit": "ns since epoch, UTC"
+    },
+    "schema_version": {
+      "description": "Version of the contract the message was written with.",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+      "type": "string"
+    },
+    "seq": {
+      "description": "Ingest sequence of the (source, symbol) stream: starts at 0 and increases by exactly 1.",
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "source": {
+      "description": "Identifier of the feed that delivered the quote.",
+      "maxLength": 64,
+      "minLength": 1,
+      "pattern": "^[a-z0-9][a-z0-9_.:-]{0,63}$",
+      "type": "string"
+    },
+    "symbol": {
+      "description": "Canonical GIE symbol (XAUUSD is the only tradable one).",
+      "maxLength": 24,
+      "minLength": 1,
+      "pattern": "^[A-Z0-9][A-Z0-9._-]{0,23}$",
+      "type": "string"
+    }
+  },
+  "required": [
+    "contract",
+    "schema_version",
+    "symbol",
+    "source",
+    "origin",
+    "seq",
+    "event_time_ns",
+    "receive_time_ns",
+    "bid",
+    "ask",
+    "flags"
+  ],
+  "title": "Tick 1.0.0",
+  "type": "object",
+  "x-gie-invariants": [
+    {
+      "id": "TICK-1",
+      "rule": "the CROSSED flag is present if and only if ask < bid"
+    },
+    {
+      "id": "TICK-2",
+      "rule": "the EVENT_AFTER_RECEIVE flag is present if and only if event_time_ns > receive_time_ns"
+    }
+  ]
+}

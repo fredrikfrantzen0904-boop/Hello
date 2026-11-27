@@ -1,0 +1,47 @@
+ GIE / ENGINEERING SPECIFICATION / V1.0
+
+                                   Session 08 / Risk Intelligence
+
+ Launch and dependencies
+ Open a dedicated Claude Code session and worktree. Read MASTER.pdf or its extracted text.
+ Dependencies: 00; execution/data contracts. Owned scope: risk/. Paths are proposed until coordinator
+ approves actual repository layout.
+
+ Integrated prompt - paste or attach to Claude
+ You are a specialist implementation engineer for Gold Intelligence Engine (GIE). The owner approves
+ material changes; ChatGPT provides architecture and independent review recommendations. Read the
+ approved master specification, CLAUDE.md, contracts and decision log before editing. Raise conflicts or
+ missing dependencies as change requests; never silently simplify, invent data, or mark placeholders
+ complete. Use a dedicated Git branch/worktree; do not overwrite other sessions, merge without owner
+ approval, or modify existing Gold Bot, AI trader, breakout bot or GCE baselines. Paper/replay only; build
+ execution interfaces but keep real order routing disabled. Do not expose credentials. Record exact commit,
+ files, tests, commands, results, limitations and requirement IDs. Submit a PDF review plus
+ machine-readable evidence; stop at the review gate.
+
+ Your assignment
+ Implement aggregate exposure, margin, pending risk, gap stress, adaptive sizing with validated quality,
+ daily state machine and monotonic profit floor. Account-wide Prague reset, actual FTMO product rules,
+ overnight/rollover restrictions. Recovery and emergency thresholds configurable. No risk increase to
+ recover losses.
+
+ Mandatory system requirements
+ Apply the master requirements G01-G10 relevant to this subsystem. Do not redefine shared contracts
+ unilaterally. If a dependency is unavailable, use explicitly labeled test fixtures only; do not claim integration
+ complete.
+
+ Acceptance tests
+ Boundary tests at -2%, proposed -1.75%, -3%, +5%; exact-floor no new risk; simultaneous reservations
+ atomic; gap stress and other-account-position handling.
+
+ Review deliverables
+ Risk formulas, rule provenance, state traces, stress results and unresolved account assumptions.
+
+ Stop condition
+ Submit the review package and await owner approval before merging. Report failed tests and
+ unimplemented requirements explicitly. No live trading.
+
+
+
+
+GIE | 27 Nov 2026 | Paper / research only                                                                            1
+

@@ -1,0 +1,442 @@
+{
+  "$defs": {
+    "Destination": {
+      "additionalProperties": false,
+      "description": "A price the market may travel to under a named scenario.",
+      "properties": {
+        "expected_time_to_reach_ns": {
+          "anyOf": [
+            {
+              "maximum": 9223372036854775807,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Expected time until it is reached.",
+          "x-gie-unit": "ns"
+        },
+        "label": {
+          "description": "Scenario or destination name.",
+          "maxLength": 48,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_]{1,47}$",
+          "type": "string"
+        },
+        "price": {
+          "description": "Destination price.",
+          "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
+          "type": "string",
+          "x-gie-exclusiveMinimum": "0",
+          "x-gie-type": "decimal",
+          "x-gie-unit": "USD per troy ounce"
+        },
+        "probability_frac": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Estimated probability of reaching it.",
+          "x-gie-unit": "fraction"
+        }
+      },
+      "required": [
+        "label",
+        "price"
+      ],
+      "type": "object"
+    },
+    "QuantilePoint": {
+      "additionalProperties": false,
+      "description": "One point of the predictive distribution of net R.",
+      "properties": {
+        "q_frac": {
+          "description": "Cumulative probability.",
+          "exclusiveMaximum": 1.0,
+          "exclusiveMinimum": 0.0,
+          "type": "number",
+          "x-gie-unit": "fraction"
+        },
+        "value_r": {
+          "description": "Net R at this quantile.",
+          "type": "number",
+          "x-gie-unit": "R"
+        }
+      },
+      "required": [
+        "q_frac",
+        "value_r"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "urn:gie:contract:Candidate:1.0.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Opportunity built from de-duplicated evidence, with its predictive estimates.",
+  "properties": {
+    "as_of_time_ns": {
+      "description": "Receive time of the newest input the record depends on (causality watermark).",
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "type": "integer",
+      "x-gie-unit": "ns since epoch, UTC"
+    },
+    "candidate_id": {
+      "description": "identity.candidate_id(setup_type, side, evidence_ids, revision).",
+      "maxLength": 36,
+      "minLength": 36,
+      "pattern": "^cnd_[0-9a-f]{32}$",
+      "type": "string"
+    },
+    "contract": {
+      "const": "Candidate",
+      "description": "Contract name."
+    },
+    "data_origin": {
+      "description": "Least trustworthy origin among the market data the record is derived from.",
+      "enum": [
+        "BROKER_FEED",
+        "HISTORICAL",
+        "SYNTHETIC_FIXTURE"
+      ],
+      "type": "string"
+    },
+    "decision_time_ns": {
+      "description": "Clock reading at which the producer created the record.",
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "type": "integer",
+      "x-gie-unit": "ns since epoch, UTC"
+    },
+    "destinations": {
+      "description": "Scenario price destinations.",
+      "items": {
+        "$ref": "#/$defs/Destination"
+      },
+      "maxItems": 16,
+      "minItems": 0,
+      "type": "array"
+    },
+    "evidence_ids": {
+      "description": "Evidence the candidate is built from (already de-duplicated by market event).",
+      "items": {
+        "maxLength": 36,
+        "minLength": 36,
+        "pattern": "^evd_[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "maxItems": 64,
+      "minItems": 1,
+      "type": "array",
+      "x-gie-canonical-order": "sorted ascending",
+      "x-gie-unique": true
+    },
+    "expected_cost_r": {
+      "anyOf": [
+        {
+          "minimum": 0.0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Expected spread, commission and slippage already deducted in expected_net_r.",
+      "x-gie-unit": "R"
+    },
+    "expected_holding_time_ns": {
+      "anyOf": [
+        {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Expected holding time.",
+      "x-gie-unit": "ns"
+    },
+    "expected_net_r": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Expected net result.",
+      "x-gie-unit": "R"
+    },
+    "horizon": {
+      "description": "Scalp or intraday.",
+      "enum": [
+        "SCALP",
+        "INTRADAY"
+      ],
+      "type": "string"
+    },
+    "mode": {
+      "description": "REPLAY or PAPER.  No live mode exists (routing lock).",
+      "enum": [
+        "REPLAY",
+        "PAPER"
+      ],
+      "type": "string"
+    },
+    "model_version_id": {
+      "anyOf": [
+        {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^mdl_[0-9a-f]{32}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Model (or rule set) version that produced the estimates; null when unscored."
+    },
+    "net_r_quantiles": {
+      "description": "Optional predictive quantiles, ascending.",
+      "items": {
+        "$ref": "#/$defs/QuantilePoint"
+      },
+      "maxItems": 32,
+      "minItems": 0,
+      "type": "array"
+    },
+    "net_r_stdev": {
+      "anyOf": [
+        {
+          "minimum": 0.0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Predictive standard deviation of the net result.",
+      "x-gie-unit": "R"
+    },
+    "producer": {
+      "description": "Component instance that emitted the record; together with the contract name it names the stream.",
+      "maxLength": 96,
+      "minLength": 1,
+      "pattern": "^[a-z][a-z0-9_]*(\\.[a-z0-9_]+){0,4}$",
+      "type": "string"
+    },
+    "quality_score": {
+      "anyOf": [
+        {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Model quality of the opportunity in this direction.",
+      "x-gie-unit": "0..1"
+    },
+    "reference_price": {
+      "description": "Executable price at decision time: ask for BUY, bid for SELL.",
+      "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
+      "type": "string",
+      "x-gie-exclusiveMinimum": "0",
+      "x-gie-type": "decimal",
+      "x-gie-unit": "USD per troy ounce"
+    },
+    "revision": {
+      "description": "0 for the first record, +1 per update.",
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "run_id": {
+      "description": "Run that produced the record.",
+      "maxLength": 36,
+      "minLength": 36,
+      "pattern": "^run_[0-9a-f]{32}$",
+      "type": "string"
+    },
+    "schema_version": {
+      "description": "Version of the contract the message was written with.",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+      "type": "string"
+    },
+    "seq": {
+      "description": "Position of the record in its stream: starts at 0 and increases by exactly 1.",
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "session": {
+      "description": "Broker session at decision time.",
+      "enum": [
+        "ASIA",
+        "LONDON",
+        "NEW_YORK",
+        "OFF_SESSION"
+      ],
+      "type": "string"
+    },
+    "setup_type": {
+      "description": "Setup name from the feature dictionary.",
+      "maxLength": 48,
+      "minLength": 1,
+      "pattern": "^[a-z][a-z0-9_]{1,47}$",
+      "type": "string"
+    },
+    "side": {
+      "description": "Direction of the opportunity.",
+      "enum": [
+        "BUY",
+        "SELL"
+      ],
+      "type": "string"
+    },
+    "status": {
+      "description": "Lifecycle status of this revision.",
+      "enum": [
+        "AVAILABLE",
+        "WITHDRAWN",
+        "EXPIRED",
+        "REJECTED"
+      ],
+      "type": "string"
+    },
+    "status_reasons": {
+      "description": "Why the candidate was rejected or withdrawn.",
+      "items": {
+        "maxLength": 48,
+        "minLength": 1,
+        "pattern": "^[A-Z][A-Z0-9_]{1,47}$",
+        "type": "string"
+      },
+      "maxItems": 32,
+      "minItems": 0,
+      "type": "array",
+      "x-gie-canonical-order": "sorted ascending",
+      "x-gie-unique": true
+    },
+    "supersedes_candidate_id": {
+      "anyOf": [
+        {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^cnd_[0-9a-f]{32}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Previous revision replaced by this record; null for revision 0."
+    },
+    "symbol": {
+      "description": "Always XAUUSD: GIE trades only gold.",
+      "enum": [
+        "XAUUSD"
+      ],
+      "maxLength": 24,
+      "minLength": 1,
+      "type": "string"
+    },
+    "valid_until_ns": {
+      "description": "Expiry instant: the candidate must not be ranked at or after it.",
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "type": "integer",
+      "x-gie-unit": "ns since epoch, UTC"
+    },
+    "win_probability_frac": {
+      "anyOf": [
+        {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Estimated probability of a positive net result.",
+      "x-gie-unit": "fraction"
+    }
+  },
+  "required": [
+    "contract",
+    "schema_version",
+    "producer",
+    "seq",
+    "run_id",
+    "mode",
+    "data_origin",
+    "decision_time_ns",
+    "as_of_time_ns",
+    "candidate_id",
+    "symbol",
+    "side",
+    "setup_type",
+    "horizon",
+    "session",
+    "evidence_ids",
+    "reference_price",
+    "status",
+    "status_reasons",
+    "net_r_quantiles",
+    "destinations",
+    "valid_until_ns",
+    "revision"
+  ],
+  "title": "Candidate 1.0.0",
+  "type": "object",
+  "x-gie-invariants": [
+    {
+      "id": "CAUSAL-1",
+      "rule": "as_of_time_ns <= decision_time_ns (a record cannot depend on data received after it was created)"
+    },
+    {
+      "id": "CND-1",
+      "rule": "candidate_id equals identity.candidate_id(setup_type, side, evidence_ids, revision)"
+    },
+    {
+      "id": "CND-2",
+      "rule": "model_version_id, expected_net_r and net_r_stdev are all null (unscored) or all set (scored)"
+    },
+    {
+      "id": "CND-3",
+      "rule": "an unscored candidate has no model-derived estimates, quantiles or destinations"
+    },
+    {
+      "id": "CND-4",
+      "rule": "quantiles have strictly increasing q_frac and non-decreasing value_r"
+    },
+    {
+      "id": "CND-5",
+      "rule": "when status is AVAILABLE, valid_until_ns is later than decision_time_ns"
+    },
+    {
+      "id": "CND-6",
+      "rule": "status_reasons is non-empty when status is REJECTED or WITHDRAWN and empty when AVAILABLE"
+    },
+    {
+      "id": "CND-7",
+      "rule": "supersedes_candidate_id is set if and only if revision > 0"
+    }
+  ]
+}

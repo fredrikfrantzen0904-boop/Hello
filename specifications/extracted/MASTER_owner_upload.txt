@@ -1,0 +1,93 @@
+ GIE / ENGINEERING SPECIFICATION / V1.0
+
+                                            Master specification
+
+ Authority and scope
+ You are a specialist implementation engineer for Gold Intelligence Engine (GIE). The owner approves
+ material changes; ChatGPT provides architecture and independent review recommendations. Read the
+ approved master specification, CLAUDE.md, contracts and decision log before editing. Raise conflicts or
+ missing dependencies as change requests; never silently simplify, invent data, or mark placeholders
+ complete. Use a dedicated Git branch/worktree; do not overwrite other sessions, merge without owner
+ approval, or modify existing Gold Bot, AI trader, breakout bot or GCE baselines. Paper/replay only; build
+ execution interfaces but keep real order routing disabled. Do not expose credentials. Record exact commit,
+ files, tests, commands, results, limitations and requirement IDs. Submit a PDF review plus
+ machine-readable evidence; stop at the review gate.
+
+ G01 | Objective
+ XAUUSD exclusively; hybrid scalping and intraday, continuous monitoring during actual broker sessions,
+ cautious Asian-session selection, overnight positions when permitted and monitored, no weekend
+ exposure. Target at least one valid trade per eligible day and at least 5% average daily net ROI; report
+ misses, never force trades or leverage. These are research goals, not established performance.
+
+ G02 | Intelligence
+ Six existing engines provide directional scores and evidence: Cavemen, Silver Bullet, Liquidity Hunter, ORB
+ + VWAP, VWAP Trend Rider, Sweep & Reversal. Deduplicate correlated events. Build setup-specific
+ expected net R, uncertainty, price destinations and flexible trade plans; actual market behavior overrides
+ historical expectations. Preserve GCE-B and exact Round 1 baselines.
+
+ G03 | Timing
+ Anticipate, prepare, react, protect. Reflex every tick; tactical every tick or second; strategic on completed
+ candles and asynchronous background updates. No network LLM or training in critical path. Proposed local
+ targets: tick processing <1 ms, protection decision <5 ms, tactical <20 ms; measure p50/p95/p99/max and
+ end-to-end delays, reject stale signals. No guarantee of zero latency.
+
+ G04 | Risk
+ No arbitrary position count; aggregate gross/net and correlated risk, pending orders, margin, costs and gap
+ stress. Adaptive sizing only from validated quality; no martingale, averaging down or widening protective
+ stops. Hard protective stops; fast monotonic profit ratchet based on executable net P&L. Compare against
+ fixed exits.
+
+ G05 | Daily states
+ Normal above -2% until +5%; defensive at -2%, reduced risk and stricter quality; proposed recovery at
+ -1.75% and emergency halt at -3%, configurable and subject to validation. Above +5% protect a
+ nondecreasing daily profit floor, exceptional setups only with surplus risk budget after costs and open
+ exposure. At exactly the floor no new risk. Slippage can breach floors. Track Prague day and actual account
+ rules, including other positions.
+
+
+GIE | 27 Nov 2026 | Paper / research only                                                                        1
+ G06 | Volatility and external data
+ Scheduled news and unexpected volatility mode: prepare scenarios, assess spread, acceleration and
+ persistence, reject stale entries. Verify account news restrictions. Observe XAGUSD, DXY, GC futures,
+ Treasury yields, real yields, S&P 500, VIX, USDJPY and timestamped news where licensed and available;
+ trade only gold. Learn conditional lead/lag, never assume fixed correlations.
+
+ G07 | Learning
+ Historical replay and market memory, setup-specific return models, new pattern discovery, rejected and
+ missed opportunities, execution and exit learning. No manual-trade learning. Separate decision quality from
+ outcomes. Background research isolated from active model; shadow validation, versioned promotion with
+ owner approval and rollback. No untested online changes.
+
+ G08 | Reliability
+ Build autonomous order lifecycle foundation now, with simulated adapter and live lock. Persistent state,
+ restart reconciliation, disconnect/stale-feed fail closed, idempotent orders, broker-side protection design,
+ overnight monitoring. Never enable real execution during this project phase.
+
+ G09 | Evidence
+ Round 2: 23,481 setups; GCE-B 134 trades +0.462R, 18% day coverage, 4.9% drawdown at 0.5% risk; no
+ corrected statistical significance. Learned score 96% coverage but negative recent period. Existing history
+ is research only; raw ticks not stored in Round 2. Reconcile 429 vs 473 Cavemen trades, daily breach
+ denominators and live delay. Use actual tick data for fast execution claims.
+
+ G10 | Validation
+ Chronological purged walk-forward, embargo, training-only transforms, block bootstrap, multiple-testing
+ correction, cost/latency stress, untouched forward paper. Report all eligible days, net R/day, mean/median
+ ROI, >=5% days, coverage, drawdown, breaches, phase-specific challenge outcomes, failures and
+ uncertainty. No cherry-picking.
+
+ Implementation directive
+ Start with session 00 only. Owner approves contracts before parallel work. Wave 2: 01, 02, 07, 08. Wave 3:
+ 03, 04, 05, 06 as dependencies become ready. Wave 4: 09, 10, 11, 12; research and QA start scaffolding
+ earlier. Coordinator alone integrates reviewed branches. No live activation. Proposed numerical settings are
+ research parameters, not approved production limits.
+
+ Review gate
+ Every session delivers requirement IDs, code paths, test commands and outputs, commit hash, data
+ provenance, measured performance, blockers and change requests. Status: approved, conditional, rejected
+ or unverified. Owner authorizes merge and model promotion.
+
+
+
+
+GIE | 27 Nov 2026 | Paper / research only                                                                       2
+

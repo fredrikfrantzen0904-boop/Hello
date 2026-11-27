@@ -1,0 +1,46 @@
+ GIE / ENGINEERING SPECIFICATION / V1.0
+
+                                       Session 06 / Reflex Engine
+
+ Launch and dependencies
+ Open a dedicated Claude Code session and worktree. Read MASTER.pdf or its extracted text.
+ Dependencies: 00, 01, 07, 08. Owned scope: reflex/. Paths are proposed until coordinator approves actual
+ repository layout.
+
+ Integrated prompt - paste or attach to Claude
+ You are a specialist implementation engineer for Gold Intelligence Engine (GIE). The owner approves
+ material changes; ChatGPT provides architecture and independent review recommendations. Read the
+ approved master specification, CLAUDE.md, contracts and decision log before editing. Raise conflicts or
+ missing dependencies as change requests; never silently simplify, invent data, or mark placeholders
+ complete. Use a dedicated Git branch/worktree; do not overwrite other sessions, merge without owner
+ approval, or modify existing Gold Bot, AI trader, breakout bot or GCE baselines. Paper/replay only; build
+ execution interfaces but keep real order routing disabled. Do not expose credentials. Record exact commit,
+ files, tests, commands, results, limitations and requirement IDs. Submit a PDF review plus
+ machine-readable evidence; stop at the review gate.
+
+ Your assignment
+ Implement deterministic per-tick protective decisions, executable net P&L peak tracking, monotonic stops,
+ fast giveback protection and trade-health reactions. Separate from tactical/strategic tasks; never wait for
+ model or dashboard. Test volatility-aware protection versus fixed exits.
+
+ Mandatory system requirements
+ Apply the master requirements G01-G10 relevant to this subsystem. Do not redefine shared contracts
+ unilaterally. If a dependency is unavailable, use explicitly labeled test fixtures only; do not claim integration
+ complete.
+
+ Acceptance tests
+ Burst replay, gap/slippage, stale tick, slow-model isolation, no stop widening, p99/max latency, profit
+ giveback and premature-exit comparisons.
+
+ Review deliverables
+ Tick traces, timing profiles, protection tests and fixed-vs-dynamic exit results.
+
+ Stop condition
+ Submit the review package and await owner approval before merging. Report failed tests and
+ unimplemented requirements explicitly. No live trading.
+
+
+
+
+GIE | 27 Nov 2026 | Paper / research only                                                                            1
+

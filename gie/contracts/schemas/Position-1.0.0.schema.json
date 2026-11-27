@@ -1,0 +1,379 @@
+{
+  "$id": "urn:gie:contract:Position:1.0.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "State of one position, marked at the price at which it could be closed now.",
+  "properties": {
+    "account_currency": {
+      "description": "ISO 4217 account currency.",
+      "maxLength": 3,
+      "minLength": 3,
+      "pattern": "^[A-Z]{3}$",
+      "type": "string"
+    },
+    "as_of_time_ns": {
+      "description": "Receive time of the newest input the record depends on (causality watermark).",
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "type": "integer",
+      "x-gie-unit": "ns since epoch, UTC"
+    },
+    "average_entry_price": {
+      "description": "Volume-weighted entry price.",
+      "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
+      "type": "string",
+      "x-gie-exclusiveMinimum": "0",
+      "x-gie-type": "decimal",
+      "x-gie-unit": "quote currency per unit"
+    },
+    "closed_time_ns": {
+      "anyOf": [
+        {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "When the position was fully closed; null while open.",
+      "x-gie-unit": "ns since epoch, UTC"
+    },
+    "contract": {
+      "const": "Position",
+      "description": "Contract name."
+    },
+    "costs_amount": {
+      "description": "Commissions and fees charged so far (already inside realized).",
+      "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
+      "type": "string",
+      "x-gie-minimum": "0",
+      "x-gie-type": "decimal",
+      "x-gie-unit": "account currency"
+    },
+    "data_origin": {
+      "description": "Least trustworthy origin among the market data the record is derived from.",
+      "enum": [
+        "BROKER_FEED",
+        "HISTORICAL",
+        "SYNTHETIC_FIXTURE"
+      ],
+      "type": "string"
+    },
+    "decision_time_ns": {
+      "description": "Clock reading at which the producer created the record.",
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "type": "integer",
+      "x-gie-unit": "ns since epoch, UTC"
+    },
+    "external_ref": {
+      "anyOf": [
+        {
+          "maxLength": 64,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Broker ticket of an EXTERNAL position; null for GIE positions."
+    },
+    "initial_risk_amount": {
+      "anyOf": [
+        {
+          "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
+          "type": "string",
+          "x-gie-exclusiveMinimum": "0",
+          "x-gie-type": "decimal"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Amount risked at opening (1 R); mandatory for GIE positions.",
+      "x-gie-unit": "account currency"
+    },
+    "initial_stop_price": {
+      "anyOf": [
+        {
+          "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
+          "type": "string",
+          "x-gie-exclusiveMinimum": "0",
+          "x-gie-type": "decimal"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Hard stop at opening; mandatory for GIE positions.",
+      "x-gie-unit": "quote currency per unit"
+    },
+    "initial_volume_lots": {
+      "description": "Volume at opening.",
+      "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
+      "type": "string",
+      "x-gie-exclusiveMinimum": "0",
+      "x-gie-type": "decimal",
+      "x-gie-unit": "lots"
+    },
+    "mark_price": {
+      "anyOf": [
+        {
+          "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
+          "type": "string",
+          "x-gie-exclusiveMinimum": "0",
+          "x-gie-type": "decimal"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Exit-side quote used for the valuation: bid for BUY, ask for SELL.",
+      "x-gie-unit": "quote currency per unit"
+    },
+    "mode": {
+      "description": "REPLAY or PAPER.  No live mode exists (routing lock).",
+      "enum": [
+        "REPLAY",
+        "PAPER"
+      ],
+      "type": "string"
+    },
+    "opened_time_ns": {
+      "description": "When the position was opened.",
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "type": "integer",
+      "x-gie-unit": "ns since epoch, UTC"
+    },
+    "opening_client_order_id": {
+      "anyOf": [
+        {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^ord_[0-9a-f]{32}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Entry order of a GIE position."
+    },
+    "owner": {
+      "description": "GIE, or another system on the same account.",
+      "enum": [
+        "GIE",
+        "EXTERNAL"
+      ],
+      "type": "string"
+    },
+    "peak_net_pnl_amount": {
+      "description": "Highest value of realized + unrealized executable net P&L since opening (never decreases).",
+      "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
+      "type": "string",
+      "x-gie-type": "decimal",
+      "x-gie-unit": "account currency"
+    },
+    "plan_id": {
+      "anyOf": [
+        {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^pln_[0-9a-f]{32}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Plan that opened a GIE position."
+    },
+    "position_id": {
+      "description": "identity.position_id(run, opening order) or identity.external_position_id(...).",
+      "maxLength": 36,
+      "minLength": 36,
+      "pattern": "^pos_[0-9a-f]{32}$",
+      "type": "string"
+    },
+    "producer": {
+      "description": "Component instance that emitted the record; together with the contract name it names the stream.",
+      "maxLength": 96,
+      "minLength": 1,
+      "pattern": "^[a-z][a-z0-9_]*(\\.[a-z0-9_]+){0,4}$",
+      "type": "string"
+    },
+    "realized_net_pnl_amount": {
+      "description": "Result already realised by partial or full closes, net of costs and swap.",
+      "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
+      "type": "string",
+      "x-gie-type": "decimal",
+      "x-gie-unit": "account currency"
+    },
+    "revision": {
+      "description": "Snapshot number of this position: 0, 1, 2, ...",
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "run_id": {
+      "description": "Run that produced the record.",
+      "maxLength": 36,
+      "minLength": 36,
+      "pattern": "^run_[0-9a-f]{32}$",
+      "type": "string"
+    },
+    "schema_version": {
+      "description": "Version of the contract the message was written with.",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+      "type": "string"
+    },
+    "seq": {
+      "description": "Position of the record in its stream: starts at 0 and increases by exactly 1.",
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "side": {
+      "description": "BUY = long, SELL = short.",
+      "enum": [
+        "BUY",
+        "SELL"
+      ],
+      "type": "string"
+    },
+    "state": {
+      "description": "OPEN or CLOSED.",
+      "enum": [
+        "OPEN",
+        "CLOSED"
+      ],
+      "type": "string"
+    },
+    "stop_price": {
+      "anyOf": [
+        {
+          "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
+          "type": "string",
+          "x-gie-exclusiveMinimum": "0",
+          "x-gie-type": "decimal"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Current hard protective stop; never further from the entry than initial_stop_price.",
+      "x-gie-unit": "quote currency per unit"
+    },
+    "swap_amount": {
+      "description": "Overnight financing charged (-) or credited (+) so far (already inside realized).",
+      "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
+      "type": "string",
+      "x-gie-type": "decimal",
+      "x-gie-unit": "account currency"
+    },
+    "symbol": {
+      "description": "XAUUSD for GIE positions; any instrument for EXTERNAL ones.",
+      "maxLength": 24,
+      "minLength": 1,
+      "pattern": "^[A-Z0-9][A-Z0-9._-]{0,23}$",
+      "type": "string"
+    },
+    "take_profit_price": {
+      "anyOf": [
+        {
+          "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
+          "type": "string",
+          "x-gie-exclusiveMinimum": "0",
+          "x-gie-type": "decimal"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Current broker-side take profit, if any.",
+      "x-gie-unit": "quote currency per unit"
+    },
+    "unrealized_net_pnl_amount": {
+      "description": "Result of closing the open volume at mark_price, net of estimated exit costs; 0 when closed.",
+      "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
+      "type": "string",
+      "x-gie-type": "decimal",
+      "x-gie-unit": "account currency"
+    },
+    "volume_lots": {
+      "description": "Open volume; 0 when closed.",
+      "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
+      "type": "string",
+      "x-gie-minimum": "0",
+      "x-gie-type": "decimal",
+      "x-gie-unit": "lots"
+    }
+  },
+  "required": [
+    "contract",
+    "schema_version",
+    "producer",
+    "seq",
+    "run_id",
+    "mode",
+    "data_origin",
+    "decision_time_ns",
+    "as_of_time_ns",
+    "position_id",
+    "revision",
+    "owner",
+    "symbol",
+    "side",
+    "state",
+    "volume_lots",
+    "initial_volume_lots",
+    "average_entry_price",
+    "realized_net_pnl_amount",
+    "unrealized_net_pnl_amount",
+    "peak_net_pnl_amount",
+    "costs_amount",
+    "swap_amount",
+    "account_currency",
+    "opened_time_ns"
+  ],
+  "title": "Position 1.0.0",
+  "type": "object",
+  "x-gie-invariants": [
+    {
+      "id": "CAUSAL-1",
+      "rule": "as_of_time_ns <= decision_time_ns (a record cannot depend on data received after it was created)"
+    },
+    {
+      "id": "POS-1",
+      "rule": "state is OPEN iff volume_lots > 0 iff closed_time_ns is null"
+    },
+    {
+      "id": "POS-2",
+      "rule": "volume_lots <= initial_volume_lots (a position is never increased: no averaging down)"
+    },
+    {
+      "id": "POS-3",
+      "rule": "a GIE position is XAUUSD with plan, opening order, initial stop and initial risk, and while open has a stop and a mark price; an EXTERNAL position has external_ref and no plan or opening order"
+    },
+    {
+      "id": "POS-4",
+      "rule": "the stop is never wider than the initial stop (BUY: stop >= initial, SELL: stop <= initial)"
+    },
+    {
+      "id": "POS-5",
+      "rule": "peak_net_pnl_amount >= realized_net_pnl_amount + unrealized_net_pnl_amount"
+    },
+    {
+      "id": "POS-6",
+      "rule": "a CLOSED position has unrealized_net_pnl_amount = 0"
+    },
+    {
+      "id": "POS-7",
+      "rule": "opened_time_ns <= closed_time_ns (when closed) <= decision_time_ns"
+    }
+  ]
+}

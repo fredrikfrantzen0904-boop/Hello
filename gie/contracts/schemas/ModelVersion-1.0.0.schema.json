@@ -1,0 +1,330 @@
+{
+  "$defs": {
+    "ContractRef": {
+      "additionalProperties": false,
+      "description": "A contract version a model was built against.",
+      "properties": {
+        "contract": {
+          "description": "Contract name.",
+          "maxLength": 48,
+          "minLength": 1,
+          "pattern": "^[A-Z][A-Za-z0-9]{1,47}$",
+          "type": "string"
+        },
+        "version": {
+          "description": "Contract version.",
+          "maxLength": 32,
+          "minLength": 1,
+          "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "contract",
+        "version"
+      ],
+      "type": "object"
+    },
+    "NamedValue": {
+      "additionalProperties": false,
+      "description": "A named finite number (feature value or metric).",
+      "properties": {
+        "name": {
+          "description": "Name from the owning dictionary.",
+          "maxLength": 48,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_]{1,47}$",
+          "type": "string"
+        },
+        "value": {
+          "description": "Finite numeric value.",
+          "type": "number"
+        }
+      },
+      "required": [
+        "name",
+        "value"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "urn:gie:contract:ModelVersion:1.0.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Registry entry of one model artifact and its promotion status.",
+  "properties": {
+    "approval_reference": {
+      "anyOf": [
+        {
+          "maxLength": 8,
+          "minLength": 1,
+          "pattern": "^D-[0-9]{3,5}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Decision-log entry recording the approval; mandatory for ACTIVE and ROLLED_BACK."
+    },
+    "approved_by": {
+      "anyOf": [
+        {
+          "maxLength": 64,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Who authorised the status; mandatory for ACTIVE and ROLLED_BACK."
+    },
+    "artifact_sha256": {
+      "description": "SHA-256 of the frozen artifact.",
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "artifact_uri": {
+      "description": "Repository-relative location of the artifact (never a URL with credentials).",
+      "maxLength": 200,
+      "minLength": 1,
+      "pattern": "^(?!/)(?!.*\\.\\.)(?!.*//)[A-Za-z0-9._/-]{1,200}$",
+      "type": "string"
+    },
+    "code_commit": {
+      "description": "Commit of the code that produced the artifact.",
+      "maxLength": 40,
+      "minLength": 40,
+      "pattern": "^[0-9a-f]{40}$",
+      "type": "string"
+    },
+    "contract": {
+      "const": "ModelVersion",
+      "description": "Contract name."
+    },
+    "contract_versions": {
+      "description": "Contract versions the model was built against.",
+      "items": {
+        "$ref": "#/$defs/ContractRef"
+      },
+      "maxItems": 32,
+      "minItems": 0,
+      "type": "array",
+      "x-gie-canonical-order": "sorted by contract",
+      "x-gie-unique": true
+    },
+    "created_time_ns": {
+      "description": "When the artifact was frozen.",
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "type": "integer",
+      "x-gie-unit": "ns since epoch, UTC"
+    },
+    "feature_schema_sha256": {
+      "anyOf": [
+        {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Hash of the feature dictionary the model expects."
+    },
+    "kind": {
+      "description": "What the model is.",
+      "enum": [
+        "RULESET",
+        "NET_R_MODEL",
+        "PAYOFF_MODEL",
+        "SIMILARITY_INDEX",
+        "DESTINATION_MODEL",
+        "COMPOSITE"
+      ],
+      "type": "string"
+    },
+    "metrics": {
+      "description": "Headline validation metrics (full results live in the model card).",
+      "items": {
+        "$ref": "#/$defs/NamedValue"
+      },
+      "maxItems": 64,
+      "minItems": 0,
+      "type": "array",
+      "x-gie-canonical-order": "sorted by name",
+      "x-gie-unique": true
+    },
+    "model_name": {
+      "description": "Model family name.",
+      "maxLength": 48,
+      "minLength": 1,
+      "pattern": "^[a-z][a-z0-9_]{1,47}$",
+      "type": "string"
+    },
+    "model_version_id": {
+      "description": "identity.model_version_id(model_name, semver, artifact_sha256).",
+      "maxLength": 36,
+      "minLength": 36,
+      "pattern": "^mdl_[0-9a-f]{32}$",
+      "type": "string"
+    },
+    "parent_model_version_id": {
+      "anyOf": [
+        {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^mdl_[0-9a-f]{32}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Version this one was derived from, and the rollback target."
+    },
+    "producer": {
+      "description": "Component instance that emitted the record; together with the contract name it names the stream.",
+      "maxLength": 96,
+      "minLength": 1,
+      "pattern": "^[a-z][a-z0-9_]*(\\.[a-z0-9_]+){0,4}$",
+      "type": "string"
+    },
+    "revision": {
+      "description": "Status revision of this model version: 0, 1, 2, ...",
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "schema_version": {
+      "description": "Version of the contract the message was written with.",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+      "type": "string"
+    },
+    "seed": {
+      "anyOf": [
+        {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Random seed used for fitting."
+    },
+    "semver": {
+      "description": "Version of the model.",
+      "maxLength": 32,
+      "minLength": 1,
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+      "type": "string"
+    },
+    "seq": {
+      "description": "Position of the record in its stream: starts at 0 and increases by exactly 1.",
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "status": {
+      "description": "Promotion status.",
+      "enum": [
+        "RESEARCH",
+        "SHADOW",
+        "ACTIVE",
+        "RETIRED",
+        "ROLLED_BACK",
+        "REJECTED"
+      ],
+      "type": "string"
+    },
+    "status_time_ns": {
+      "description": "When this status was recorded.",
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "type": "integer",
+      "x-gie-unit": "ns since epoch, UTC"
+    },
+    "training_data_end_ns": {
+      "anyOf": [
+        {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Latest event time used for fitting; predictions for earlier instants are in-sample.",
+      "x-gie-unit": "ns since epoch, UTC"
+    },
+    "training_data_start_ns": {
+      "anyOf": [
+        {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Earliest event time used for fitting; null for rule sets.",
+      "x-gie-unit": "ns since epoch, UTC"
+    }
+  },
+  "required": [
+    "contract",
+    "schema_version",
+    "producer",
+    "seq",
+    "model_version_id",
+    "revision",
+    "model_name",
+    "semver",
+    "kind",
+    "status",
+    "status_time_ns",
+    "created_time_ns",
+    "artifact_sha256",
+    "artifact_uri",
+    "code_commit",
+    "contract_versions",
+    "metrics"
+  ],
+  "title": "ModelVersion 1.0.0",
+  "type": "object",
+  "x-gie-invariants": [
+    {
+      "id": "MDL-1",
+      "rule": "model_version_id equals identity.model_version_id(model_name, semver, artifact_sha256)"
+    },
+    {
+      "id": "MDL-2",
+      "rule": "status ACTIVE or ROLLED_BACK requires approved_by and approval_reference (owner decision)"
+    },
+    {
+      "id": "MDL-3",
+      "rule": "training_data_start_ns and training_data_end_ns are both null or both set with start <= end <= created_time_ns"
+    },
+    {
+      "id": "MDL-4",
+      "rule": "created_time_ns <= status_time_ns"
+    },
+    {
+      "id": "MDL-5",
+      "rule": "revision 0 has status RESEARCH"
+    },
+    {
+      "id": "MDL-6",
+      "rule": "status ROLLED_BACK requires parent_model_version_id (the version rolled back to)"
+    }
+  ]
+}

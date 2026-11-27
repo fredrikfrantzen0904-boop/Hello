@@ -1,0 +1,98 @@
+{
+  "$id": "urn:gie:contract:Clock:1.0.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "One reading of a run's clock.",
+  "properties": {
+    "clock_mode": {
+      "description": "REPLAY (virtual time) or SYSTEM (operating-system time).",
+      "enum": [
+        "REPLAY",
+        "SYSTEM"
+      ],
+      "type": "string"
+    },
+    "contract": {
+      "const": "Clock",
+      "description": "Contract name."
+    },
+    "mode": {
+      "description": "REPLAY or PAPER.",
+      "enum": [
+        "REPLAY",
+        "PAPER"
+      ],
+      "type": "string"
+    },
+    "monotonic_ns": {
+      "description": "Reading of the monotonic scale (arbitrary origin; only differences are meaningful).",
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "type": "integer",
+      "x-gie-unit": "ns"
+    },
+    "producer": {
+      "description": "Component instance that emitted the record; together with the contract name it names the stream.",
+      "maxLength": 96,
+      "minLength": 1,
+      "pattern": "^[a-z][a-z0-9_]*(\\.[a-z0-9_]+){0,4}$",
+      "type": "string"
+    },
+    "run_id": {
+      "description": "Run the clock belongs to.",
+      "maxLength": 36,
+      "minLength": 36,
+      "pattern": "^run_[0-9a-f]{32}$",
+      "type": "string"
+    },
+    "schema_version": {
+      "description": "Version of the contract the message was written with.",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+      "type": "string"
+    },
+    "seq": {
+      "description": "Position of the record in its stream: starts at 0 and increases by exactly 1.",
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "trading_day": {
+      "description": "Europe/Prague calendar date of wall_time_ns.",
+      "maxLength": 10,
+      "minLength": 10,
+      "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$",
+      "type": "string"
+    },
+    "wall_time_ns": {
+      "description": "The instant 'now'.",
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "type": "integer",
+      "x-gie-unit": "ns since epoch, UTC"
+    }
+  },
+  "required": [
+    "contract",
+    "schema_version",
+    "producer",
+    "seq",
+    "run_id",
+    "mode",
+    "clock_mode",
+    "wall_time_ns",
+    "monotonic_ns",
+    "trading_day"
+  ],
+  "title": "Clock 1.0.0",
+  "type": "object",
+  "x-gie-invariants": [
+    {
+      "id": "CLK-1",
+      "rule": "trading_day is the Europe/Prague calendar date of wall_time_ns"
+    },
+    {
+      "id": "CLK-2",
+      "rule": "a REPLAY run uses a REPLAY clock and a PAPER run uses the SYSTEM clock"
+    }
+  ]
+}

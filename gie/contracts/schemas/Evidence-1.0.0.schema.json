@@ -1,0 +1,463 @@
+{
+  "$defs": {
+    "Invalidation": {
+      "additionalProperties": false,
+      "description": "Observable price condition that invalidates the evidence.",
+      "properties": {
+        "basis": {
+          "description": "Which price the condition is evaluated on.",
+          "enum": [
+            "BID",
+            "ASK",
+            "MID",
+            "CANDLE_CLOSE"
+          ],
+          "type": "string"
+        },
+        "price": {
+          "description": "Invalidation price.",
+          "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
+          "type": "string",
+          "x-gie-exclusiveMinimum": "0",
+          "x-gie-type": "decimal",
+          "x-gie-unit": "USD per troy ounce"
+        },
+        "timeframe": {
+          "anyOf": [
+            {
+              "enum": [
+                "TICK",
+                "S1",
+                "M1",
+                "M5",
+                "M15",
+                "M30",
+                "H1",
+                "H4",
+                "D1"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Candle timeframe when basis is CANDLE_CLOSE, otherwise null."
+        },
+        "trigger": {
+          "description": "Invalidated when the basis price is at or below / at or above the price.",
+          "enum": [
+            "AT_OR_BELOW",
+            "AT_OR_ABOVE"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "price",
+        "trigger",
+        "basis"
+      ],
+      "type": "object",
+      "x-gie-invariants": [
+        {
+          "id": "INVAL-1",
+          "rule": "timeframe is set if and only if basis is CANDLE_CLOSE"
+        }
+      ]
+    },
+    "NamedValue": {
+      "additionalProperties": false,
+      "description": "A named finite number (feature value or metric).",
+      "properties": {
+        "name": {
+          "description": "Name from the owning dictionary.",
+          "maxLength": 48,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_]{1,47}$",
+          "type": "string"
+        },
+        "value": {
+          "description": "Finite numeric value.",
+          "type": "number"
+        }
+      },
+      "required": [
+        "name",
+        "value"
+      ],
+      "type": "object"
+    },
+    "PriceLevel": {
+      "additionalProperties": false,
+      "description": "A price with a role, e.g. the swept level or the bounds of a fair value gap.",
+      "properties": {
+        "price": {
+          "description": "Price of the level.",
+          "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
+          "type": "string",
+          "x-gie-exclusiveMinimum": "0",
+          "x-gie-type": "decimal",
+          "x-gie-unit": "USD per troy ounce"
+        },
+        "role": {
+          "description": "Role of the level from the feature dictionary (e.g. SWEPT_LEVEL, FVG_HIGH, PENDING_LIMIT).",
+          "maxLength": 32,
+          "minLength": 1,
+          "pattern": "^[A-Z][A-Z0-9_]{1,31}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "role",
+        "price"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "urn:gie:contract:Evidence:1.0.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Directional observation with scores, levels, stage, freshness and invalidation.",
+  "properties": {
+    "anchor_time_ns": {
+      "description": "Source event time of the market structure that defines the event (part of its identity).",
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "type": "integer",
+      "x-gie-unit": "ns since epoch, UTC"
+    },
+    "as_of_time_ns": {
+      "description": "Receive time of the newest input the record depends on (causality watermark).",
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "type": "integer",
+      "x-gie-unit": "ns since epoch, UTC"
+    },
+    "bearish_score": {
+      "anyOf": [
+        {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Strength of bearish evidence; null only when MISSING.",
+      "x-gie-unit": "0..1"
+    },
+    "bullish_score": {
+      "anyOf": [
+        {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Strength of bullish evidence; null only when MISSING.",
+      "x-gie-unit": "0..1"
+    },
+    "contract": {
+      "const": "Evidence",
+      "description": "Contract name."
+    },
+    "contradicts_evidence_id": {
+      "anyOf": [
+        {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^evd_[0-9a-f]{32}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Evidence that this record contradicts; set if and only if state is CONTRA."
+    },
+    "data_origin": {
+      "description": "Least trustworthy origin among the market data the record is derived from.",
+      "enum": [
+        "BROKER_FEED",
+        "HISTORICAL",
+        "SYNTHETIC_FIXTURE"
+      ],
+      "type": "string"
+    },
+    "decision_time_ns": {
+      "description": "Clock reading at which the producer created the record.",
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "type": "integer",
+      "x-gie-unit": "ns since epoch, UTC"
+    },
+    "engine": {
+      "description": "Producing engine.  For STRATEGY_ENGINE one of the six canonical engine ids.",
+      "maxLength": 32,
+      "minLength": 1,
+      "pattern": "^[a-z][a-z0-9_]{1,31}$",
+      "type": "string"
+    },
+    "evidence_id": {
+      "description": "identity.evidence_id(engine, market_event_id, revision).",
+      "maxLength": 36,
+      "minLength": 36,
+      "pattern": "^evd_[0-9a-f]{32}$",
+      "type": "string"
+    },
+    "features": {
+      "description": "Engine-specific numeric features from the feature dictionary.",
+      "items": {
+        "$ref": "#/$defs/NamedValue"
+      },
+      "maxItems": 64,
+      "minItems": 0,
+      "type": "array",
+      "x-gie-canonical-order": "sorted by name",
+      "x-gie-unique": true
+    },
+    "invalidation": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Invalidation"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Price condition that invalidates the evidence, if one exists."
+    },
+    "kind": {
+      "description": "Evidence kind from the feature dictionary (e.g. liquidity_sweep, fair_value_gap, breakout).",
+      "maxLength": 48,
+      "minLength": 1,
+      "pattern": "^[a-z][a-z0-9_]{1,47}$",
+      "type": "string"
+    },
+    "levels": {
+      "description": "Price levels that describe the event.",
+      "items": {
+        "$ref": "#/$defs/PriceLevel"
+      },
+      "maxItems": 32,
+      "minItems": 0,
+      "type": "array"
+    },
+    "market_event_id": {
+      "description": "Shared identity of the observed market event; equal ids are the same event (exact de-duplication).",
+      "maxLength": 36,
+      "minLength": 36,
+      "pattern": "^mev_[0-9a-f]{32}$",
+      "type": "string"
+    },
+    "missing_reason": {
+      "anyOf": [
+        {
+          "maxLength": 48,
+          "minLength": 1,
+          "pattern": "^[A-Z][A-Z0-9_]{1,47}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Why the producer could not evaluate; set if and only if state is MISSING."
+    },
+    "mode": {
+      "description": "REPLAY or PAPER.  No live mode exists (routing lock).",
+      "enum": [
+        "REPLAY",
+        "PAPER"
+      ],
+      "type": "string"
+    },
+    "producer": {
+      "description": "Component instance that emitted the record; together with the contract name it names the stream.",
+      "maxLength": 96,
+      "minLength": 1,
+      "pattern": "^[a-z][a-z0-9_]*(\\.[a-z0-9_]+){0,4}$",
+      "type": "string"
+    },
+    "producer_class": {
+      "description": "Kind of producing component.",
+      "enum": [
+        "STRATEGY_ENGINE",
+        "INTERMARKET",
+        "VOLATILITY",
+        "PATTERN"
+      ],
+      "type": "string"
+    },
+    "revision": {
+      "description": "0 for the first record of an observation, +1 per update.",
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "run_id": {
+      "description": "Run that produced the record.",
+      "maxLength": 36,
+      "minLength": 36,
+      "pattern": "^run_[0-9a-f]{32}$",
+      "type": "string"
+    },
+    "schema_version": {
+      "description": "Version of the contract the message was written with.",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+      "type": "string"
+    },
+    "seq": {
+      "description": "Position of the record in its stream: starts at 0 and increases by exactly 1.",
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "stage": {
+      "description": "Progress of the setup.",
+      "enum": [
+        "NONE",
+        "ANTICIPATED",
+        "FORMING",
+        "ARMED",
+        "TRIGGERED",
+        "CONFIRMED",
+        "COMPLETED"
+      ],
+      "type": "string"
+    },
+    "state": {
+      "description": "Evaluation state of the producer's condition.",
+      "enum": [
+        "ACTIVE",
+        "INACTIVE",
+        "MISSING",
+        "CONTRA",
+        "INVALIDATED",
+        "EXPIRED"
+      ],
+      "type": "string"
+    },
+    "supersedes_evidence_id": {
+      "anyOf": [
+        {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^evd_[0-9a-f]{32}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Previous revision replaced by this record; null for revision 0."
+    },
+    "symbol": {
+      "description": "Instrument the observation is about.",
+      "maxLength": 24,
+      "minLength": 1,
+      "pattern": "^[A-Z0-9][A-Z0-9._-]{0,23}$",
+      "type": "string"
+    },
+    "timeframe": {
+      "description": "Timeframe the observation was made on.",
+      "enum": [
+        "TICK",
+        "S1",
+        "M1",
+        "M5",
+        "M15",
+        "M30",
+        "H1",
+        "H4",
+        "D1"
+      ],
+      "type": "string"
+    },
+    "valid_until_ns": {
+      "description": "Expiry instant: the evidence must not be used at or after it.",
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "type": "integer",
+      "x-gie-unit": "ns since epoch, UTC"
+    }
+  },
+  "required": [
+    "contract",
+    "schema_version",
+    "producer",
+    "seq",
+    "run_id",
+    "mode",
+    "data_origin",
+    "decision_time_ns",
+    "as_of_time_ns",
+    "evidence_id",
+    "market_event_id",
+    "producer_class",
+    "engine",
+    "kind",
+    "symbol",
+    "timeframe",
+    "anchor_time_ns",
+    "state",
+    "stage",
+    "levels",
+    "valid_until_ns",
+    "revision",
+    "features"
+  ],
+  "title": "Evidence 1.0.0",
+  "type": "object",
+  "x-gie-invariants": [
+    {
+      "id": "CAUSAL-1",
+      "rule": "as_of_time_ns <= decision_time_ns (a record cannot depend on data received after it was created)"
+    },
+    {
+      "id": "EVD-1",
+      "rule": "evidence_id equals identity.evidence_id(engine, market_event_id, revision)"
+    },
+    {
+      "id": "EVD-2",
+      "rule": "state is MISSING if and only if both scores are null; otherwise both scores are numbers"
+    },
+    {
+      "id": "EVD-3",
+      "rule": "missing_reason is set if and only if state is MISSING"
+    },
+    {
+      "id": "EVD-4",
+      "rule": "when state is ACTIVE at least one score is greater than 0"
+    },
+    {
+      "id": "EVD-5",
+      "rule": "when state is INACTIVE, INVALIDATED or EXPIRED both scores are exactly 0"
+    },
+    {
+      "id": "EVD-6",
+      "rule": "contradicts_evidence_id is set if and only if state is CONTRA"
+    },
+    {
+      "id": "EVD-7",
+      "rule": "supersedes_evidence_id is set if and only if revision > 0"
+    },
+    {
+      "id": "EVD-8",
+      "rule": "when state is ACTIVE or CONTRA, valid_until_ns is later than decision_time_ns"
+    },
+    {
+      "id": "EVD-9",
+      "rule": "a STRATEGY_ENGINE producer is one of the six canonical engines and observes XAUUSD"
+    },
+    {
+      "id": "EVD-10",
+      "rule": "stage is NONE when state is INACTIVE or MISSING"
+    }
+  ]
+}

@@ -1,0 +1,362 @@
+{
+  "$id": "urn:gie:contract:RiskDecision:1.0.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Approval, reduction or rejection of a plan, with the size and risk granted.",
+  "properties": {
+    "account_currency": {
+      "description": "ISO 4217 account currency.",
+      "maxLength": 3,
+      "minLength": 3,
+      "pattern": "^[A-Z]{3}$",
+      "type": "string"
+    },
+    "as_of_time_ns": {
+      "description": "Receive time of the newest input the record depends on (causality watermark).",
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "type": "integer",
+      "x-gie-unit": "ns since epoch, UTC"
+    },
+    "attempt": {
+      "description": "0 for the first evaluation of the plan, +1 per re-evaluation.",
+      "maximum": 65535,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "contract": {
+      "const": "RiskDecision",
+      "description": "Contract name."
+    },
+    "daily_pnl_frac": {
+      "description": "Account-wide net result of the trading day including open positions of all systems.",
+      "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
+      "type": "string",
+      "x-gie-type": "decimal",
+      "x-gie-unit": "fraction of reference equity"
+    },
+    "daily_state": {
+      "description": "Daily risk state at decision time.",
+      "enum": [
+        "NORMAL",
+        "DEFENSIVE",
+        "PROFIT_PROTECTION",
+        "EMERGENCY_HALT"
+      ],
+      "type": "string"
+    },
+    "data_origin": {
+      "description": "Least trustworthy origin among the market data the record is derived from.",
+      "enum": [
+        "BROKER_FEED",
+        "HISTORICAL",
+        "SYNTHETIC_FIXTURE"
+      ],
+      "type": "string"
+    },
+    "decision_id": {
+      "description": "identity.risk_decision_id(run_id, plan_id, attempt).",
+      "maxLength": 36,
+      "minLength": 36,
+      "pattern": "^rsk_[0-9a-f]{32}$",
+      "type": "string"
+    },
+    "decision_time_ns": {
+      "description": "Clock reading at which the producer created the record.",
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "type": "integer",
+      "x-gie-unit": "ns since epoch, UTC"
+    },
+    "equity_amount": {
+      "anyOf": [
+        {
+          "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
+          "type": "string",
+          "x-gie-type": "decimal"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Account equity at decision time.",
+      "x-gie-unit": "account currency"
+    },
+    "gap_stress_loss_amount": {
+      "anyOf": [
+        {
+          "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
+          "type": "string",
+          "x-gie-minimum": "0",
+          "x-gie-type": "decimal"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Aggregate loss in the gap-stress scenario including this trade.",
+      "x-gie-unit": "account currency"
+    },
+    "margin_free_amount": {
+      "anyOf": [
+        {
+          "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
+          "type": "string",
+          "x-gie-type": "decimal"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Free margin before this decision.",
+      "x-gie-unit": "account currency"
+    },
+    "margin_required_amount": {
+      "anyOf": [
+        {
+          "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
+          "type": "string",
+          "x-gie-minimum": "0",
+          "x-gie-type": "decimal"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Margin required for the granted volume.",
+      "x-gie-unit": "account currency"
+    },
+    "mode": {
+      "description": "REPLAY or PAPER.  No live mode exists (routing lock).",
+      "enum": [
+        "REPLAY",
+        "PAPER"
+      ],
+      "type": "string"
+    },
+    "open_risk_amount": {
+      "anyOf": [
+        {
+          "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
+          "type": "string",
+          "x-gie-minimum": "0",
+          "x-gie-type": "decimal"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Aggregate risk of open positions before this decision.",
+      "x-gie-unit": "account currency"
+    },
+    "outcome": {
+      "description": "Result of the evaluation.",
+      "enum": [
+        "APPROVED",
+        "APPROVED_REDUCED",
+        "REJECTED"
+      ],
+      "type": "string"
+    },
+    "pending_risk_amount": {
+      "anyOf": [
+        {
+          "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
+          "type": "string",
+          "x-gie-minimum": "0",
+          "x-gie-type": "decimal"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Aggregate risk of pending orders and unexpired reservations before this decision.",
+      "x-gie-unit": "account currency"
+    },
+    "plan_id": {
+      "description": "Plan that was evaluated.",
+      "maxLength": 36,
+      "minLength": 36,
+      "pattern": "^pln_[0-9a-f]{32}$",
+      "type": "string"
+    },
+    "producer": {
+      "description": "Component instance that emitted the record; together with the contract name it names the stream.",
+      "maxLength": 96,
+      "minLength": 1,
+      "pattern": "^[a-z][a-z0-9_]*(\\.[a-z0-9_]+){0,4}$",
+      "type": "string"
+    },
+    "profit_floor_frac": {
+      "anyOf": [
+        {
+          "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
+          "type": "string",
+          "x-gie-type": "decimal"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Protected, non-decreasing daily profit floor; set if and only if daily_state is PROFIT_PROTECTION.",
+      "x-gie-unit": "fraction of reference equity"
+    },
+    "quality_validated": {
+      "description": "True only when the size was adapted using quality from an owner-approved (ACTIVE) model version.",
+      "type": "boolean"
+    },
+    "reason_codes": {
+      "description": "Reasons for a reduction or rejection (rule identifiers of the risk engine).",
+      "items": {
+        "maxLength": 48,
+        "minLength": 1,
+        "pattern": "^[A-Z][A-Z0-9_]{1,47}$",
+        "type": "string"
+      },
+      "maxItems": 32,
+      "minItems": 0,
+      "type": "array",
+      "x-gie-canonical-order": "sorted ascending",
+      "x-gie-unique": true
+    },
+    "reservation_id": {
+      "anyOf": [
+        {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^rsv_[0-9a-f]{32}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "identity.reservation_id(decision_id) of the reserved risk; null when rejected."
+    },
+    "risk_amount": {
+      "description": "Worst-case loss at the hard stop for the granted volume including expected costs; 0 when rejected.",
+      "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
+      "type": "string",
+      "x-gie-minimum": "0",
+      "x-gie-type": "decimal",
+      "x-gie-unit": "account currency"
+    },
+    "risk_frac": {
+      "description": "risk_amount as a fraction of the day's reference equity.",
+      "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
+      "type": "string",
+      "x-gie-minimum": "0",
+      "x-gie-type": "decimal",
+      "x-gie-unit": "fraction"
+    },
+    "run_id": {
+      "description": "Run that produced the record.",
+      "maxLength": 36,
+      "minLength": 36,
+      "pattern": "^run_[0-9a-f]{32}$",
+      "type": "string"
+    },
+    "schema_version": {
+      "description": "Version of the contract the message was written with.",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+      "type": "string"
+    },
+    "seq": {
+      "description": "Position of the record in its stream: starts at 0 and increases by exactly 1.",
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "trading_day": {
+      "description": "Prague trading day of decision_time_ns.",
+      "maxLength": 10,
+      "minLength": 10,
+      "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$",
+      "type": "string"
+    },
+    "valid_until_ns": {
+      "description": "Expiry instant of the approval and its reservation.",
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "type": "integer",
+      "x-gie-unit": "ns since epoch, UTC"
+    },
+    "volume_lots": {
+      "description": "Granted volume; 0 when rejected.",
+      "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
+      "type": "string",
+      "x-gie-minimum": "0",
+      "x-gie-type": "decimal",
+      "x-gie-unit": "lots"
+    }
+  },
+  "required": [
+    "contract",
+    "schema_version",
+    "producer",
+    "seq",
+    "run_id",
+    "mode",
+    "data_origin",
+    "decision_time_ns",
+    "as_of_time_ns",
+    "decision_id",
+    "plan_id",
+    "attempt",
+    "outcome",
+    "reason_codes",
+    "volume_lots",
+    "risk_amount",
+    "risk_frac",
+    "quality_validated",
+    "account_currency",
+    "trading_day",
+    "daily_state",
+    "daily_pnl_frac",
+    "valid_until_ns"
+  ],
+  "title": "RiskDecision 1.0.0",
+  "type": "object",
+  "x-gie-invariants": [
+    {
+      "id": "CAUSAL-1",
+      "rule": "as_of_time_ns <= decision_time_ns (a record cannot depend on data received after it was created)"
+    },
+    {
+      "id": "RSK-1",
+      "rule": "decision_id equals identity.risk_decision_id(run_id, plan_id, attempt)"
+    },
+    {
+      "id": "RSK-2",
+      "rule": "REJECTED grants nothing: volume_lots = 0, risk_amount = 0, risk_frac = 0, no reservation"
+    },
+    {
+      "id": "RSK-3",
+      "rule": "an approval grants volume_lots > 0 and risk_amount > 0 and carries reservation_id = identity.reservation_id(decision_id)"
+    },
+    {
+      "id": "RSK-4",
+      "rule": "reason_codes is non-empty unless outcome is APPROVED"
+    },
+    {
+      "id": "RSK-5",
+      "rule": "EMERGENCY_HALT never approves: outcome is REJECTED"
+    },
+    {
+      "id": "RSK-6",
+      "rule": "profit_floor_frac is set if and only if daily_state is PROFIT_PROTECTION"
+    },
+    {
+      "id": "RSK-7",
+      "rule": "at or below the profit floor no new risk is approved (G05: at exactly the floor no new risk)"
+    },
+    {
+      "id": "RSK-8",
+      "rule": "an approval expires later than decision_time_ns"
+    },
+    {
+      "id": "RSK-9",
+      "rule": "trading_day is the Europe/Prague calendar date of decision_time_ns"
+    }
+  ]
+}

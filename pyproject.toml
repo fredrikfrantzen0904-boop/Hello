@@ -1,0 +1,77 @@
+[project]
+name = "gie"
+version = "0.1.0"
+description = "Gold Intelligence Engine - paper/replay research system for XAUUSD (real order routing locked)"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+# Everything needed to run the integration CI locally.
+dev = [
+    "pytest>=8",
+    "pytest-cov>=5",
+    "hypothesis>=6.100",
+    "jsonschema>=4.21",
+    "PyYAML>=6",
+    "ruff>=0.6",
+    "mypy>=1.10",
+    "types-PyYAML",
+    "types-jsonschema",
+    "reportlab>=4",
+    "tzdata; platform_system == 'Windows'",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["gie*"]
+
+[tool.setuptools.package-data]
+"gie.contracts" = ["schemas/*.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers --strict-config"
+xfail_strict = true
+markers = [
+    "requirement(*ids): requirement ids from specifications/requirements_matrix.yaml covered by the test",
+    "acceptance(id): acceptance-test id from specifications/acceptance_tests.yaml",
+    "benchmark: measures performance and records it as evidence (no hard pass/fail threshold)",
+]
+filterwarnings = ["error"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+extend-exclude = ["specifications/source", "specifications/extracted"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "UP", "I", "SIM", "C4", "PIE", "RET", "PT", "RUF", "S", "T20", "DTZ", "PL"]
+ignore = [
+    "PLR0911", "PLR0912", "PLR0913", "PLR0915", "PLR2004",  # complexity/magic-number heuristics
+    "RET505",  # explicit else after return is kept where it reads better
+    "RUF009",  # contract fields are declared with fld(...) by design
+    "UP042",   # (str, Enum) kept: stable behaviour on every supported Python
+    "S101",    # assert is used for internal invariants and in tests
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S", "PLC0415", "DTZ"]
+"tools/**" = ["T20", "S603", "S607"]
+"gie/contracts/schema_gen.py" = ["T20"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_unreachable = true
+files = ["gie"]
+
+[tool.coverage.run]
+branch = true
+source = ["gie"]
+
+[tool.coverage.report]
+show_missing = true
+exclude_also = ["raise NotImplementedError", "if __name__ == .__main__.:", "\\.\\.\\."]

@@ -1,0 +1,46 @@
+ GIE / ENGINEERING SPECIFICATION / V1.0
+
+                                            Session 01 / Market Data
+
+ Launch and dependencies
+ Open a dedicated Claude Code session and worktree. Read MASTER.pdf or its extracted text.
+ Dependencies: 00. Owned scope: market_data/. Paths are proposed until coordinator approves actual
+ repository layout.
+
+ Integrated prompt - paste or attach to Claude
+ You are a specialist implementation engineer for Gold Intelligence Engine (GIE). The owner approves
+ material changes; ChatGPT provides architecture and independent review recommendations. Read the
+ approved master specification, CLAUDE.md, contracts and decision log before editing. Raise conflicts or
+ missing dependencies as change requests; never silently simplify, invent data, or mark placeholders
+ complete. Use a dedicated Git branch/worktree; do not overwrite other sessions, merge without owner
+ approval, or modify existing Gold Bot, AI trader, breakout bot or GCE baselines. Paper/replay only; build
+ execution interfaces but keep real order routing disabled. Do not expose credentials. Record exact commit,
+ files, tests, commands, results, limitations and requirement IDs. Submit a PDF review plus
+ machine-readable evidence; stop at the review gate.
+
+ Your assignment
+ Implement timestamped raw bid/ask tick ingestion and storage, historical replay, candle construction, broker
+ calendar, quality flags, sequence IDs and feed freshness. Audit missing history and acquire only authorized
+ data. Distinguish event time, receive time and decision time. Provide synchronized external feeds to 03.
+
+ Mandatory system requirements
+ Apply the master requirements G01-G10 relevant to this subsystem. Do not redefine shared contracts
+ unilaterally. If a dependency is unavailable, use explicitly labeled test fixtures only; do not claim integration
+ complete.
+
+ Acceptance tests
+ Out-of-order, duplicate, missing and stale tick tests; DST/holiday/rollover tests; deterministic replay;
+ throughput and latency distributions.
+
+ Review deliverables
+ Data inventory, coverage/gap report, schema, replay samples and feed benchmarks.
+
+ Stop condition
+ Submit the review package and await owner approval before merging. Report failed tests and
+ unimplemented requirements explicitly. No live trading.
+
+
+
+
+GIE | 27 Nov 2026 | Paper / research only                                                                            1
+

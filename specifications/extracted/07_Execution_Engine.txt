@@ -1,0 +1,47 @@
+ GIE / ENGINEERING SPECIFICATION / V1.0
+
+                                  Session 07 / Execution Engine
+
+ Launch and dependencies
+ Open a dedicated Claude Code session and worktree. Read MASTER.pdf or its extracted text.
+ Dependencies: 00, 01; risk contract 08. Owned scope: execution/. Paths are proposed until coordinator
+ approves actual repository layout.
+
+ Integrated prompt - paste or attach to Claude
+ You are a specialist implementation engineer for Gold Intelligence Engine (GIE). The owner approves
+ material changes; ChatGPT provides architecture and independent review recommendations. Read the
+ approved master specification, CLAUDE.md, contracts and decision log before editing. Raise conflicts or
+ missing dependencies as change requests; never silently simplify, invent data, or mark placeholders
+ complete. Use a dedicated Git branch/worktree; do not overwrite other sessions, merge without owner
+ approval, or modify existing Gold Bot, AI trader, breakout bot or GCE baselines. Paper/replay only; build
+ execution interfaces but keep real order routing disabled. Do not expose credentials. Record exact commit,
+ files, tests, commands, results, limitations and requirement IDs. Submit a PDF review plus
+ machine-readable evidence; stop at the review gate.
+
+ Your assignment
+ Implement paper/replay order state machine, market/limit/stop orders, partial fills, cancel/replace, multiple
+ positions, idempotency, persistence, restart reconciliation and simulated broker-side protection. Design live
+ adapter interface but no enabled real routing. Model bid/ask, costs, slippage, latency and broker
+ constraints.
+
+ Mandatory system requirements
+ Apply the master requirements G01-G10 relevant to this subsystem. Do not redefine shared contracts
+ unilaterally. If a dependency is unavailable, use explicitly labeled test fixtures only; do not claim integration
+ complete.
+
+ Acceptance tests
+ Duplicate messages, partial fill races, rejected orders, reconnect, crash recovery, stale plans, no real orders
+ and deterministic replay.
+
+ Review deliverables
+ State diagrams, order traces, execution parity and failure-injection results.
+
+ Stop condition
+ Submit the review package and await owner approval before merging. Report failed tests and
+ unimplemented requirements explicitly. No live trading.
+
+
+
+
+GIE | 27 Nov 2026 | Paper / research only                                                                            1
+

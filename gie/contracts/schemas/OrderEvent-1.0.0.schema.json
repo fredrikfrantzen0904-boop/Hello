@@ -1,0 +1,452 @@
+{
+  "$id": "urn:gie:contract:OrderEvent:1.0.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "One lifecycle event of one order at the simulated venue.",
+  "properties": {
+    "attached_stop_price": {
+      "anyOf": [
+        {
+          "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
+          "type": "string",
+          "x-gie-exclusiveMinimum": "0",
+          "x-gie-type": "decimal"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Protective stop held by the (simulated) broker for the resulting position; mandatory for entries.",
+      "x-gie-unit": "USD per troy ounce"
+    },
+    "attached_take_profit_price": {
+      "anyOf": [
+        {
+          "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
+          "type": "string",
+          "x-gie-exclusiveMinimum": "0",
+          "x-gie-type": "decimal"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Take profit held by the (simulated) broker, if any.",
+      "x-gie-unit": "USD per troy ounce"
+    },
+    "average_fill_price": {
+      "anyOf": [
+        {
+          "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
+          "type": "string",
+          "x-gie-exclusiveMinimum": "0",
+          "x-gie-type": "decimal"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Volume-weighted average price of all fills so far.",
+      "x-gie-unit": "USD per troy ounce"
+    },
+    "broker_order_id": {
+      "anyOf": [
+        {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^brk_[0-9a-f]{32}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Identifier assigned by the simulated broker once it knows the order."
+    },
+    "client_order_id": {
+      "description": "Idempotency key of the order: identity.client_order_id(run, origin, intent, attempt).",
+      "maxLength": 36,
+      "minLength": 36,
+      "pattern": "^ord_[0-9a-f]{32}$",
+      "type": "string"
+    },
+    "contract": {
+      "const": "OrderEvent",
+      "description": "Contract name."
+    },
+    "cumulative_filled_lots": {
+      "description": "Quantity filled so far including this event.",
+      "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
+      "type": "string",
+      "x-gie-minimum": "0",
+      "x-gie-type": "decimal",
+      "x-gie-unit": "lots"
+    },
+    "data_origin": {
+      "description": "Least trustworthy origin among the market data the record is derived from.",
+      "enum": [
+        "BROKER_FEED",
+        "HISTORICAL",
+        "SYNTHETIC_FIXTURE"
+      ],
+      "type": "string"
+    },
+    "event_time_ns": {
+      "description": "When it happened: at GIE for *_REQUESTED events, at the simulated broker otherwise.",
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "type": "integer",
+      "x-gie-unit": "ns since epoch, UTC"
+    },
+    "event_type": {
+      "description": "What happened.",
+      "enum": [
+        "SUBMIT_REQUESTED",
+        "ACCEPTED",
+        "REJECTED",
+        "PARTIALLY_FILLED",
+        "FILLED",
+        "CANCEL_REQUESTED",
+        "CANCELED",
+        "CANCEL_REJECTED",
+        "REPLACE_REQUESTED",
+        "REPLACED",
+        "REPLACE_REJECTED",
+        "EXPIRED",
+        "RECONCILED"
+      ],
+      "type": "string"
+    },
+    "intent": {
+      "description": "Why the order exists.",
+      "enum": [
+        "ENTRY",
+        "PROTECTIVE_STOP",
+        "TAKE_PROFIT",
+        "EXIT"
+      ],
+      "type": "string"
+    },
+    "last_fill_cost_amount": {
+      "anyOf": [
+        {
+          "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
+          "type": "string",
+          "x-gie-minimum": "0",
+          "x-gie-type": "decimal"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Commission and fees charged for this fill.",
+      "x-gie-unit": "account currency"
+    },
+    "last_fill_lots": {
+      "anyOf": [
+        {
+          "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
+          "type": "string",
+          "x-gie-exclusiveMinimum": "0",
+          "x-gie-type": "decimal"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Quantity filled by this event; set only on fill events.",
+      "x-gie-unit": "lots"
+    },
+    "last_fill_price": {
+      "anyOf": [
+        {
+          "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
+          "type": "string",
+          "x-gie-exclusiveMinimum": "0",
+          "x-gie-type": "decimal"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Price of this fill; set only on fill events.",
+      "x-gie-unit": "USD per troy ounce"
+    },
+    "limit_price": {
+      "anyOf": [
+        {
+          "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
+          "type": "string",
+          "x-gie-exclusiveMinimum": "0",
+          "x-gie-type": "decimal"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Limit price; set if and only if order_type is LIMIT.",
+      "x-gie-unit": "USD per troy ounce"
+    },
+    "mode": {
+      "description": "REPLAY or PAPER.  No live mode exists (routing lock).",
+      "enum": [
+        "REPLAY",
+        "PAPER"
+      ],
+      "type": "string"
+    },
+    "order_event_id": {
+      "description": "identity.order_event_id(client_order_id, order_seq).",
+      "maxLength": 36,
+      "minLength": 36,
+      "pattern": "^oev_[0-9a-f]{32}$",
+      "type": "string"
+    },
+    "order_seq": {
+      "description": "Index of the event within its order: 0, 1, 2, ...",
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "order_state": {
+      "description": "State of the order after this event.",
+      "enum": [
+        "PENDING_SUBMIT",
+        "WORKING",
+        "PARTIALLY_FILLED",
+        "PENDING_CANCEL",
+        "PENDING_REPLACE",
+        "FILLED",
+        "CANCELED",
+        "REJECTED",
+        "EXPIRED"
+      ],
+      "type": "string"
+    },
+    "order_type": {
+      "description": "MARKET, LIMIT or STOP.",
+      "enum": [
+        "MARKET",
+        "LIMIT",
+        "STOP"
+      ],
+      "type": "string"
+    },
+    "plan_id": {
+      "anyOf": [
+        {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^pln_[0-9a-f]{32}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Plan behind an entry order."
+    },
+    "position_id": {
+      "anyOf": [
+        {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^pos_[0-9a-f]{32}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Position a protective or exit order belongs to."
+    },
+    "producer": {
+      "description": "Component instance that emitted the record; together with the contract name it names the stream.",
+      "maxLength": 96,
+      "minLength": 1,
+      "pattern": "^[a-z][a-z0-9_]*(\\.[a-z0-9_]+){0,4}$",
+      "type": "string"
+    },
+    "reason_code": {
+      "anyOf": [
+        {
+          "maxLength": 48,
+          "minLength": 1,
+          "pattern": "^[A-Z][A-Z0-9_]{1,47}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Reason of a rejection, cancellation, expiry or reconciliation."
+    },
+    "receive_time_ns": {
+      "description": "When GIE observed the event (includes modelled latency).",
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "type": "integer",
+      "x-gie-unit": "ns since epoch, UTC"
+    },
+    "risk_decision_id": {
+      "anyOf": [
+        {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^rsk_[0-9a-f]{32}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Risk approval behind an entry order."
+    },
+    "run_id": {
+      "description": "Run that produced the record.",
+      "maxLength": 36,
+      "minLength": 36,
+      "pattern": "^run_[0-9a-f]{32}$",
+      "type": "string"
+    },
+    "schema_version": {
+      "description": "Version of the contract the message was written with.",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+      "type": "string"
+    },
+    "seq": {
+      "description": "Position of the record in its stream: starts at 0 and increases by exactly 1.",
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "side": {
+      "description": "Direction of the order.",
+      "enum": [
+        "BUY",
+        "SELL"
+      ],
+      "type": "string"
+    },
+    "symbol": {
+      "description": "Always XAUUSD: GIE trades only gold.",
+      "enum": [
+        "XAUUSD"
+      ],
+      "maxLength": 24,
+      "minLength": 1,
+      "type": "string"
+    },
+    "trigger_price": {
+      "anyOf": [
+        {
+          "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
+          "type": "string",
+          "x-gie-exclusiveMinimum": "0",
+          "x-gie-type": "decimal"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Stop trigger price; set if and only if order_type is STOP.",
+      "x-gie-unit": "USD per troy ounce"
+    },
+    "valid_until_ns": {
+      "anyOf": [
+        {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Instant at which a working order expires; null for no expiry.",
+      "x-gie-unit": "ns since epoch, UTC"
+    },
+    "venue": {
+      "description": "Always SIMULATED (routing lock).",
+      "enum": [
+        "SIMULATED"
+      ],
+      "type": "string"
+    },
+    "volume_lots": {
+      "description": "Total order quantity.",
+      "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
+      "type": "string",
+      "x-gie-exclusiveMinimum": "0",
+      "x-gie-type": "decimal",
+      "x-gie-unit": "lots"
+    }
+  },
+  "required": [
+    "contract",
+    "schema_version",
+    "producer",
+    "seq",
+    "run_id",
+    "mode",
+    "data_origin",
+    "order_event_id",
+    "client_order_id",
+    "order_seq",
+    "event_type",
+    "order_state",
+    "event_time_ns",
+    "receive_time_ns",
+    "venue",
+    "symbol",
+    "side",
+    "order_type",
+    "intent",
+    "volume_lots",
+    "cumulative_filled_lots"
+  ],
+  "title": "OrderEvent 1.0.0",
+  "type": "object",
+  "x-gie-invariants": [
+    {
+      "id": "OEV-1",
+      "rule": "order_event_id equals identity.order_event_id(client_order_id, order_seq)"
+    },
+    {
+      "id": "OEV-2",
+      "rule": "order_seq is 0 if and only if event_type is SUBMIT_REQUESTED"
+    },
+    {
+      "id": "OEV-3",
+      "rule": "order_state is a state that event_type can lead to (see ORDER_TRANSITIONS)"
+    },
+    {
+      "id": "OEV-4",
+      "rule": "limit_price is set iff order_type is LIMIT; trigger_price is set iff order_type is STOP"
+    },
+    {
+      "id": "OEV-5",
+      "rule": "an ENTRY order references its plan and risk approval and carries a protective stop"
+    },
+    {
+      "id": "OEV-6",
+      "rule": "a non-ENTRY order references the position it protects or closes and has no attached protection"
+    },
+    {
+      "id": "OEV-7",
+      "rule": "fill fields are consistent: last_fill_* only on fill events, 0 <= cumulative <= volume, average_fill_price iff cumulative > 0, order_state is FILLED iff cumulative = volume, PENDING_SUBMIT and WORKING have no fills, PARTIALLY_FILLED has some"
+    },
+    {
+      "id": "OEV-8",
+      "rule": "reason_code is set on REJECTED, CANCEL_REJECTED, REPLACE_REJECTED and RECONCILED events"
+    },
+    {
+      "id": "OEV-9",
+      "rule": "attached protection is on the correct side of the order price (stop on the losing side, take profit on the winning side)"
+    },
+    {
+      "id": "OEV-10",
+      "rule": "event_time_ns <= receive_time_ns (the venue is simulated in-process, so there is no clock offset)"
+    }
+  ]
+}

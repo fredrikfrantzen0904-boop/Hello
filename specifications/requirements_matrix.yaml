@@ -1,0 +1,5266 @@
+schema_version: 1
+title: GIE requirements matrix
+description: Atomised requirements extracted from specifications/source/*.pdf (text in specifications/extracted/)
+  and from the owner's launch directive. This file is the single source of truth; specifications/REQUIREMENTS_MATRIX.md
+  is rendered from it by tools/gie_registers.py. Never delete a requirement; change status only with evidence.
+status_values:
+  not_started: No implementation work yet.
+  in_progress: Work started, not complete.
+  partial: A foundation portion is delivered; the remainder is owned by a later session (see contributions).
+  implemented: Code/document exists but automated or review evidence is incomplete.
+  verified: Implemented and backed by recorded, reproducible evidence.
+  blocked: Cannot proceed; see the linked blocker / change request.
+  not_applicable: Informational clause with nothing to implement (justified in notes).
+review_status_values:
+- unverified
+- approved
+- conditional
+- rejected
+requirements:
+- id: M-AUTH-01
+  source: MASTER.pdf
+  section: Authority and scope
+  kind: governance
+  text: You are a specialist implementation engineer for Gold Intelligence Engine (GIE).
+  sessions: [S00, S01, S02, S03, S04, S05, S06, S07, S08, S09, S10, S11, S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: M-AUTH-02
+  source: MASTER.pdf
+  section: Authority and scope
+  kind: governance
+  text: The owner approves material changes.
+  sessions: [S00, S01, S02, S03, S04, S05, S06, S07, S08, S09, S10, S11, S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: M-AUTH-03
+  source: MASTER.pdf
+  section: Authority and scope
+  kind: governance
+  text: ChatGPT provides architecture and independent review recommendations.
+  sessions: [S00, S01, S02, S03, S04, S05, S06, S07, S08, S09, S10, S11, S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: M-AUTH-04
+  source: MASTER.pdf
+  section: Authority and scope
+  kind: governance
+  text: Read the approved master specification, CLAUDE.md, contracts and decision log before editing.
+  sessions: [S00, S01, S02, S03, S04, S05, S06, S07, S08, S09, S10, S11, S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: M-AUTH-05
+  source: MASTER.pdf
+  section: Authority and scope
+  kind: governance
+  text: Raise conflicts or missing dependencies as change requests.
+  sessions: [S00, S01, S02, S03, S04, S05, S06, S07, S08, S09, S10, S11, S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: M-AUTH-06
+  source: MASTER.pdf
+  section: Authority and scope
+  kind: governance
+  text: Never silently simplify.
+  sessions: [S00, S01, S02, S03, S04, S05, S06, S07, S08, S09, S10, S11, S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: M-AUTH-07
+  source: MASTER.pdf
+  section: Authority and scope
+  kind: governance
+  text: Never invent data.
+  sessions: [S00, S01, S02, S03, S04, S05, S06, S07, S08, S09, S10, S11, S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: M-AUTH-08
+  source: MASTER.pdf
+  section: Authority and scope
+  kind: governance
+  text: Never mark placeholders complete.
+  sessions: [S00, S01, S02, S03, S04, S05, S06, S07, S08, S09, S10, S11, S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: M-AUTH-09
+  source: MASTER.pdf
+  section: Authority and scope
+  kind: governance
+  text: Use a dedicated Git branch/worktree.
+  sessions: [S00, S01, S02, S03, S04, S05, S06, S07, S08, S09, S10, S11, S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: M-AUTH-10
+  source: MASTER.pdf
+  section: Authority and scope
+  kind: governance
+  text: Do not overwrite other sessions.
+  sessions: [S00, S01, S02, S03, S04, S05, S06, S07, S08, S09, S10, S11, S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: M-AUTH-11
+  source: MASTER.pdf
+  section: Authority and scope
+  kind: governance
+  text: Do not merge without owner approval.
+  sessions: [S00, S01, S02, S03, S04, S05, S06, S07, S08, S09, S10, S11, S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: M-AUTH-12
+  source: MASTER.pdf
+  section: Authority and scope
+  kind: governance
+  text: Do not modify existing Gold Bot, AI trader, breakout bot or GCE baselines.
+  sessions: [S00, S01, S02, S03, S04, S05, S06, S07, S08, S09, S10, S11, S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: M-AUTH-13
+  source: MASTER.pdf
+  section: Authority and scope
+  kind: governance
+  text: Paper/replay only.
+  sessions: [S00, S01, S02, S03, S04, S05, S06, S07, S08, S09, S10, S11, S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: M-AUTH-14
+  source: MASTER.pdf
+  section: Authority and scope
+  kind: governance
+  text: Build execution interfaces but keep real order routing disabled.
+  sessions: [S00, S07]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: M-AUTH-15
+  source: MASTER.pdf
+  section: Authority and scope
+  kind: governance
+  text: Do not expose credentials.
+  sessions: [S00, S01, S02, S03, S04, S05, S06, S07, S08, S09, S10, S11, S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: M-AUTH-16
+  source: MASTER.pdf
+  section: Authority and scope
+  kind: governance
+  text: Record exact commit, files, tests, commands, results, limitations and requirement IDs.
+  sessions: [S00, S01, S02, S03, S04, S05, S06, S07, S08, S09, S10, S11, S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: M-AUTH-17
+  source: MASTER.pdf
+  section: Authority and scope
+  kind: governance
+  text: Submit a PDF review plus machine-readable evidence.
+  sessions: [S00, S01, S02, S03, S04, S05, S06, S07, S08, S09, S10, S11, S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: M-AUTH-18
+  source: MASTER.pdf
+  section: Authority and scope
+  kind: governance
+  text: Stop at the review gate.
+  sessions: [S00, S01, S02, S03, S04, S05, S06, S07, S08, S09, S10, S11, S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G01-01
+  source: MASTER.pdf
+  section: G01 | Objective
+  kind: system
+  text: XAUUSD exclusively.
+  sessions: [S00, S01, S05, S07, S08]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G01-02
+  source: MASTER.pdf
+  section: G01 | Objective
+  kind: system
+  text: Hybrid scalping and intraday.
+  sessions: [S05, S06, S10]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G01-03
+  source: MASTER.pdf
+  section: G01 | Objective
+  kind: system
+  text: Continuous monitoring during actual broker sessions.
+  sessions: [S01, S06, S07]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G01-04
+  source: MASTER.pdf
+  section: G01 | Objective
+  kind: system
+  text: Cautious Asian-session selection.
+  sessions: [S05, S08, S10]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G01-05
+  source: MASTER.pdf
+  section: G01 | Objective
+  kind: system
+  text: Overnight positions when permitted and monitored.
+  sessions: [S07, S08, S06]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G01-06
+  source: MASTER.pdf
+  section: G01 | Objective
+  kind: system
+  text: No weekend exposure.
+  sessions: [S08, S07, S01]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G01-07
+  source: MASTER.pdf
+  section: G01 | Objective
+  kind: system
+  text: Target at least one valid trade per eligible day (research goal).
+  sessions: [S05, S10]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G01-08
+  source: MASTER.pdf
+  section: G01 | Objective
+  kind: system
+  text: Target at least 5% average daily net ROI (research goal).
+  sessions: [S10, S05, S08]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G01-09
+  source: MASTER.pdf
+  section: G01 | Objective
+  kind: system
+  text: Report misses (of the trade-frequency and ROI targets).
+  sessions: [S10, S09, S11]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G01-10
+  source: MASTER.pdf
+  section: G01 | Objective
+  kind: system
+  text: Never force trades or leverage.
+  sessions: [S05, S08]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G01-11
+  source: MASTER.pdf
+  section: G01 | Objective
+  kind: system
+  text: These are research goals, not established performance.
+  sessions: [S00, S01, S02, S03, S04, S05, S06, S07, S08, S09, S10, S11, S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G02-01
+  source: MASTER.pdf
+  section: G02 | Intelligence
+  kind: system
+  text: 'Six existing engines provide directional scores and evidence: Cavemen, Silver Bullet, Liquidity Hunter,
+    ORB + VWAP, VWAP Trend Rider, Sweep & Reversal.'
+  sessions: [S02, S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G02-02
+  source: MASTER.pdf
+  section: G02 | Intelligence
+  kind: system
+  text: Deduplicate correlated events.
+  sessions: [S02, S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G02-03
+  source: MASTER.pdf
+  section: G02 | Intelligence
+  kind: system
+  text: Build setup-specific expected net R.
+  sessions: [S04, S05, S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G02-04
+  source: MASTER.pdf
+  section: G02 | Intelligence
+  kind: system
+  text: Build uncertainty (for setup-specific expected net R).
+  sessions: [S04, S05, S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G02-05
+  source: MASTER.pdf
+  section: G02 | Intelligence
+  kind: system
+  text: Build price destinations.
+  sessions: [S04, S05, S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G02-06
+  source: MASTER.pdf
+  section: G02 | Intelligence
+  kind: system
+  text: Build flexible trade plans.
+  sessions: [S05, S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G02-07
+  source: MASTER.pdf
+  section: G02 | Intelligence
+  kind: system
+  text: Actual market behavior overrides historical expectations.
+  sessions: [S05, S06]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G02-08
+  source: MASTER.pdf
+  section: G02 | Intelligence
+  kind: system
+  text: Preserve GCE-B (baseline).
+  sessions: [S00, S02, S10]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G02-09
+  source: MASTER.pdf
+  section: G02 | Intelligence
+  kind: system
+  text: Preserve exact Round 1 baselines.
+  sessions: [S00, S02, S10]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G03-01
+  source: MASTER.pdf
+  section: G03 | Timing
+  kind: system
+  text: Anticipate, prepare, react, protect.
+  sessions: [S05, S06, S03]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G03-02
+  source: MASTER.pdf
+  section: G03 | Timing
+  kind: system
+  text: Reflex every tick.
+  sessions: [S06]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G03-03
+  source: MASTER.pdf
+  section: G03 | Timing
+  kind: system
+  text: Tactical every tick or second.
+  sessions: [S05, S06]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G03-04
+  source: MASTER.pdf
+  section: G03 | Timing
+  kind: system
+  text: Strategic on completed candles and asynchronous background updates.
+  sessions: [S02, S04, S05]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G03-05
+  source: MASTER.pdf
+  section: G03 | Timing
+  kind: system
+  text: No network LLM in critical path.
+  sessions: [S00, S01, S02, S03, S04, S05, S06, S07, S08, S09, S10, S11, S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G03-06
+  source: MASTER.pdf
+  section: G03 | Timing
+  kind: system
+  text: No training in critical path.
+  sessions: [S04, S09, S06]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G03-07
+  source: MASTER.pdf
+  section: G03 | Timing
+  kind: system
+  text: 'Proposed local target: tick processing <1 ms.'
+  sessions: [S01, S06, S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G03-08
+  source: MASTER.pdf
+  section: G03 | Timing
+  kind: system
+  text: 'Proposed local target: protection decision <5 ms.'
+  sessions: [S06]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G03-09
+  source: MASTER.pdf
+  section: G03 | Timing
+  kind: system
+  text: 'Proposed local target: tactical <20 ms.'
+  sessions: [S05]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G03-10
+  source: MASTER.pdf
+  section: G03 | Timing
+  kind: system
+  text: Measure p50/p95/p99/max.
+  sessions: [S00, S01, S05, S06, S07, S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G03-11
+  source: MASTER.pdf
+  section: G03 | Timing
+  kind: system
+  text: Measure end-to-end delays.
+  sessions: [S00, S01, S06, S07, S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G03-12
+  source: MASTER.pdf
+  section: G03 | Timing
+  kind: system
+  text: Reject stale signals.
+  sessions: [S00, S05, S06, S07, S08]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G03-13
+  source: MASTER.pdf
+  section: G03 | Timing
+  kind: system
+  text: No guarantee of zero latency.
+  sessions: [S00, S01, S02, S03, S04, S05, S06, S07, S08, S09, S10, S11, S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G04-01
+  source: MASTER.pdf
+  section: G04 | Risk
+  kind: system
+  text: No arbitrary position count.
+  sessions: [S08, S07]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G04-02
+  source: MASTER.pdf
+  section: G04 | Risk
+  kind: system
+  text: Aggregate gross/net risk.
+  sessions: [S08]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G04-03
+  source: MASTER.pdf
+  section: G04 | Risk
+  kind: system
+  text: Aggregate correlated risk.
+  sessions: [S08]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G04-04
+  source: MASTER.pdf
+  section: G04 | Risk
+  kind: system
+  text: Aggregate pending orders (into risk).
+  sessions: [S08, S07]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G04-05
+  source: MASTER.pdf
+  section: G04 | Risk
+  kind: system
+  text: Aggregate margin (into risk).
+  sessions: [S08]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G04-06
+  source: MASTER.pdf
+  section: G04 | Risk
+  kind: system
+  text: Aggregate costs (into risk).
+  sessions: [S08, S07]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G04-07
+  source: MASTER.pdf
+  section: G04 | Risk
+  kind: system
+  text: Aggregate gap stress (into risk).
+  sessions: [S08]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G04-08
+  source: MASTER.pdf
+  section: G04 | Risk
+  kind: system
+  text: Adaptive sizing only from validated quality.
+  sessions: [S08, S04]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G04-09
+  source: MASTER.pdf
+  section: G04 | Risk
+  kind: system
+  text: No martingale.
+  sessions: [S08]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G04-10
+  source: MASTER.pdf
+  section: G04 | Risk
+  kind: system
+  text: No averaging down.
+  sessions: [S08, S05]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G04-11
+  source: MASTER.pdf
+  section: G04 | Risk
+  kind: system
+  text: No widening protective stops.
+  sessions: [S06, S07, S08, S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G04-12
+  source: MASTER.pdf
+  section: G04 | Risk
+  kind: system
+  text: Hard protective stops.
+  sessions: [S05, S06, S07, S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G04-13
+  source: MASTER.pdf
+  section: G04 | Risk
+  kind: system
+  text: Fast monotonic profit ratchet based on executable net P&L.
+  sessions: [S06, S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G04-14
+  source: MASTER.pdf
+  section: G04 | Risk
+  kind: system
+  text: Compare (ratchet/dynamic protection) against fixed exits.
+  sessions: [S06, S10]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G05-01
+  source: MASTER.pdf
+  section: G05 | Daily states
+  kind: system
+  text: Normal above -2% until +5%.
+  sessions: [S08, S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G05-02
+  source: MASTER.pdf
+  section: G05 | Daily states
+  kind: system
+  text: Defensive at -2%, reduced risk and stricter quality.
+  sessions: [S08, S05]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G05-03
+  source: MASTER.pdf
+  section: G05 | Daily states
+  kind: system
+  text: Proposed recovery at -1.75% (configurable and subject to validation).
+  sessions: [S08]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G05-04
+  source: MASTER.pdf
+  section: G05 | Daily states
+  kind: system
+  text: Emergency halt at -3% (configurable and subject to validation).
+  sessions: [S08]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G05-05
+  source: MASTER.pdf
+  section: G05 | Daily states
+  kind: system
+  text: Thresholds configurable and subject to validation.
+  sessions: [S08, S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G05-06
+  source: MASTER.pdf
+  section: G05 | Daily states
+  kind: system
+  text: Above +5% protect a nondecreasing daily profit floor.
+  sessions: [S08, S06]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G05-07
+  source: MASTER.pdf
+  section: G05 | Daily states
+  kind: system
+  text: Exceptional setups only with surplus risk budget after costs and open exposure.
+  sessions: [S08, S05]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G05-08
+  source: MASTER.pdf
+  section: G05 | Daily states
+  kind: system
+  text: At exactly the floor no new risk.
+  sessions: [S08]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G05-09
+  source: MASTER.pdf
+  section: G05 | Daily states
+  kind: system
+  text: Slippage can breach floors.
+  sessions: [S08, S07, S10]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G05-10
+  source: MASTER.pdf
+  section: G05 | Daily states
+  kind: system
+  text: Track Prague day.
+  sessions: [S08, S00, S01]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G05-11
+  source: MASTER.pdf
+  section: G05 | Daily states
+  kind: system
+  text: Track actual account rules.
+  sessions: [S08]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G05-12
+  source: MASTER.pdf
+  section: G05 | Daily states
+  kind: system
+  text: Track other positions (on the account).
+  sessions: [S08, S07, S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G06-01
+  source: MASTER.pdf
+  section: G06 | Volatility and external data
+  kind: system
+  text: Scheduled news and unexpected volatility mode.
+  sessions: [S03, S06]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G06-02
+  source: MASTER.pdf
+  section: G06 | Volatility and external data
+  kind: system
+  text: Prepare scenarios.
+  sessions: [S03, S05]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G06-03
+  source: MASTER.pdf
+  section: G06 | Volatility and external data
+  kind: system
+  text: Assess spread, acceleration and persistence.
+  sessions: [S03, S06, S01]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G06-04
+  source: MASTER.pdf
+  section: G06 | Volatility and external data
+  kind: system
+  text: Reject stale entries.
+  sessions: [S05, S07, S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G06-05
+  source: MASTER.pdf
+  section: G06 | Volatility and external data
+  kind: system
+  text: Verify account news restrictions.
+  sessions: [S08, S03]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G06-06
+  source: MASTER.pdf
+  section: G06 | Volatility and external data
+  kind: system
+  text: Observe XAGUSD, DXY, GC futures, Treasury yields, real yields, S&P 500, VIX, USDJPY and timestamped news
+    where licensed and available.
+  sessions: [S01, S03]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G06-07
+  source: MASTER.pdf
+  section: G06 | Volatility and external data
+  kind: system
+  text: Trade only gold.
+  sessions: [S00, S05, S07, S08]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G06-08
+  source: MASTER.pdf
+  section: G06 | Volatility and external data
+  kind: system
+  text: Learn conditional lead/lag.
+  sessions: [S03]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G06-09
+  source: MASTER.pdf
+  section: G06 | Volatility and external data
+  kind: system
+  text: Never assume fixed correlations.
+  sessions: [S03, S04]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G07-01
+  source: MASTER.pdf
+  section: G07 | Learning
+  kind: system
+  text: Historical replay and market memory.
+  sessions: [S09, S10, S04]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G07-02
+  source: MASTER.pdf
+  section: G07 | Learning
+  kind: system
+  text: Setup-specific return models.
+  sessions: [S04, S09]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G07-03
+  source: MASTER.pdf
+  section: G07 | Learning
+  kind: system
+  text: New pattern discovery.
+  sessions: [S09]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G07-04
+  source: MASTER.pdf
+  section: G07 | Learning
+  kind: system
+  text: Rejected and missed opportunities (learning).
+  sessions: [S09, S05]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G07-05
+  source: MASTER.pdf
+  section: G07 | Learning
+  kind: system
+  text: Execution and exit learning.
+  sessions: [S09, S06, S07]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G07-06
+  source: MASTER.pdf
+  section: G07 | Learning
+  kind: system
+  text: No manual-trade learning.
+  sessions: [S09]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G07-07
+  source: MASTER.pdf
+  section: G07 | Learning
+  kind: system
+  text: Separate decision quality from outcomes.
+  sessions: [S09]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G07-08
+  source: MASTER.pdf
+  section: G07 | Learning
+  kind: system
+  text: Background research isolated from active model.
+  sessions: [S09, S04]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G07-09
+  source: MASTER.pdf
+  section: G07 | Learning
+  kind: system
+  text: Shadow validation.
+  sessions: [S09]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G07-10
+  source: MASTER.pdf
+  section: G07 | Learning
+  kind: system
+  text: Versioned promotion with owner approval.
+  sessions: [S09, S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G07-11
+  source: MASTER.pdf
+  section: G07 | Learning
+  kind: system
+  text: Rollback.
+  sessions: [S09, S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G07-12
+  source: MASTER.pdf
+  section: G07 | Learning
+  kind: system
+  text: No untested online changes.
+  sessions: [S09]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G08-01
+  source: MASTER.pdf
+  section: G08 | Reliability
+  kind: system
+  text: Build autonomous order lifecycle foundation now.
+  sessions: [S07, S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G08-02
+  source: MASTER.pdf
+  section: G08 | Reliability
+  kind: system
+  text: Simulated adapter.
+  sessions: [S07]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G08-03
+  source: MASTER.pdf
+  section: G08 | Reliability
+  kind: system
+  text: Live lock.
+  sessions: [S00, S07, S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G08-04
+  source: MASTER.pdf
+  section: G08 | Reliability
+  kind: system
+  text: Persistent state.
+  sessions: [S07, S08]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G08-05
+  source: MASTER.pdf
+  section: G08 | Reliability
+  kind: system
+  text: Restart reconciliation.
+  sessions: [S07]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G08-06
+  source: MASTER.pdf
+  section: G08 | Reliability
+  kind: system
+  text: Disconnect/stale-feed fail closed.
+  sessions: [S01, S06, S07, S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G08-07
+  source: MASTER.pdf
+  section: G08 | Reliability
+  kind: system
+  text: Idempotent orders.
+  sessions: [S07, S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G08-08
+  source: MASTER.pdf
+  section: G08 | Reliability
+  kind: system
+  text: Broker-side protection design.
+  sessions: [S07]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G08-09
+  source: MASTER.pdf
+  section: G08 | Reliability
+  kind: system
+  text: Overnight monitoring.
+  sessions: [S06, S07, S08]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G08-10
+  source: MASTER.pdf
+  section: G08 | Reliability
+  kind: system
+  text: Never enable real execution during this project phase.
+  sessions: [S00, S01, S02, S03, S04, S05, S06, S07, S08, S09, S10, S11, S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G09-01
+  source: MASTER.pdf
+  section: G09 | Evidence
+  kind: evidence
+  text: 'Round 2: 23,481 setups (existing evidence, to be reconciled).'
+  sessions: [S10, S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G09-02
+  source: MASTER.pdf
+  section: G09 | Evidence
+  kind: evidence
+  text: GCE-B 134 trades +0.462R, 18% day coverage, 4.9% drawdown at 0.5% risk (existing evidence).
+  sessions: [S10, S00, S02]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G09-03
+  source: MASTER.pdf
+  section: G09 | Evidence
+  kind: evidence
+  text: No corrected statistical significance (of existing results).
+  sessions: [S10]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G09-04
+  source: MASTER.pdf
+  section: G09 | Evidence
+  kind: evidence
+  text: Learned score 96% coverage but negative recent period.
+  sessions: [S10, S04]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G09-05
+  source: MASTER.pdf
+  section: G09 | Evidence
+  kind: evidence
+  text: Existing history is research only.
+  sessions: [S00, S01, S02, S03, S04, S05, S06, S07, S08, S09, S10, S11, S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G09-06
+  source: MASTER.pdf
+  section: G09 | Evidence
+  kind: evidence
+  text: Raw ticks not stored in Round 2.
+  sessions: [S01, S10]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G09-07
+  source: MASTER.pdf
+  section: G09 | Evidence
+  kind: evidence
+  text: Reconcile 429 vs 473 Cavemen trades.
+  sessions: [S02, S10, S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G09-08
+  source: MASTER.pdf
+  section: G09 | Evidence
+  kind: evidence
+  text: Reconcile daily breach denominators.
+  sessions: [S10, S08]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G09-09
+  source: MASTER.pdf
+  section: G09 | Evidence
+  kind: evidence
+  text: Reconcile live delay.
+  sessions: [S02, S10, S01]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G09-10
+  source: MASTER.pdf
+  section: G09 | Evidence
+  kind: evidence
+  text: Use actual tick data for fast execution claims.
+  sessions: [S01, S06, S07, S10]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G10-01
+  source: MASTER.pdf
+  section: G10 | Validation
+  kind: validation
+  text: Chronological purged walk-forward.
+  sessions: [S10, S04]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G10-02
+  source: MASTER.pdf
+  section: G10 | Validation
+  kind: validation
+  text: Embargo.
+  sessions: [S10, S04]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G10-03
+  source: MASTER.pdf
+  section: G10 | Validation
+  kind: validation
+  text: Training-only transforms.
+  sessions: [S04, S10]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G10-04
+  source: MASTER.pdf
+  section: G10 | Validation
+  kind: validation
+  text: Block bootstrap.
+  sessions: [S10]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G10-05
+  source: MASTER.pdf
+  section: G10 | Validation
+  kind: validation
+  text: Multiple-testing correction.
+  sessions: [S10, S09]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G10-06
+  source: MASTER.pdf
+  section: G10 | Validation
+  kind: validation
+  text: Cost/latency stress.
+  sessions: [S10, S04, S07]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G10-07
+  source: MASTER.pdf
+  section: G10 | Validation
+  kind: validation
+  text: Untouched forward paper.
+  sessions: [S10, S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G10-08
+  source: MASTER.pdf
+  section: G10 | Validation
+  kind: validation
+  text: Report all eligible days.
+  sessions: [S10]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G10-09
+  source: MASTER.pdf
+  section: G10 | Validation
+  kind: validation
+  text: Report net R/day.
+  sessions: [S10]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G10-10
+  source: MASTER.pdf
+  section: G10 | Validation
+  kind: validation
+  text: Report mean/median ROI.
+  sessions: [S10]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G10-11
+  source: MASTER.pdf
+  section: G10 | Validation
+  kind: validation
+  text: Report >=5% days.
+  sessions: [S10]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G10-12
+  source: MASTER.pdf
+  section: G10 | Validation
+  kind: validation
+  text: Report coverage.
+  sessions: [S10]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G10-13
+  source: MASTER.pdf
+  section: G10 | Validation
+  kind: validation
+  text: Report drawdown.
+  sessions: [S10]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G10-14
+  source: MASTER.pdf
+  section: G10 | Validation
+  kind: validation
+  text: Report breaches.
+  sessions: [S10, S08]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G10-15
+  source: MASTER.pdf
+  section: G10 | Validation
+  kind: validation
+  text: Report phase-specific challenge outcomes.
+  sessions: [S10, S08]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G10-16
+  source: MASTER.pdf
+  section: G10 | Validation
+  kind: validation
+  text: Report failures and uncertainty.
+  sessions: [S10, S09]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: G10-17
+  source: MASTER.pdf
+  section: G10 | Validation
+  kind: validation
+  text: No cherry-picking.
+  sessions: [S00, S01, S02, S03, S04, S05, S06, S07, S08, S09, S10, S11, S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: M-DIR-01
+  source: MASTER.pdf
+  section: Implementation directive
+  kind: governance
+  text: Start with session 00 only.
+  sessions: [S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: M-DIR-02
+  source: MASTER.pdf
+  section: Implementation directive
+  kind: governance
+  text: Owner approves contracts before parallel work.
+  sessions: [S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: M-DIR-03
+  source: MASTER.pdf
+  section: Implementation directive
+  kind: governance
+  text: 'Wave 2: 01, 02, 07, 08.'
+  sessions: [S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: M-DIR-04
+  source: MASTER.pdf
+  section: Implementation directive
+  kind: governance
+  text: 'Wave 3: 03, 04, 05, 06 as dependencies become ready.'
+  sessions: [S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: M-DIR-05
+  source: MASTER.pdf
+  section: Implementation directive
+  kind: governance
+  text: 'Wave 4: 09, 10, 11, 12; research and QA start scaffolding earlier.'
+  sessions: [S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: M-DIR-06
+  source: MASTER.pdf
+  section: Implementation directive
+  kind: governance
+  text: Coordinator alone integrates reviewed branches.
+  sessions: [S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: M-DIR-07
+  source: MASTER.pdf
+  section: Implementation directive
+  kind: governance
+  text: No live activation.
+  sessions: [S00, S01, S02, S03, S04, S05, S06, S07, S08, S09, S10, S11, S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: M-DIR-08
+  source: MASTER.pdf
+  section: Implementation directive
+  kind: governance
+  text: Proposed numerical settings are research parameters, not approved production limits.
+  sessions: [S00, S01, S02, S03, S04, S05, S06, S07, S08, S09, S10, S11, S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: M-GATE-01
+  source: MASTER.pdf
+  section: Review gate
+  kind: governance
+  text: Every session delivers requirement IDs.
+  sessions: [S00, S01, S02, S03, S04, S05, S06, S07, S08, S09, S10, S11, S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: M-GATE-02
+  source: MASTER.pdf
+  section: Review gate
+  kind: governance
+  text: Every session delivers code paths.
+  sessions: [S00, S01, S02, S03, S04, S05, S06, S07, S08, S09, S10, S11, S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: M-GATE-03
+  source: MASTER.pdf
+  section: Review gate
+  kind: governance
+  text: Every session delivers test commands and outputs.
+  sessions: [S00, S01, S02, S03, S04, S05, S06, S07, S08, S09, S10, S11, S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: M-GATE-04
+  source: MASTER.pdf
+  section: Review gate
+  kind: governance
+  text: Every session delivers commit hash.
+  sessions: [S00, S01, S02, S03, S04, S05, S06, S07, S08, S09, S10, S11, S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: M-GATE-05
+  source: MASTER.pdf
+  section: Review gate
+  kind: governance
+  text: Every session delivers data provenance.
+  sessions: [S00, S01, S02, S03, S04, S05, S06, S07, S08, S09, S10, S11, S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: M-GATE-06
+  source: MASTER.pdf
+  section: Review gate
+  kind: governance
+  text: Every session delivers measured performance.
+  sessions: [S00, S01, S02, S03, S04, S05, S06, S07, S08, S09, S10, S11, S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: M-GATE-07
+  source: MASTER.pdf
+  section: Review gate
+  kind: governance
+  text: Every session delivers blockers and change requests.
+  sessions: [S00, S01, S02, S03, S04, S05, S06, S07, S08, S09, S10, S11, S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: M-GATE-08
+  source: MASTER.pdf
+  section: Review gate
+  kind: governance
+  text: 'Status: approved, conditional, rejected or unverified.'
+  sessions: [S00, S01, S02, S03, S04, S05, S06, S07, S08, S09, S10, S11, S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: M-GATE-09
+  source: MASTER.pdf
+  section: Review gate
+  kind: governance
+  text: Owner authorizes merge and model promotion.
+  sessions: [S00, S01, S02, S03, S04, S05, S06, S07, S08, S09, S10, S11, S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: COM-01
+  source: 00-12 briefs (identical text in every session brief)
+  section: Common brief clauses
+  kind: governance
+  text: Open a dedicated Claude Code session and worktree.
+  sessions: [S00, S01, S02, S03, S04, S05, S06, S07, S08, S09, S10, S11, S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: COM-02
+  source: 00-12 briefs (identical text in every session brief)
+  section: Common brief clauses
+  kind: governance
+  text: Read MASTER.pdf or its extracted text.
+  sessions: [S00, S01, S02, S03, S04, S05, S06, S07, S08, S09, S10, S11, S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: COM-03
+  source: 00-12 briefs (identical text in every session brief)
+  section: Common brief clauses
+  kind: governance
+  text: Paths are proposed until coordinator approves actual repository layout.
+  sessions: [S00, S01, S02, S03, S04, S05, S06, S07, S08, S09, S10, S11, S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: COM-04
+  source: 00-12 briefs (identical text in every session brief)
+  section: Common brief clauses
+  kind: governance
+  text: 'Integrated prompt - paste or attach to Claude: text identical to MASTER ''Authority and scope'' (see M-AUTH-01..18).'
+  sessions: [S00, S01, S02, S03, S04, S05, S06, S07, S08, S09, S10, S11, S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: COM-05
+  source: 00-12 briefs (identical text in every session brief)
+  section: Common brief clauses
+  kind: governance
+  text: Apply the master requirements G01-G10 relevant to this subsystem.
+  sessions: [S00, S01, S02, S03, S04, S05, S06, S07, S08, S09, S10, S11, S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: COM-06
+  source: 00-12 briefs (identical text in every session brief)
+  section: Common brief clauses
+  kind: governance
+  text: Do not redefine shared contracts unilaterally.
+  sessions: [S00, S01, S02, S03, S04, S05, S06, S07, S08, S09, S10, S11, S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: COM-07
+  source: 00-12 briefs (identical text in every session brief)
+  section: Common brief clauses
+  kind: governance
+  text: If a dependency is unavailable, use explicitly labeled test fixtures only.
+  sessions: [S00, S01, S02, S03, S04, S05, S06, S07, S08, S09, S10, S11, S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: COM-08
+  source: 00-12 briefs (identical text in every session brief)
+  section: Common brief clauses
+  kind: governance
+  text: Do not claim integration complete (when a dependency is unavailable).
+  sessions: [S00, S01, S02, S03, S04, S05, S06, S07, S08, S09, S10, S11, S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: COM-09
+  source: 00-12 briefs (identical text in every session brief)
+  section: Common brief clauses
+  kind: governance
+  text: Submit the review package and await owner approval before merging.
+  sessions: [S00, S01, S02, S03, S04, S05, S06, S07, S08, S09, S10, S11, S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: COM-10
+  source: 00-12 briefs (identical text in every session brief)
+  section: Common brief clauses
+  kind: governance
+  text: Report failed tests and unimplemented requirements explicitly.
+  sessions: [S00, S01, S02, S03, S04, S05, S06, S07, S08, S09, S10, S11, S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: COM-11
+  source: 00-12 briefs (identical text in every session brief)
+  section: Common brief clauses
+  kind: governance
+  text: No live trading.
+  sessions: [S00, S01, S02, S03, S04, S05, S06, S07, S08, S09, S10, S11, S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: OWN-01
+  source: Owner directive, chat 2026-11-27
+  section: Owner launch instructions
+  kind: governance
+  text: You will coordinate and implement the entire project within this session.
+  sessions: [S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: OWN-02
+  source: Owner directive, chat 2026-11-27
+  section: Owner launch instructions
+  kind: governance
+  text: Read every PDF in full before beginning.
+  sessions: [S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: OWN-03
+  source: Owner directive, chat 2026-11-27
+  section: Owner launch instructions
+  kind: governance
+  text: Extract and preserve all requirements in permanent project documentation so nothing is lost during context
+    compaction.
+  sessions: [S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: OWN-04
+  source: Owner directive, chat 2026-11-27
+  section: Owner launch instructions
+  kind: governance
+  text: Treat ChatGPT as the architectural supervisor and independent reviewer, and the owner as the project owner
+    with final authority.
+  sessions: [S00, S01, S02, S03, S04, S05, S06, S07, S08, S09, S10, S11, S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: OWN-05
+  source: Owner directive, chat 2026-11-27
+  section: Owner launch instructions
+  kind: governance
+  text: You are responsible for implementation, not independently reducing the agreed scope.
+  sessions: [S00, S01, S02, S03, S04, S05, S06, S07, S08, S09, S10, S11, S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: OWN-06
+  source: Owner directive, chat 2026-11-27
+  section: Owner launch instructions
+  kind: governance
+  text: You may use specialized subagents and parallel development where appropriate, provided all components follow
+    the approved shared architecture.
+  sessions: [S00, S01, S02, S03, S04, S05, S06, S07, S08, S09, S10, S11, S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: OWN-07
+  source: Owner directive, chat 2026-11-27
+  section: Owner launch instructions
+  kind: governance
+  text: Begin with Session 00 only.
+  sessions: [S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: OWN-08
+  source: Owner directive, chat 2026-11-27
+  section: Owner launch instructions
+  kind: governance
+  text: Maintain a persistent requirements matrix, implementation status, decision log and acceptance test register
+    throughout development.
+  sessions: [S00, S01, S02, S03, S04, S05, S06, S07, S08, S09, S10, S11, S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: OWN-09
+  source: Owner directive, chat 2026-11-27
+  section: Owner launch instructions
+  kind: governance
+  text: Do not silently simplify functionality, substitute placeholders, omit requirements or declare incomplete
+    components finished.
+  sessions: [S00, S01, S02, S03, S04, S05, S06, S07, S08, S09, S10, S11, S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: OWN-10
+  source: Owner directive, chat 2026-11-27
+  section: Owner launch instructions
+  kind: governance
+  text: If you encounter technical limitations, document them and propose solutions for approval.
+  sessions: [S00, S01, S02, S03, S04, S05, S06, S07, S08, S09, S10, S11, S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: OWN-11
+  source: Owner directive, chat 2026-11-27
+  section: Owner launch instructions
+  kind: governance
+  text: Complete Session 00 and submit the foundation review PDF, shared contracts, source files and test evidence.
+  sessions: [S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: OWN-12
+  source: Owner directive, chat 2026-11-27
+  section: Owner launch instructions
+  kind: governance
+  text: Stop at the architectural review gate before implementing the remaining subsystems.
+  sessions: [S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: OWN-13
+  source: Owner directive, chat 2026-11-27
+  section: Owner launch instructions
+  kind: governance
+  text: Preserve all existing trading systems.
+  sessions: [S00, S01, S02, S03, S04, S05, S06, S07, S08, S09, S10, S11, S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: OWN-14
+  source: Owner directive, chat 2026-11-27
+  section: Owner launch instructions
+  kind: governance
+  text: Live execution must remain disabled throughout development and validation.
+  sessions: [S00, S01, S02, S03, S04, S05, S06, S07, S08, S09, S10, S11, S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S00-DEP-01
+  source: 00_Project_Coordinator.pdf
+  section: Launch and dependencies
+  kind: dependency
+  text: 'Dependencies: None; start here.'
+  sessions: [S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S00-DEP-02
+  source: 00_Project_Coordinator.pdf
+  section: Launch and dependencies
+  kind: dependency
+  text: 'Owned scope: core/, contracts/, specifications/'
+  sessions: [S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S00-ASG-01
+  source: 00_Project_Coordinator.pdf
+  section: Your assignment
+  kind: assignment
+  text: Audit existing D:\ftmo_eurusd without modifying production.
+  sessions: [S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S00-ASG-02
+  source: 00_Project_Coordinator.pdf
+  section: Your assignment
+  kind: assignment
+  text: Inventory languages.
+  sessions: [S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S00-ASG-03
+  source: 00_Project_Coordinator.pdf
+  section: Your assignment
+  kind: assignment
+  text: Inventory processes.
+  sessions: [S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S00-ASG-04
+  source: 00_Project_Coordinator.pdf
+  section: Your assignment
+  kind: assignment
+  text: Inventory data.
+  sessions: [S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S00-ASG-05
+  source: 00_Project_Coordinator.pdf
+  section: Your assignment
+  kind: assignment
+  text: Inventory tests.
+  sessions: [S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S00-ASG-06
+  source: 00_Project_Coordinator.pdf
+  section: Your assignment
+  kind: assignment
+  text: Inventory hardware.
+  sessions: [S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S00-ASG-07
+  source: 00_Project_Coordinator.pdf
+  section: Your assignment
+  kind: assignment
+  text: Inventory broker interfaces.
+  sessions: [S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S00-ASG-08
+  source: 00_Project_Coordinator.pdf
+  section: Your assignment
+  kind: assignment
+  text: Establish repository/worktrees.
+  sessions: [S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S00-ASG-09
+  source: 00_Project_Coordinator.pdf
+  section: Your assignment
+  kind: assignment
+  text: Establish ownership.
+  sessions: [S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S00-ASG-10
+  source: 00_Project_Coordinator.pdf
+  section: Your assignment
+  kind: assignment
+  text: Establish dependency graph.
+  sessions: [S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S00-ASG-11
+  source: 00_Project_Coordinator.pdf
+  section: Your assignment
+  kind: assignment
+  text: Establish versioned contract for Tick.
+  sessions: [S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S00-ASG-12
+  source: 00_Project_Coordinator.pdf
+  section: Your assignment
+  kind: assignment
+  text: Establish versioned contract for Evidence.
+  sessions: [S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S00-ASG-13
+  source: 00_Project_Coordinator.pdf
+  section: Your assignment
+  kind: assignment
+  text: Establish versioned contract for Candidate.
+  sessions: [S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S00-ASG-14
+  source: 00_Project_Coordinator.pdf
+  section: Your assignment
+  kind: assignment
+  text: Establish versioned contract for TradePlan.
+  sessions: [S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S00-ASG-15
+  source: 00_Project_Coordinator.pdf
+  section: Your assignment
+  kind: assignment
+  text: Establish versioned contract for RiskDecision.
+  sessions: [S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S00-ASG-16
+  source: 00_Project_Coordinator.pdf
+  section: Your assignment
+  kind: assignment
+  text: Establish versioned contract for OrderEvent.
+  sessions: [S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S00-ASG-17
+  source: 00_Project_Coordinator.pdf
+  section: Your assignment
+  kind: assignment
+  text: Establish versioned contract for Position.
+  sessions: [S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S00-ASG-18
+  source: 00_Project_Coordinator.pdf
+  section: Your assignment
+  kind: assignment
+  text: Establish versioned contract for ModelVersion.
+  sessions: [S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S00-ASG-19
+  source: 00_Project_Coordinator.pdf
+  section: Your assignment
+  kind: assignment
+  text: Establish versioned contract for Clock.
+  sessions: [S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S00-ASG-20
+  source: 00_Project_Coordinator.pdf
+  section: Your assignment
+  kind: assignment
+  text: Define units.
+  sessions: [S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S00-ASG-21
+  source: 00_Project_Coordinator.pdf
+  section: Your assignment
+  kind: assignment
+  text: Define timestamps.
+  sessions: [S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S00-ASG-22
+  source: 00_Project_Coordinator.pdf
+  section: Your assignment
+  kind: assignment
+  text: Define IDs.
+  sessions: [S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S00-ASG-23
+  source: 00_Project_Coordinator.pdf
+  section: Your assignment
+  kind: assignment
+  text: Define freshness.
+  sessions: [S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S00-ASG-24
+  source: 00_Project_Coordinator.pdf
+  section: Your assignment
+  kind: assignment
+  text: Define error semantics.
+  sessions: [S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S00-ASG-25
+  source: 00_Project_Coordinator.pdf
+  section: Your assignment
+  kind: assignment
+  text: Define event ordering.
+  sessions: [S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S00-ASG-26
+  source: 00_Project_Coordinator.pdf
+  section: Your assignment
+  kind: assignment
+  text: Create CLAUDE.md.
+  sessions: [S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S00-ASG-27
+  source: 00_Project_Coordinator.pdf
+  section: Your assignment
+  kind: assignment
+  text: Create decision log.
+  sessions: [S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S00-ASG-28
+  source: 00_Project_Coordinator.pdf
+  section: Your assignment
+  kind: assignment
+  text: Create requirements matrix.
+  sessions: [S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S00-ASG-29
+  source: 00_Project_Coordinator.pdf
+  section: Your assignment
+  kind: assignment
+  text: Create integration CI.
+  sessions: [S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S00-ACC-01
+  source: 00_Project_Coordinator.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Contract round-trip tests.
+  sessions: [S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S00-ACC-02
+  source: 00_Project_Coordinator.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Contract compatibility tests.
+  sessions: [S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S00-ACC-03
+  source: 00_Project_Coordinator.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Replay clock.
+  sessions: [S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S00-ACC-04
+  source: 00_Project_Coordinator.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Paper-only routing lock.
+  sessions: [S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S00-ACC-05
+  source: 00_Project_Coordinator.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Baseline regression.
+  sessions: [S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S00-ACC-06
+  source: 00_Project_Coordinator.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: No production changes.
+  sessions: [S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S00-DEL-01
+  source: 00_Project_Coordinator.pdf
+  section: Review deliverables
+  kind: deliverable
+  text: Architecture report.
+  sessions: [S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S00-DEL-02
+  source: 00_Project_Coordinator.pdf
+  section: Review deliverables
+  kind: deliverable
+  text: Contract schemas.
+  sessions: [S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S00-DEL-03
+  source: 00_Project_Coordinator.pdf
+  section: Review deliverables
+  kind: deliverable
+  text: Dependency graph.
+  sessions: [S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S00-DEL-04
+  source: 00_Project_Coordinator.pdf
+  section: Review deliverables
+  kind: deliverable
+  text: Baseline audit.
+  sessions: [S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S00-DEL-05
+  source: 00_Project_Coordinator.pdf
+  section: Review deliverables
+  kind: deliverable
+  text: Worktree instructions.
+  sessions: [S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S00-DEL-06
+  source: 00_Project_Coordinator.pdf
+  section: Review deliverables
+  kind: deliverable
+  text: Unresolved decisions.
+  sessions: [S00]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S01-DEP-01
+  source: 01_Market_Data.pdf
+  section: Launch and dependencies
+  kind: dependency
+  text: 'Dependencies: 00.'
+  sessions: [S01]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S01-DEP-02
+  source: 01_Market_Data.pdf
+  section: Launch and dependencies
+  kind: dependency
+  text: 'Owned scope: market_data/'
+  sessions: [S01]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S01-ASG-01
+  source: 01_Market_Data.pdf
+  section: Your assignment
+  kind: assignment
+  text: Implement timestamped raw bid/ask tick ingestion.
+  sessions: [S01]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S01-ASG-02
+  source: 01_Market_Data.pdf
+  section: Your assignment
+  kind: assignment
+  text: Implement (raw tick) storage.
+  sessions: [S01]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S01-ASG-03
+  source: 01_Market_Data.pdf
+  section: Your assignment
+  kind: assignment
+  text: Implement historical replay.
+  sessions: [S01]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S01-ASG-04
+  source: 01_Market_Data.pdf
+  section: Your assignment
+  kind: assignment
+  text: Implement candle construction.
+  sessions: [S01]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S01-ASG-05
+  source: 01_Market_Data.pdf
+  section: Your assignment
+  kind: assignment
+  text: Implement broker calendar.
+  sessions: [S01]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S01-ASG-06
+  source: 01_Market_Data.pdf
+  section: Your assignment
+  kind: assignment
+  text: Implement quality flags.
+  sessions: [S01]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S01-ASG-07
+  source: 01_Market_Data.pdf
+  section: Your assignment
+  kind: assignment
+  text: Implement sequence IDs.
+  sessions: [S01]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S01-ASG-08
+  source: 01_Market_Data.pdf
+  section: Your assignment
+  kind: assignment
+  text: Implement feed freshness.
+  sessions: [S01]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S01-ASG-09
+  source: 01_Market_Data.pdf
+  section: Your assignment
+  kind: assignment
+  text: Audit missing history.
+  sessions: [S01]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S01-ASG-10
+  source: 01_Market_Data.pdf
+  section: Your assignment
+  kind: assignment
+  text: Acquire only authorized data.
+  sessions: [S01]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S01-ASG-11
+  source: 01_Market_Data.pdf
+  section: Your assignment
+  kind: assignment
+  text: Distinguish event time, receive time and decision time.
+  sessions: [S01]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S01-ASG-12
+  source: 01_Market_Data.pdf
+  section: Your assignment
+  kind: assignment
+  text: Provide synchronized external feeds to 03.
+  sessions: [S01]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S01-ACC-01
+  source: 01_Market_Data.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Out-of-order tick tests.
+  sessions: [S01]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S01-ACC-02
+  source: 01_Market_Data.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Duplicate tick tests.
+  sessions: [S01]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S01-ACC-03
+  source: 01_Market_Data.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Missing tick tests.
+  sessions: [S01]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S01-ACC-04
+  source: 01_Market_Data.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Stale tick tests.
+  sessions: [S01]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S01-ACC-05
+  source: 01_Market_Data.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: DST tests.
+  sessions: [S01]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S01-ACC-06
+  source: 01_Market_Data.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Holiday tests.
+  sessions: [S01]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S01-ACC-07
+  source: 01_Market_Data.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Rollover tests.
+  sessions: [S01]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S01-ACC-08
+  source: 01_Market_Data.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Deterministic replay.
+  sessions: [S01]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S01-ACC-09
+  source: 01_Market_Data.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Throughput distributions.
+  sessions: [S01]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S01-ACC-10
+  source: 01_Market_Data.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Latency distributions.
+  sessions: [S01]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S01-DEL-01
+  source: 01_Market_Data.pdf
+  section: Review deliverables
+  kind: deliverable
+  text: Data inventory.
+  sessions: [S01]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S01-DEL-02
+  source: 01_Market_Data.pdf
+  section: Review deliverables
+  kind: deliverable
+  text: Coverage/gap report.
+  sessions: [S01]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S01-DEL-03
+  source: 01_Market_Data.pdf
+  section: Review deliverables
+  kind: deliverable
+  text: Schema.
+  sessions: [S01]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S01-DEL-04
+  source: 01_Market_Data.pdf
+  section: Review deliverables
+  kind: deliverable
+  text: Replay samples.
+  sessions: [S01]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S01-DEL-05
+  source: 01_Market_Data.pdf
+  section: Review deliverables
+  kind: deliverable
+  text: Feed benchmarks.
+  sessions: [S01]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S02-DEP-01
+  source: 02_Strategy_Intelligence.pdf
+  section: Launch and dependencies
+  kind: dependency
+  text: 'Dependencies: 00; data contracts from 01.'
+  sessions: [S02]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S02-DEP-02
+  source: 02_Strategy_Intelligence.pdf
+  section: Launch and dependencies
+  kind: dependency
+  text: 'Owned scope: strategy_intelligence/'
+  sessions: [S02]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S02-ASG-01
+  source: 02_Strategy_Intelligence.pdf
+  section: Your assignment
+  kind: assignment
+  text: Adapt all six existing engines into causal evidence producers.
+  sessions: [S02]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S02-ASG-02
+  source: 02_Strategy_Intelligence.pdf
+  section: Your assignment
+  kind: assignment
+  text: Evidence with bullish/bearish scores.
+  sessions: [S02]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S02-ASG-03
+  source: 02_Strategy_Intelligence.pdf
+  section: Your assignment
+  kind: assignment
+  text: Evidence with event IDs.
+  sessions: [S02]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S02-ASG-04
+  source: 02_Strategy_Intelligence.pdf
+  section: Your assignment
+  kind: assignment
+  text: Evidence with freshness.
+  sessions: [S02]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S02-ASG-05
+  source: 02_Strategy_Intelligence.pdf
+  section: Your assignment
+  kind: assignment
+  text: Evidence with levels.
+  sessions: [S02]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S02-ASG-06
+  source: 02_Strategy_Intelligence.pdf
+  section: Your assignment
+  kind: assignment
+  text: Evidence with stages.
+  sessions: [S02]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S02-ASG-07
+  source: 02_Strategy_Intelligence.pdf
+  section: Your assignment
+  kind: assignment
+  text: Evidence with invalidation.
+  sessions: [S02]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S02-ASG-08
+  source: 02_Strategy_Intelligence.pdf
+  section: Your assignment
+  kind: assignment
+  text: Evidence with missing/contra states.
+  sessions: [S02]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S02-ASG-09
+  source: 02_Strategy_Intelligence.pdf
+  section: Your assignment
+  kind: assignment
+  text: Expose Cavemen pending limit at breakout close.
+  sessions: [S02]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S02-ASG-10
+  source: 02_Strategy_Intelligence.pdf
+  section: Your assignment
+  kind: assignment
+  text: Deduplicate shared sweep/FVG/breakout evidence.
+  sessions: [S02]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S02-ASG-11
+  source: 02_Strategy_Intelligence.pdf
+  section: Your assignment
+  kind: assignment
+  text: Keep original engines unchanged.
+  sessions: [S02]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S02-ACC-01
+  source: 02_Strategy_Intelligence.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Prefix invariance.
+  sessions: [S02]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S02-ACC-02
+  source: 02_Strategy_Intelligence.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Exact event deduplication.
+  sessions: [S02]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S02-ACC-03
+  source: 02_Strategy_Intelligence.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Inactive vs missing evidence.
+  sessions: [S02]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S02-ACC-04
+  source: 02_Strategy_Intelligence.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Baseline parity.
+  sessions: [S02]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S02-ACC-05
+  source: 02_Strategy_Intelligence.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: No five-minute notification delay.
+  sessions: [S02]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S02-DEL-01
+  source: 02_Strategy_Intelligence.pdf
+  section: Review deliverables
+  kind: deliverable
+  text: Feature dictionary.
+  sessions: [S02]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S02-DEL-02
+  source: 02_Strategy_Intelligence.pdf
+  section: Review deliverables
+  kind: deliverable
+  text: Adapter tests.
+  sessions: [S02]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S02-DEL-03
+  source: 02_Strategy_Intelligence.pdf
+  section: Review deliverables
+  kind: deliverable
+  text: Baseline reconciliation.
+  sessions: [S02]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S02-DEL-04
+  source: 02_Strategy_Intelligence.pdf
+  section: Review deliverables
+  kind: deliverable
+  text: Annotated examples.
+  sessions: [S02]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S03-DEP-01
+  source: 03_Intermarket_Intelligence.pdf
+  section: Launch and dependencies
+  kind: dependency
+  text: 'Dependencies: 00, 01.'
+  sessions: [S03]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S03-DEP-02
+  source: 03_Intermarket_Intelligence.pdf
+  section: Launch and dependencies
+  kind: dependency
+  text: 'Owned scope: intermarket/'
+  sessions: [S03]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S03-ASG-01
+  source: 03_Intermarket_Intelligence.pdf
+  section: Your assignment
+  kind: assignment
+  text: Synchronize XAGUSD, DXY, GC, yields, real yields, S&P, VIX, USDJPY and news when available.
+  sessions: [S03]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S03-ASG-02
+  source: 03_Intermarket_Intelligence.pdf
+  section: Your assignment
+  kind: assignment
+  text: Estimate conditional lead/lag at seconds/minutes/hours.
+  sessions: [S03]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S03-ASG-03
+  source: 03_Intermarket_Intelligence.pdf
+  section: Your assignment
+  kind: assignment
+  text: Use actual availability timestamps (for lead/lag estimation).
+  sessions: [S03]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S03-ASG-04
+  source: 03_Intermarket_Intelligence.pdf
+  section: Your assignment
+  kind: assignment
+  text: Handle futures rolls.
+  sessions: [S03]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S03-ASG-05
+  source: 03_Intermarket_Intelligence.pdf
+  section: Your assignment
+  kind: assignment
+  text: Handle stale feeds.
+  sessions: [S03]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S03-ASG-06
+  source: 03_Intermarket_Intelligence.pdf
+  section: Your assignment
+  kind: assignment
+  text: Detect scheduled volatility.
+  sessions: [S03]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S03-ASG-07
+  source: 03_Intermarket_Intelligence.pdf
+  section: Your assignment
+  kind: assignment
+  text: Detect unscheduled volatility.
+  sessions: [S03]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S03-ASG-08
+  source: 03_Intermarket_Intelligence.pdf
+  section: Your assignment
+  kind: assignment
+  text: Prepare scenarios.
+  sessions: [S03]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S03-ASG-09
+  source: 03_Intermarket_Intelligence.pdf
+  section: Your assignment
+  kind: assignment
+  text: Respect news restrictions.
+  sessions: [S03]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S03-ACC-01
+  source: 03_Intermarket_Intelligence.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: No future data leakage.
+  sessions: [S03]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S03-ACC-02
+  source: 03_Intermarket_Intelligence.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: No revised release leakage.
+  sessions: [S03]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S03-ACC-03
+  source: 03_Intermarket_Intelligence.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Delayed-feed rejection.
+  sessions: [S03]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S03-ACC-04
+  source: 03_Intermarket_Intelligence.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Missing-source degradation.
+  sessions: [S03]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S03-ACC-05
+  source: 03_Intermarket_Intelligence.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Incremental out-of-period value versus gold-only.
+  sessions: [S03]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S03-DEL-01
+  source: 03_Intermarket_Intelligence.pdf
+  section: Review deliverables
+  kind: deliverable
+  text: Source/licensing inventory.
+  sessions: [S03]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S03-DEL-02
+  source: 03_Intermarket_Intelligence.pdf
+  section: Review deliverables
+  kind: deliverable
+  text: Timestamp audit.
+  sessions: [S03]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S03-DEL-03
+  source: 03_Intermarket_Intelligence.pdf
+  section: Review deliverables
+  kind: deliverable
+  text: Event studies.
+  sessions: [S03]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S03-DEL-04
+  source: 03_Intermarket_Intelligence.pdf
+  section: Review deliverables
+  kind: deliverable
+  text: Feature exports.
+  sessions: [S03]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S03-DEL-05
+  source: 03_Intermarket_Intelligence.pdf
+  section: Review deliverables
+  kind: deliverable
+  text: Limitations.
+  sessions: [S03]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S04-DEP-01
+  source: 04_Predictive_Intelligence.pdf
+  section: Launch and dependencies
+  kind: dependency
+  text: 'Dependencies: 00, 01, 02; 03 optional until available.'
+  sessions: [S04]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S04-DEP-02
+  source: 04_Predictive_Intelligence.pdf
+  section: Launch and dependencies
+  kind: dependency
+  text: 'Owned scope: prediction/, models/research/'
+  sessions: [S04]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S04-ASG-01
+  source: 04_Predictive_Intelligence.pdf
+  section: Your assignment
+  kind: assignment
+  text: Train regularized net-R models.
+  sessions: [S04]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S04-ASG-02
+  source: 04_Predictive_Intelligence.pdf
+  section: Your assignment
+  kind: assignment
+  text: Train regularized payoff models.
+  sessions: [S04]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S04-ASG-03
+  source: 04_Predictive_Intelligence.pdf
+  section: Your assignment
+  kind: assignment
+  text: Setup-specific interactions.
+  sessions: [S04]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S04-ASG-04
+  source: 04_Predictive_Intelligence.pdf
+  section: Your assignment
+  kind: assignment
+  text: Historical similarity retrieval.
+  sessions: [S04]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S04-ASG-05
+  source: 04_Predictive_Intelligence.pdf
+  section: Your assignment
+  kind: assignment
+  text: Scenario destinations.
+  sessions: [S04]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S04-ASG-06
+  source: 04_Predictive_Intelligence.pdf
+  section: Your assignment
+  kind: assignment
+  text: Use prior-only neighbors.
+  sessions: [S04]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S04-ASG-07
+  source: 04_Predictive_Intelligence.pdf
+  section: Your assignment
+  kind: assignment
+  text: Use training-only transforms.
+  sessions: [S04]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S04-ASG-08
+  source: 04_Predictive_Intelligence.pdf
+  section: Your assignment
+  kind: assignment
+  text: Estimate uncertainty.
+  sessions: [S04]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S04-ASG-09
+  source: 04_Predictive_Intelligence.pdf
+  section: Your assignment
+  kind: assignment
+  text: Estimate holding time.
+  sessions: [S04]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S04-ASG-10
+  source: 04_Predictive_Intelligence.pdf
+  section: Your assignment
+  kind: assignment
+  text: Estimate expected costs.
+  sessions: [S04]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S04-ASG-11
+  source: 04_Predictive_Intelligence.pdf
+  section: Your assignment
+  kind: assignment
+  text: Compare against GCE-B.
+  sessions: [S04]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S04-ASG-12
+  source: 04_Predictive_Intelligence.pdf
+  section: Your assignment
+  kind: assignment
+  text: Compare against simple baselines.
+  sessions: [S04]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S04-ACC-01
+  source: 04_Predictive_Intelligence.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Purged chronological splits.
+  sessions: [S04]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S04-ACC-02
+  source: 04_Predictive_Intelligence.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Calibration by setup and session.
+  sessions: [S04]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S04-ACC-03
+  source: 04_Predictive_Intelligence.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Leakage mutation tests.
+  sessions: [S04]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S04-ACC-04
+  source: 04_Predictive_Intelligence.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Cost stress.
+  sessions: [S04]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S04-ACC-05
+  source: 04_Predictive_Intelligence.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Model inference latency.
+  sessions: [S04]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S04-ACC-06
+  source: 04_Predictive_Intelligence.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Reproducibility.
+  sessions: [S04]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S04-DEL-01
+  source: 04_Predictive_Intelligence.pdf
+  section: Review deliverables
+  kind: deliverable
+  text: Model cards.
+  sessions: [S04]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S04-DEL-02
+  source: 04_Predictive_Intelligence.pdf
+  section: Review deliverables
+  kind: deliverable
+  text: Frozen artifacts.
+  sessions: [S04]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S04-DEL-03
+  source: 04_Predictive_Intelligence.pdf
+  section: Review deliverables
+  kind: deliverable
+  text: Predictions.
+  sessions: [S04]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S04-DEL-04
+  source: 04_Predictive_Intelligence.pdf
+  section: Review deliverables
+  kind: deliverable
+  text: Splits.
+  sessions: [S04]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S04-DEL-05
+  source: 04_Predictive_Intelligence.pdf
+  section: Review deliverables
+  kind: deliverable
+  text: Metrics.
+  sessions: [S04]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S04-DEL-06
+  source: 04_Predictive_Intelligence.pdf
+  section: Review deliverables
+  kind: deliverable
+  text: Unsuccessful models.
+  sessions: [S04]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S05-DEP-01
+  source: 05_Decision_Engine.pdf
+  section: Launch and dependencies
+  kind: dependency
+  text: 'Dependencies: 00, 02, 04; risk contract 08.'
+  sessions: [S05]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S05-DEP-02
+  source: 05_Decision_Engine.pdf
+  section: Launch and dependencies
+  kind: dependency
+  text: 'Owned scope: decision/'
+  sessions: [S05]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S05-ASG-01
+  source: 05_Decision_Engine.pdf
+  section: Your assignment
+  kind: assignment
+  text: Construct alternative market/limit/retest/pullback plans.
+  sessions: [S05]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S05-ASG-02
+  source: 05_Decision_Engine.pdf
+  section: Your assignment
+  kind: assignment
+  text: Plans with executable entry.
+  sessions: [S05]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S05-ASG-03
+  source: 05_Decision_Engine.pdf
+  section: Your assignment
+  kind: assignment
+  text: Plans with hard invalidation.
+  sessions: [S05]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S05-ASG-04
+  source: 05_Decision_Engine.pdf
+  section: Your assignment
+  kind: assignment
+  text: Plans with realistic destination.
+  sessions: [S05]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S05-ASG-05
+  source: 05_Decision_Engine.pdf
+  section: Your assignment
+  kind: assignment
+  text: Plans with expected net R and uncertainty.
+  sessions: [S05]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S05-ASG-06
+  source: 05_Decision_Engine.pdf
+  section: Your assignment
+  kind: assignment
+  text: Hybrid scalp/intraday.
+  sessions: [S05]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S05-ASG-07
+  source: 05_Decision_Engine.pdf
+  section: Your assignment
+  kind: assignment
+  text: Prepare both directions.
+  sessions: [S05]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S05-ASG-08
+  source: 05_Decision_Engine.pdf
+  section: Your assignment
+  kind: assignment
+  text: Actual behavior invalidates plans.
+  sessions: [S05]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S05-ASG-09
+  source: 05_Decision_Engine.pdf
+  section: Your assignment
+  kind: assignment
+  text: Rank only currently available candidates.
+  sessions: [S05]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S05-ASG-10
+  source: 05_Decision_Engine.pdf
+  section: Your assignment
+  kind: assignment
+  text: Reject stale opportunities.
+  sessions: [S05]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S05-ASG-11
+  source: 05_Decision_Engine.pdf
+  section: Your assignment
+  kind: assignment
+  text: Reject negative expected opportunities.
+  sessions: [S05]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S05-ASG-12
+  source: 05_Decision_Engine.pdf
+  section: Your assignment
+  kind: assignment
+  text: One unified decision stream.
+  sessions: [S05]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S05-ACC-01
+  source: 05_Decision_Engine.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: No future candidate ranking.
+  sessions: [S05]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S05-ACC-02
+  source: 05_Decision_Engine.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Expiry tests.
+  sessions: [S05]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S05-ACC-03
+  source: 05_Decision_Engine.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Contradiction tests.
+  sessions: [S05]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S05-ACC-04
+  source: 05_Decision_Engine.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Duplicate plan handling.
+  sessions: [S05]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S05-ACC-05
+  source: 05_Decision_Engine.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Positive expectancy gate.
+  sessions: [S05]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S05-ACC-06
+  source: 05_Decision_Engine.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Session coverage.
+  sessions: [S05]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S05-ACC-07
+  source: 05_Decision_Engine.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Explainability.
+  sessions: [S05]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S05-DEL-01
+  source: 05_Decision_Engine.pdf
+  section: Review deliverables
+  kind: deliverable
+  text: Plan schema examples.
+  sessions: [S05]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S05-DEL-02
+  source: 05_Decision_Engine.pdf
+  section: Review deliverables
+  kind: deliverable
+  text: Scoring mapping.
+  sessions: [S05]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S05-DEL-03
+  source: 05_Decision_Engine.pdf
+  section: Review deliverables
+  kind: deliverable
+  text: Accepted/rejected cases.
+  sessions: [S05]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S05-DEL-04
+  source: 05_Decision_Engine.pdf
+  section: Review deliverables
+  kind: deliverable
+  text: Decision benchmarks.
+  sessions: [S05]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S06-DEP-01
+  source: 06_Reflex_Engine.pdf
+  section: Launch and dependencies
+  kind: dependency
+  text: 'Dependencies: 00, 01, 07, 08.'
+  sessions: [S06]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S06-DEP-02
+  source: 06_Reflex_Engine.pdf
+  section: Launch and dependencies
+  kind: dependency
+  text: 'Owned scope: reflex/'
+  sessions: [S06]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S06-ASG-01
+  source: 06_Reflex_Engine.pdf
+  section: Your assignment
+  kind: assignment
+  text: Implement deterministic per-tick protective decisions.
+  sessions: [S06]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S06-ASG-02
+  source: 06_Reflex_Engine.pdf
+  section: Your assignment
+  kind: assignment
+  text: Executable net P&L peak tracking.
+  sessions: [S06]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S06-ASG-03
+  source: 06_Reflex_Engine.pdf
+  section: Your assignment
+  kind: assignment
+  text: Monotonic stops.
+  sessions: [S06]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S06-ASG-04
+  source: 06_Reflex_Engine.pdf
+  section: Your assignment
+  kind: assignment
+  text: Fast giveback protection.
+  sessions: [S06]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S06-ASG-05
+  source: 06_Reflex_Engine.pdf
+  section: Your assignment
+  kind: assignment
+  text: Trade-health reactions.
+  sessions: [S06]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S06-ASG-06
+  source: 06_Reflex_Engine.pdf
+  section: Your assignment
+  kind: assignment
+  text: Separate from tactical/strategic tasks.
+  sessions: [S06]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S06-ASG-07
+  source: 06_Reflex_Engine.pdf
+  section: Your assignment
+  kind: assignment
+  text: Never wait for model or dashboard.
+  sessions: [S06]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S06-ASG-08
+  source: 06_Reflex_Engine.pdf
+  section: Your assignment
+  kind: assignment
+  text: Test volatility-aware protection versus fixed exits.
+  sessions: [S06]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S06-ACC-01
+  source: 06_Reflex_Engine.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Burst replay.
+  sessions: [S06]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S06-ACC-02
+  source: 06_Reflex_Engine.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Gap/slippage.
+  sessions: [S06]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S06-ACC-03
+  source: 06_Reflex_Engine.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Stale tick.
+  sessions: [S06]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S06-ACC-04
+  source: 06_Reflex_Engine.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Slow-model isolation.
+  sessions: [S06]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S06-ACC-05
+  source: 06_Reflex_Engine.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: No stop widening.
+  sessions: [S06]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S06-ACC-06
+  source: 06_Reflex_Engine.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: p99/max latency.
+  sessions: [S06]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S06-ACC-07
+  source: 06_Reflex_Engine.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Profit giveback comparisons.
+  sessions: [S06]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S06-ACC-08
+  source: 06_Reflex_Engine.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Premature-exit comparisons.
+  sessions: [S06]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S06-DEL-01
+  source: 06_Reflex_Engine.pdf
+  section: Review deliverables
+  kind: deliverable
+  text: Tick traces.
+  sessions: [S06]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S06-DEL-02
+  source: 06_Reflex_Engine.pdf
+  section: Review deliverables
+  kind: deliverable
+  text: Timing profiles.
+  sessions: [S06]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S06-DEL-03
+  source: 06_Reflex_Engine.pdf
+  section: Review deliverables
+  kind: deliverable
+  text: Protection tests.
+  sessions: [S06]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S06-DEL-04
+  source: 06_Reflex_Engine.pdf
+  section: Review deliverables
+  kind: deliverable
+  text: Fixed-vs-dynamic exit results.
+  sessions: [S06]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S07-DEP-01
+  source: 07_Execution_Engine.pdf
+  section: Launch and dependencies
+  kind: dependency
+  text: 'Dependencies: 00, 01; risk contract 08.'
+  sessions: [S07]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S07-DEP-02
+  source: 07_Execution_Engine.pdf
+  section: Launch and dependencies
+  kind: dependency
+  text: 'Owned scope: execution/'
+  sessions: [S07]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S07-ASG-01
+  source: 07_Execution_Engine.pdf
+  section: Your assignment
+  kind: assignment
+  text: Implement paper/replay order state machine.
+  sessions: [S07]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S07-ASG-02
+  source: 07_Execution_Engine.pdf
+  section: Your assignment
+  kind: assignment
+  text: Market/limit/stop orders.
+  sessions: [S07]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S07-ASG-03
+  source: 07_Execution_Engine.pdf
+  section: Your assignment
+  kind: assignment
+  text: Partial fills.
+  sessions: [S07]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S07-ASG-04
+  source: 07_Execution_Engine.pdf
+  section: Your assignment
+  kind: assignment
+  text: Cancel/replace.
+  sessions: [S07]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S07-ASG-05
+  source: 07_Execution_Engine.pdf
+  section: Your assignment
+  kind: assignment
+  text: Multiple positions.
+  sessions: [S07]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S07-ASG-06
+  source: 07_Execution_Engine.pdf
+  section: Your assignment
+  kind: assignment
+  text: Idempotency.
+  sessions: [S07]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S07-ASG-07
+  source: 07_Execution_Engine.pdf
+  section: Your assignment
+  kind: assignment
+  text: Persistence.
+  sessions: [S07]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S07-ASG-08
+  source: 07_Execution_Engine.pdf
+  section: Your assignment
+  kind: assignment
+  text: Restart reconciliation.
+  sessions: [S07]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S07-ASG-09
+  source: 07_Execution_Engine.pdf
+  section: Your assignment
+  kind: assignment
+  text: Simulated broker-side protection.
+  sessions: [S07]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S07-ASG-10
+  source: 07_Execution_Engine.pdf
+  section: Your assignment
+  kind: assignment
+  text: Design live adapter interface but no enabled real routing.
+  sessions: [S07]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S07-ASG-11
+  source: 07_Execution_Engine.pdf
+  section: Your assignment
+  kind: assignment
+  text: Model bid/ask.
+  sessions: [S07]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S07-ASG-12
+  source: 07_Execution_Engine.pdf
+  section: Your assignment
+  kind: assignment
+  text: Model costs.
+  sessions: [S07]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S07-ASG-13
+  source: 07_Execution_Engine.pdf
+  section: Your assignment
+  kind: assignment
+  text: Model slippage.
+  sessions: [S07]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S07-ASG-14
+  source: 07_Execution_Engine.pdf
+  section: Your assignment
+  kind: assignment
+  text: Model latency.
+  sessions: [S07]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S07-ASG-15
+  source: 07_Execution_Engine.pdf
+  section: Your assignment
+  kind: assignment
+  text: Model broker constraints.
+  sessions: [S07]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S07-ACC-01
+  source: 07_Execution_Engine.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Duplicate messages.
+  sessions: [S07]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S07-ACC-02
+  source: 07_Execution_Engine.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Partial fill races.
+  sessions: [S07]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S07-ACC-03
+  source: 07_Execution_Engine.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Rejected orders.
+  sessions: [S07]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S07-ACC-04
+  source: 07_Execution_Engine.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Reconnect.
+  sessions: [S07]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S07-ACC-05
+  source: 07_Execution_Engine.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Crash recovery.
+  sessions: [S07]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S07-ACC-06
+  source: 07_Execution_Engine.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Stale plans.
+  sessions: [S07]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S07-ACC-07
+  source: 07_Execution_Engine.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: No real orders.
+  sessions: [S07]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S07-ACC-08
+  source: 07_Execution_Engine.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Deterministic replay.
+  sessions: [S07]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S07-DEL-01
+  source: 07_Execution_Engine.pdf
+  section: Review deliverables
+  kind: deliverable
+  text: State diagrams.
+  sessions: [S07]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S07-DEL-02
+  source: 07_Execution_Engine.pdf
+  section: Review deliverables
+  kind: deliverable
+  text: Order traces.
+  sessions: [S07]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S07-DEL-03
+  source: 07_Execution_Engine.pdf
+  section: Review deliverables
+  kind: deliverable
+  text: Execution parity.
+  sessions: [S07]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S07-DEL-04
+  source: 07_Execution_Engine.pdf
+  section: Review deliverables
+  kind: deliverable
+  text: Failure-injection results.
+  sessions: [S07]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S08-DEP-01
+  source: 08_Risk_Intelligence.pdf
+  section: Launch and dependencies
+  kind: dependency
+  text: 'Dependencies: 00; execution/data contracts.'
+  sessions: [S08]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S08-DEP-02
+  source: 08_Risk_Intelligence.pdf
+  section: Launch and dependencies
+  kind: dependency
+  text: 'Owned scope: risk/'
+  sessions: [S08]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S08-ASG-01
+  source: 08_Risk_Intelligence.pdf
+  section: Your assignment
+  kind: assignment
+  text: Implement aggregate exposure.
+  sessions: [S08]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S08-ASG-02
+  source: 08_Risk_Intelligence.pdf
+  section: Your assignment
+  kind: assignment
+  text: Implement margin.
+  sessions: [S08]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S08-ASG-03
+  source: 08_Risk_Intelligence.pdf
+  section: Your assignment
+  kind: assignment
+  text: Implement pending risk.
+  sessions: [S08]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S08-ASG-04
+  source: 08_Risk_Intelligence.pdf
+  section: Your assignment
+  kind: assignment
+  text: Implement gap stress.
+  sessions: [S08]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S08-ASG-05
+  source: 08_Risk_Intelligence.pdf
+  section: Your assignment
+  kind: assignment
+  text: Implement adaptive sizing with validated quality.
+  sessions: [S08]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S08-ASG-06
+  source: 08_Risk_Intelligence.pdf
+  section: Your assignment
+  kind: assignment
+  text: Implement daily state machine.
+  sessions: [S08]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S08-ASG-07
+  source: 08_Risk_Intelligence.pdf
+  section: Your assignment
+  kind: assignment
+  text: Implement monotonic profit floor.
+  sessions: [S08]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S08-ASG-08
+  source: 08_Risk_Intelligence.pdf
+  section: Your assignment
+  kind: assignment
+  text: Account-wide Prague reset.
+  sessions: [S08]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S08-ASG-09
+  source: 08_Risk_Intelligence.pdf
+  section: Your assignment
+  kind: assignment
+  text: Actual FTMO product rules.
+  sessions: [S08]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S08-ASG-10
+  source: 08_Risk_Intelligence.pdf
+  section: Your assignment
+  kind: assignment
+  text: Overnight/rollover restrictions.
+  sessions: [S08]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S08-ASG-11
+  source: 08_Risk_Intelligence.pdf
+  section: Your assignment
+  kind: assignment
+  text: Recovery and emergency thresholds configurable.
+  sessions: [S08]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S08-ASG-12
+  source: 08_Risk_Intelligence.pdf
+  section: Your assignment
+  kind: assignment
+  text: No risk increase to recover losses.
+  sessions: [S08]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S08-ACC-01
+  source: 08_Risk_Intelligence.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Boundary tests at -2%.
+  sessions: [S08]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S08-ACC-02
+  source: 08_Risk_Intelligence.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Boundary tests at proposed -1.75%.
+  sessions: [S08]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S08-ACC-03
+  source: 08_Risk_Intelligence.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Boundary tests at -3%.
+  sessions: [S08]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S08-ACC-04
+  source: 08_Risk_Intelligence.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Boundary tests at +5%.
+  sessions: [S08]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S08-ACC-05
+  source: 08_Risk_Intelligence.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Exact-floor no new risk.
+  sessions: [S08]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S08-ACC-06
+  source: 08_Risk_Intelligence.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Simultaneous reservations atomic.
+  sessions: [S08]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S08-ACC-07
+  source: 08_Risk_Intelligence.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Gap stress.
+  sessions: [S08]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S08-ACC-08
+  source: 08_Risk_Intelligence.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Other-account-position handling.
+  sessions: [S08]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S08-DEL-01
+  source: 08_Risk_Intelligence.pdf
+  section: Review deliverables
+  kind: deliverable
+  text: Risk formulas.
+  sessions: [S08]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S08-DEL-02
+  source: 08_Risk_Intelligence.pdf
+  section: Review deliverables
+  kind: deliverable
+  text: Rule provenance.
+  sessions: [S08]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S08-DEL-03
+  source: 08_Risk_Intelligence.pdf
+  section: Review deliverables
+  kind: deliverable
+  text: State traces.
+  sessions: [S08]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S08-DEL-04
+  source: 08_Risk_Intelligence.pdf
+  section: Review deliverables
+  kind: deliverable
+  text: Stress results.
+  sessions: [S08]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S08-DEL-05
+  source: 08_Risk_Intelligence.pdf
+  section: Review deliverables
+  kind: deliverable
+  text: Unresolved account assumptions.
+  sessions: [S08]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S09-DEP-01
+  source: 09_Learning_Laboratory.pdf
+  section: Launch and dependencies
+  kind: dependency
+  text: 'Dependencies: 00, 04, 05, 10.'
+  sessions: [S09]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S09-DEP-02
+  source: 09_Learning_Laboratory.pdf
+  section: Launch and dependencies
+  kind: dependency
+  text: 'Owned scope: learning/'
+  sessions: [S09]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S09-ASG-01
+  source: 09_Learning_Laboratory.pdf
+  section: Your assignment
+  kind: assignment
+  text: Collect decision and outcome logs.
+  sessions: [S09]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S09-ASG-02
+  source: 09_Learning_Laboratory.pdf
+  section: Your assignment
+  kind: assignment
+  text: Collect rejected/missed setups.
+  sessions: [S09]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S09-ASG-03
+  source: 09_Learning_Laboratory.pdf
+  section: Your assignment
+  kind: assignment
+  text: Collect latency.
+  sessions: [S09]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S09-ASG-04
+  source: 09_Learning_Laboratory.pdf
+  section: Your assignment
+  kind: assignment
+  text: Collect profit giveback.
+  sessions: [S09]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S09-ASG-05
+  source: 09_Learning_Laboratory.pdf
+  section: Your assignment
+  kind: assignment
+  text: Collect execution errors.
+  sessions: [S09]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S09-ASG-06
+  source: 09_Learning_Laboratory.pdf
+  section: Your assignment
+  kind: assignment
+  text: Discover new patterns beyond six engines with constrained search.
+  sessions: [S09]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S09-ASG-07
+  source: 09_Learning_Laboratory.pdf
+  section: Your assignment
+  kind: assignment
+  text: Separate research compute.
+  sessions: [S09]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S09-ASG-08
+  source: 09_Learning_Laboratory.pdf
+  section: Your assignment
+  kind: assignment
+  text: Version models.
+  sessions: [S09]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S09-ASG-09
+  source: 09_Learning_Laboratory.pdf
+  section: Your assignment
+  kind: assignment
+  text: Shadow compare.
+  sessions: [S09]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S09-ASG-10
+  source: 09_Learning_Laboratory.pdf
+  section: Your assignment
+  kind: assignment
+  text: Require owner-approved promotion.
+  sessions: [S09]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S09-ASG-11
+  source: 09_Learning_Laboratory.pdf
+  section: Your assignment
+  kind: assignment
+  text: Rollback.
+  sessions: [S09]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S09-ASG-12
+  source: 09_Learning_Laboratory.pdf
+  section: Your assignment
+  kind: assignment
+  text: No manual trade learning.
+  sessions: [S09]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S09-ACC-01
+  source: 09_Learning_Laboratory.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Active model immutable during training.
+  sessions: [S09]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S09-ACC-02
+  source: 09_Learning_Laboratory.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Resource isolation.
+  sessions: [S09]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S09-ACC-03
+  source: 09_Learning_Laboratory.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Leakage tests.
+  sessions: [S09]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S09-ACC-04
+  source: 09_Learning_Laboratory.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Promotion rejection for weak evidence.
+  sessions: [S09]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S09-ACC-05
+  source: 09_Learning_Laboratory.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Rollback.
+  sessions: [S09]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S09-ACC-06
+  source: 09_Learning_Laboratory.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Reproducibility.
+  sessions: [S09]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S09-DEL-01
+  source: 09_Learning_Laboratory.pdf
+  section: Review deliverables
+  kind: deliverable
+  text: Experiment registry.
+  sessions: [S09]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S09-DEL-02
+  source: 09_Learning_Laboratory.pdf
+  section: Review deliverables
+  kind: deliverable
+  text: Candidate models.
+  sessions: [S09]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S09-DEL-03
+  source: 09_Learning_Laboratory.pdf
+  section: Review deliverables
+  kind: deliverable
+  text: Shadow results.
+  sessions: [S09]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S09-DEL-04
+  source: 09_Learning_Laboratory.pdf
+  section: Review deliverables
+  kind: deliverable
+  text: Promotion criteria.
+  sessions: [S09]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S09-DEL-05
+  source: 09_Learning_Laboratory.pdf
+  section: Review deliverables
+  kind: deliverable
+  text: Resource benchmarks.
+  sessions: [S09]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S10-DEP-01
+  source: 10_Research_and_Backtesting.pdf
+  section: Launch and dependencies
+  kind: dependency
+  text: 'Dependencies: 00; begin harness early; integrated modules later.'
+  sessions: [S10]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S10-DEP-02
+  source: 10_Research_and_Backtesting.pdf
+  section: Launch and dependencies
+  kind: dependency
+  text: 'Owned scope: backtesting/'
+  sessions: [S10]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S10-ASG-01
+  source: 10_Research_and_Backtesting.pdf
+  section: Your assignment
+  kind: assignment
+  text: Build chronological tick replay using same decision/risk/execution interfaces as paper.
+  sessions: [S10]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S10-ASG-02
+  source: 10_Research_and_Backtesting.pdf
+  section: Your assignment
+  kind: assignment
+  text: Reconcile Round 1/2 baselines.
+  sessions: [S10]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S10-ASG-03
+  source: 10_Research_and_Backtesting.pdf
+  section: Your assignment
+  kind: assignment
+  text: Reconcile daily metrics.
+  sessions: [S10]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S10-ASG-04
+  source: 10_Research_and_Backtesting.pdf
+  section: Your assignment
+  kind: assignment
+  text: Test hybrid.
+  sessions: [S10]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S10-ASG-05
+  source: 10_Research_and_Backtesting.pdf
+  section: Your assignment
+  kind: assignment
+  text: Test multiple positions.
+  sessions: [S10]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S10-ASG-06
+  source: 10_Research_and_Backtesting.pdf
+  section: Your assignment
+  kind: assignment
+  text: Test sizing.
+  sessions: [S10]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S10-ASG-07
+  source: 10_Research_and_Backtesting.pdf
+  section: Your assignment
+  kind: assignment
+  text: Test exits.
+  sessions: [S10]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S10-ASG-08
+  source: 10_Research_and_Backtesting.pdf
+  section: Your assignment
+  kind: assignment
+  text: Test news ablations.
+  sessions: [S10]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S10-ASG-09
+  source: 10_Research_and_Backtesting.pdf
+  section: Your assignment
+  kind: assignment
+  text: Test intermarket ablations.
+  sessions: [S10]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S10-ASG-10
+  source: 10_Research_and_Backtesting.pdf
+  section: Your assignment
+  kind: assignment
+  text: Report unconstrained research and halted challenge simulations separately.
+  sessions: [S10]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S10-ACC-01
+  source: 10_Research_and_Backtesting.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Deterministic replay.
+  sessions: [S10]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S10-ACC-02
+  source: 10_Research_and_Backtesting.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: No lookahead.
+  sessions: [S10]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S10-ACC-03
+  source: 10_Research_and_Backtesting.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Tick ordering.
+  sessions: [S10]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S10-ACC-04
+  source: 10_Research_and_Backtesting.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Costs.
+  sessions: [S10]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S10-ACC-05
+  source: 10_Research_and_Backtesting.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Overlapping positions.
+  sessions: [S10]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S10-ACC-06
+  source: 10_Research_and_Backtesting.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Daily denominator checks.
+  sessions: [S10]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S10-ACC-07
+  source: 10_Research_and_Backtesting.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Purged walk-forward.
+  sessions: [S10]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S10-ACC-08
+  source: 10_Research_and_Backtesting.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Block bootstrap.
+  sessions: [S10]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S10-ACC-09
+  source: 10_Research_and_Backtesting.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Multiplicity.
+  sessions: [S10]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S10-DEL-01
+  source: 10_Research_and_Backtesting.pdf
+  section: Review deliverables
+  kind: deliverable
+  text: PDF with all metrics G09/G10.
+  sessions: [S10]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S10-DEL-02
+  source: 10_Research_and_Backtesting.pdf
+  section: Review deliverables
+  kind: deliverable
+  text: Trade/candidate CSVs.
+  sessions: [S10]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S10-DEL-03
+  source: 10_Research_and_Backtesting.pdf
+  section: Review deliverables
+  kind: deliverable
+  text: Configs.
+  sessions: [S10]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S10-DEL-04
+  source: 10_Research_and_Backtesting.pdf
+  section: Review deliverables
+  kind: deliverable
+  text: Seeds.
+  sessions: [S10]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S10-DEL-05
+  source: 10_Research_and_Backtesting.pdf
+  section: Review deliverables
+  kind: deliverable
+  text: Equity curves.
+  sessions: [S10]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S10-DEL-06
+  source: 10_Research_and_Backtesting.pdf
+  section: Review deliverables
+  kind: deliverable
+  text: Frequency-expectancy frontier.
+  sessions: [S10]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S11-DEP-01
+  source: 11_Dashboard.pdf
+  section: Launch and dependencies
+  kind: dependency
+  text: 'Dependencies: 00; read-only contracts from all modules.'
+  sessions: [S11]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S11-DEP-02
+  source: 11_Dashboard.pdf
+  section: Launch and dependencies
+  kind: dependency
+  text: 'Owned scope: dashboard/gie/'
+  sessions: [S11]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S11-ASG-01
+  source: 11_Dashboard.pdf
+  section: Your assignment
+  kind: assignment
+  text: Show live chart.
+  sessions: [S11]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S11-ASG-02
+  source: 11_Dashboard.pdf
+  section: Your assignment
+  kind: assignment
+  text: Show BUY/SELL quality.
+  sessions: [S11]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S11-ASG-03
+  source: 11_Dashboard.pdf
+  section: Your assignment
+  kind: assignment
+  text: Show expected R.
+  sessions: [S11]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S11-ASG-04
+  source: 11_Dashboard.pdf
+  section: Your assignment
+  kind: assignment
+  text: Show uncertainty.
+  sessions: [S11]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S11-ASG-05
+  source: 11_Dashboard.pdf
+  section: Your assignment
+  kind: assignment
+  text: Show evidence contributions.
+  sessions: [S11]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S11-ASG-06
+  source: 11_Dashboard.pdf
+  section: Your assignment
+  kind: assignment
+  text: Show prepared plans.
+  sessions: [S11]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S11-ASG-07
+  source: 11_Dashboard.pdf
+  section: Your assignment
+  kind: assignment
+  text: Show open positions.
+  sessions: [S11]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S11-ASG-08
+  source: 11_Dashboard.pdf
+  section: Your assignment
+  kind: assignment
+  text: Show risk states.
+  sessions: [S11]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S11-ASG-09
+  source: 11_Dashboard.pdf
+  section: Your assignment
+  kind: assignment
+  text: Show profit floor.
+  sessions: [S11]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S11-ASG-10
+  source: 11_Dashboard.pdf
+  section: Your assignment
+  kind: assignment
+  text: Show data freshness.
+  sessions: [S11]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S11-ASG-11
+  source: 11_Dashboard.pdf
+  section: Your assignment
+  kind: assignment
+  text: Show latency.
+  sessions: [S11]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S11-ASG-12
+  source: 11_Dashboard.pdf
+  section: Your assignment
+  kind: assignment
+  text: Show model versions.
+  sessions: [S11]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S11-ASG-13
+  source: 11_Dashboard.pdf
+  section: Your assignment
+  kind: assignment
+  text: Show learning.
+  sessions: [S11]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S11-ASG-14
+  source: 11_Dashboard.pdf
+  section: Your assignment
+  kind: assignment
+  text: Show paper results.
+  sessions: [S11]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S11-ASG-15
+  source: 11_Dashboard.pdf
+  section: Your assignment
+  kind: assignment
+  text: Clearly label simulated, unavailable and unvalidated values.
+  sessions: [S11]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S11-ASG-16
+  source: 11_Dashboard.pdf
+  section: Your assignment
+  kind: assignment
+  text: No direct order route.
+  sessions: [S11]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S11-ACC-01
+  source: 11_Dashboard.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Replay UI with real event payloads.
+  sessions: [S11]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S11-ACC-02
+  source: 11_Dashboard.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Stale/disconnect state.
+  sessions: [S11]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S11-ACC-03
+  source: 11_Dashboard.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: No hardcoded metrics.
+  sessions: [S11]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S11-ACC-04
+  source: 11_Dashboard.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: No blocking of reflex.
+  sessions: [S11]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S11-ACC-05
+  source: 11_Dashboard.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Existing tabs unaffected.
+  sessions: [S11]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S11-DEL-01
+  source: 11_Dashboard.pdf
+  section: Review deliverables
+  kind: deliverable
+  text: Screenshots.
+  sessions: [S11]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S11-DEL-02
+  source: 11_Dashboard.pdf
+  section: Review deliverables
+  kind: deliverable
+  text: UI tests.
+  sessions: [S11]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S11-DEL-03
+  source: 11_Dashboard.pdf
+  section: Review deliverables
+  kind: deliverable
+  text: Event mappings.
+  sessions: [S11]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S11-DEL-04
+  source: 11_Dashboard.pdf
+  section: Review deliverables
+  kind: deliverable
+  text: Usability notes.
+  sessions: [S11]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S12-DEP-01
+  source: 12_Quality_Assurance.pdf
+  section: Launch and dependencies
+  kind: dependency
+  text: 'Dependencies: 00; ongoing through all waves.'
+  sessions: [S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S12-DEP-02
+  source: 12_Quality_Assurance.pdf
+  section: Launch and dependencies
+  kind: dependency
+  text: 'Owned scope: tests/gie/, reviews/qa/'
+  sessions: [S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S12-ASG-01
+  source: 12_Quality_Assurance.pdf
+  section: Your assignment
+  kind: assignment
+  text: Independently verify requirements.
+  sessions: [S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S12-ASG-02
+  source: 12_Quality_Assurance.pdf
+  section: Your assignment
+  kind: assignment
+  text: Inspect code and tests.
+  sessions: [S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S12-ASG-03
+  source: 12_Quality_Assurance.pdf
+  section: Your assignment
+  kind: assignment
+  text: Run mutation/failure injection.
+  sessions: [S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S12-ASG-04
+  source: 12_Quality_Assurance.pdf
+  section: Your assignment
+  kind: assignment
+  text: Stress concurrency and latency.
+  sessions: [S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S12-ASG-05
+  source: 12_Quality_Assurance.pdf
+  section: Your assignment
+  kind: assignment
+  text: Check data leakage.
+  sessions: [S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S12-ASG-06
+  source: 12_Quality_Assurance.pdf
+  section: Your assignment
+  kind: assignment
+  text: Check live lock.
+  sessions: [S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S12-ASG-07
+  source: 12_Quality_Assurance.pdf
+  section: Your assignment
+  kind: assignment
+  text: Verify reports against raw exports and commits.
+  sessions: [S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S12-ASG-08
+  source: 12_Quality_Assurance.pdf
+  section: Your assignment
+  kind: assignment
+  text: Do not approve own implementation.
+  sessions: [S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S12-ASG-09
+  source: 12_Quality_Assurance.pdf
+  section: Your assignment
+  kind: assignment
+  text: Do not silently fix other branches.
+  sessions: [S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S12-ACC-01
+  source: 12_Quality_Assurance.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Full integration replay.
+  sessions: [S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S12-ACC-02
+  source: 12_Quality_Assurance.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Restart/disconnect.
+  sessions: [S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S12-ACC-03
+  source: 12_Quality_Assurance.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Stale feed.
+  sessions: [S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S12-ACC-04
+  source: 12_Quality_Assurance.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Burst load.
+  sessions: [S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S12-ACC-05
+  source: 12_Quality_Assurance.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Risk races.
+  sessions: [S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S12-ACC-06
+  source: 12_Quality_Assurance.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Overnight reset.
+  sessions: [S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S12-ACC-07
+  source: 12_Quality_Assurance.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Regression.
+  sessions: [S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S12-ACC-08
+  source: 12_Quality_Assurance.pdf
+  section: Acceptance tests
+  kind: acceptance
+  text: Paper-only end-to-end tests.
+  sessions: [S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S12-DEL-01
+  source: 12_Quality_Assurance.pdf
+  section: Review deliverables
+  kind: deliverable
+  text: Requirement-by-requirement verdict.
+  sessions: [S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S12-DEL-02
+  source: 12_Quality_Assurance.pdf
+  section: Review deliverables
+  kind: deliverable
+  text: Reproducible commands.
+  sessions: [S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S12-DEL-03
+  source: 12_Quality_Assurance.pdf
+  section: Review deliverables
+  kind: deliverable
+  text: Failures.
+  sessions: [S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S12-DEL-04
+  source: 12_Quality_Assurance.pdf
+  section: Review deliverables
+  kind: deliverable
+  text: Evidence paths.
+  sessions: [S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''
+- id: S12-DEL-05
+  source: 12_Quality_Assurance.pdf
+  section: Review deliverables
+  kind: deliverable
+  text: Release blockers.
+  sessions: [S12]
+  status: not_started
+  review_status: unverified
+  contributions: []
+  notes: ''

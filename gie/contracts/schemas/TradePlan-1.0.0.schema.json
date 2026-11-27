@@ -1,0 +1,444 @@
+{
+  "$defs": {
+    "EvidenceContribution": {
+      "additionalProperties": false,
+      "description": "How much one evidence record contributed to the plan's score (explainability).",
+      "properties": {
+        "evidence_id": {
+          "description": "Contributing evidence.",
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^evd_[0-9a-f]{32}$",
+          "type": "string"
+        },
+        "weight": {
+          "description": "Signed contribution to the expected net R.",
+          "type": "number",
+          "x-gie-unit": "R"
+        }
+      },
+      "required": [
+        "evidence_id",
+        "weight"
+      ],
+      "type": "object"
+    },
+    "Target": {
+      "additionalProperties": false,
+      "description": "A profit destination at which part of the position is closed.",
+      "properties": {
+        "close_frac": {
+          "description": "Share of the initial volume to close at this target.",
+          "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
+          "type": "string",
+          "x-gie-exclusiveMinimum": "0",
+          "x-gie-maximum": "1",
+          "x-gie-type": "decimal",
+          "x-gie-unit": "fraction of initial volume"
+        },
+        "label": {
+          "description": "Destination name.",
+          "maxLength": 48,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_]{1,47}$",
+          "type": "string"
+        },
+        "price": {
+          "description": "Target price.",
+          "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
+          "type": "string",
+          "x-gie-exclusiveMinimum": "0",
+          "x-gie-type": "decimal",
+          "x-gie-unit": "USD per troy ounce"
+        }
+      },
+      "required": [
+        "label",
+        "price",
+        "close_frac"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "urn:gie:contract:TradePlan:1.0.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Executable plan: entry, hard stop, targets, expected net R and uncertainty.",
+  "properties": {
+    "alternative_group_id": {
+      "description": "identity.alternative_group_id(candidate_id); alternatives exclude each other.",
+      "maxLength": 36,
+      "minLength": 36,
+      "pattern": "^grp_[0-9a-f]{32}$",
+      "type": "string"
+    },
+    "as_of_time_ns": {
+      "description": "Receive time of the newest input the record depends on (causality watermark).",
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "type": "integer",
+      "x-gie-unit": "ns since epoch, UTC"
+    },
+    "candidate_id": {
+      "description": "Candidate this plan trades.",
+      "maxLength": 36,
+      "minLength": 36,
+      "pattern": "^cnd_[0-9a-f]{32}$",
+      "type": "string"
+    },
+    "contract": {
+      "const": "TradePlan",
+      "description": "Contract name."
+    },
+    "contributions": {
+      "description": "Evidence contributions to the expected net R.",
+      "items": {
+        "$ref": "#/$defs/EvidenceContribution"
+      },
+      "maxItems": 64,
+      "minItems": 0,
+      "type": "array",
+      "x-gie-canonical-order": "sorted by evidence_id",
+      "x-gie-unique": true
+    },
+    "data_origin": {
+      "description": "Least trustworthy origin among the market data the record is derived from.",
+      "enum": [
+        "BROKER_FEED",
+        "HISTORICAL",
+        "SYNTHETIC_FIXTURE"
+      ],
+      "type": "string"
+    },
+    "decision_time_ns": {
+      "description": "Clock reading at which the producer created the record.",
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "type": "integer",
+      "x-gie-unit": "ns since epoch, UTC"
+    },
+    "entry_order_type": {
+      "description": "Order type used for the entry.",
+      "enum": [
+        "MARKET",
+        "LIMIT",
+        "STOP"
+      ],
+      "type": "string"
+    },
+    "entry_price": {
+      "anyOf": [
+        {
+          "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
+          "type": "string",
+          "x-gie-exclusiveMinimum": "0",
+          "x-gie-type": "decimal"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Limit or stop-trigger price of the entry; null for a market entry.",
+      "x-gie-unit": "USD per troy ounce"
+    },
+    "entry_style": {
+      "description": "Intended way of entering.",
+      "enum": [
+        "MARKET",
+        "LIMIT",
+        "RETEST",
+        "PULLBACK",
+        "STOP"
+      ],
+      "type": "string"
+    },
+    "expected_cost_r": {
+      "description": "Expected spread, commission and slippage already deducted in expected_net_r.",
+      "minimum": 0.0,
+      "type": "number",
+      "x-gie-unit": "R"
+    },
+    "expected_net_r": {
+      "description": "Expected net result of this plan.",
+      "type": "number",
+      "x-gie-unit": "R"
+    },
+    "horizon": {
+      "description": "Scalp or intraday.",
+      "enum": [
+        "SCALP",
+        "INTRADAY"
+      ],
+      "type": "string"
+    },
+    "max_entry_slippage": {
+      "anyOf": [
+        {
+          "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
+          "type": "string",
+          "x-gie-minimum": "0",
+          "x-gie-type": "decimal"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Largest acceptable adverse difference between intended and achievable entry price.",
+      "x-gie-unit": "USD per troy ounce"
+    },
+    "max_spread": {
+      "anyOf": [
+        {
+          "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
+          "type": "string",
+          "x-gie-exclusiveMinimum": "0",
+          "x-gie-type": "decimal"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Do not enter while the spread is wider than this.",
+      "x-gie-unit": "USD per troy ounce"
+    },
+    "mode": {
+      "description": "REPLAY or PAPER.  No live mode exists (routing lock).",
+      "enum": [
+        "REPLAY",
+        "PAPER"
+      ],
+      "type": "string"
+    },
+    "model_version_id": {
+      "description": "Model (or rule set) version behind the estimates.",
+      "maxLength": 36,
+      "minLength": 36,
+      "pattern": "^mdl_[0-9a-f]{32}$",
+      "type": "string"
+    },
+    "net_r_stdev": {
+      "description": "Predictive standard deviation of the net result.",
+      "minimum": 0.0,
+      "type": "number",
+      "x-gie-unit": "R"
+    },
+    "overnight_allowed": {
+      "description": "Whether the position may be held past the daily rollover (never over a weekend).",
+      "type": "boolean"
+    },
+    "plan_id": {
+      "description": "identity.plan_id(candidate_id, entry_style, variant, revision).",
+      "maxLength": 36,
+      "minLength": 36,
+      "pattern": "^pln_[0-9a-f]{32}$",
+      "type": "string"
+    },
+    "producer": {
+      "description": "Component instance that emitted the record; together with the contract name it names the stream.",
+      "maxLength": 96,
+      "minLength": 1,
+      "pattern": "^[a-z][a-z0-9_]*(\\.[a-z0-9_]+){0,4}$",
+      "type": "string"
+    },
+    "reference_price": {
+      "description": "Executable price at decision time: ask for BUY, bid for SELL.",
+      "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
+      "type": "string",
+      "x-gie-exclusiveMinimum": "0",
+      "x-gie-type": "decimal",
+      "x-gie-unit": "USD per troy ounce"
+    },
+    "revision": {
+      "description": "0 for the first record, +1 per update.",
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "run_id": {
+      "description": "Run that produced the record.",
+      "maxLength": 36,
+      "minLength": 36,
+      "pattern": "^run_[0-9a-f]{32}$",
+      "type": "string"
+    },
+    "schema_version": {
+      "description": "Version of the contract the message was written with.",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+      "type": "string"
+    },
+    "seq": {
+      "description": "Position of the record in its stream: starts at 0 and increases by exactly 1.",
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "side": {
+      "description": "Direction of the trade.",
+      "enum": [
+        "BUY",
+        "SELL"
+      ],
+      "type": "string"
+    },
+    "status": {
+      "description": "Lifecycle status of this revision.",
+      "enum": [
+        "PREPARED",
+        "ARMED",
+        "SELECTED",
+        "WITHDRAWN",
+        "EXPIRED",
+        "REJECTED"
+      ],
+      "type": "string"
+    },
+    "status_reasons": {
+      "description": "Why the plan was rejected or withdrawn.",
+      "items": {
+        "maxLength": 48,
+        "minLength": 1,
+        "pattern": "^[A-Z][A-Z0-9_]{1,47}$",
+        "type": "string"
+      },
+      "maxItems": 32,
+      "minItems": 0,
+      "type": "array",
+      "x-gie-canonical-order": "sorted ascending",
+      "x-gie-unique": true
+    },
+    "stop_price": {
+      "description": "Hard protective stop (the plan's invalidation).  It may later be tightened, never widened.",
+      "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
+      "type": "string",
+      "x-gie-exclusiveMinimum": "0",
+      "x-gie-type": "decimal",
+      "x-gie-unit": "USD per troy ounce"
+    },
+    "supersedes_plan_id": {
+      "anyOf": [
+        {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^pln_[0-9a-f]{32}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Previous revision replaced by this record; null for revision 0."
+    },
+    "symbol": {
+      "description": "Always XAUUSD: GIE trades only gold.",
+      "enum": [
+        "XAUUSD"
+      ],
+      "maxLength": 24,
+      "minLength": 1,
+      "type": "string"
+    },
+    "targets": {
+      "description": "Profit destinations, at least one.",
+      "items": {
+        "$ref": "#/$defs/Target"
+      },
+      "maxItems": 8,
+      "minItems": 1,
+      "type": "array"
+    },
+    "valid_until_ns": {
+      "description": "Expiry instant: the plan must not be acted on at or after it.",
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "type": "integer",
+      "x-gie-unit": "ns since epoch, UTC"
+    },
+    "variant": {
+      "description": "Distinguishes several plans of the same entry style.",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "contract",
+    "schema_version",
+    "producer",
+    "seq",
+    "run_id",
+    "mode",
+    "data_origin",
+    "decision_time_ns",
+    "as_of_time_ns",
+    "plan_id",
+    "candidate_id",
+    "alternative_group_id",
+    "variant",
+    "symbol",
+    "side",
+    "horizon",
+    "entry_style",
+    "entry_order_type",
+    "reference_price",
+    "stop_price",
+    "targets",
+    "expected_net_r",
+    "net_r_stdev",
+    "expected_cost_r",
+    "model_version_id",
+    "overnight_allowed",
+    "status",
+    "status_reasons",
+    "contributions",
+    "valid_until_ns",
+    "revision"
+  ],
+  "title": "TradePlan 1.0.0",
+  "type": "object",
+  "x-gie-invariants": [
+    {
+      "id": "CAUSAL-1",
+      "rule": "as_of_time_ns <= decision_time_ns (a record cannot depend on data received after it was created)"
+    },
+    {
+      "id": "PLN-1",
+      "rule": "plan_id equals identity.plan_id(candidate_id, entry_style, variant, revision)"
+    },
+    {
+      "id": "PLN-2",
+      "rule": "alternative_group_id equals identity.alternative_group_id(candidate_id)"
+    },
+    {
+      "id": "PLN-3",
+      "rule": "entry_price is null if and only if entry_order_type is MARKET"
+    },
+    {
+      "id": "PLN-4",
+      "rule": "entry styles MARKET, LIMIT and STOP use the order type of the same name"
+    },
+    {
+      "id": "PLN-5",
+      "rule": "the stop is on the losing side of the entry (BUY: stop < entry, SELL: stop > entry)"
+    },
+    {
+      "id": "PLN-6",
+      "rule": "every target is on the winning side of the entry"
+    },
+    {
+      "id": "PLN-7",
+      "rule": "the target close fractions sum to at most 1"
+    },
+    {
+      "id": "PLN-8",
+      "rule": "when status is PREPARED, ARMED or SELECTED, valid_until_ns is later than decision_time_ns"
+    },
+    {
+      "id": "PLN-9",
+      "rule": "status_reasons is non-empty when status is REJECTED or WITHDRAWN and empty when usable"
+    },
+    {
+      "id": "PLN-10",
+      "rule": "supersedes_plan_id is set if and only if revision > 0"
+    }
+  ]
+}
