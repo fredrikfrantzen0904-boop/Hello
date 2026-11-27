@@ -489,6 +489,11 @@ def build_tree(root: Path) -> None:
     os.utime(root, ns=(FIXED_MTIME_NS, FIXED_MTIME_NS))
 
 
+def plain(path: Any) -> str:
+    """A path as the tests name it: without the extended-length prefix the tool uses on Windows."""
+    return str(audit._strip_extended_prefix(os.fsdecode(path)))
+
+
 def line_of(text: str, needle: str) -> int:
     """1-based line number of the first occurrence of ``needle`` (fails when it is absent)."""
     return text[: text.index(needle)].count("\n") + 1
@@ -827,7 +832,7 @@ def test_data_inventory_reports_column_names_only(audited: Audited) -> None:
     assert set(files) == data_paths
     assert data["file_count"] == len(data_paths)
     assert files["data/big_utf16.csv"]["row_count"] == BIG_UTF16_ROWS
-    assert data["by_extension"][".csv"]["files"] == 7
+    assert data["by_extension"][".csv"]["files"] == 6 + len(NON_UTF8_FILES)  # the byte-named file is a .csv
     assert data["by_extension"][".sqlite"] == {"files": 1, "bytes": len(VISIBLE["data/history.sqlite"])}
     assert data["largest_files"][0]["size"] == max(item["size"] for item in data["files"])
     required = [
@@ -1512,7 +1517,11 @@ def test_interpreter_sees_only_read_opens_under_root(tree: Path, tmp_path: Path)
     assert code == 0
     assert seen.writes == []
     assert seen.mutations == []
-    assert seen.other == []
+    # With --processes the tool lists the running processes: on Linux by reading /proc, on Windows
+    # through its two fixed read-only queries (tasklist, schtasks), which the interpreter reports as
+    # process starts.  That the tool's own guard admits no other process start is tested separately.
+    process_queries = {"subprocess.Popen"} if os.name == "nt" else set()
+    assert set(seen.other) <= process_queries
     assert seen.reads >= len(EXPECTED_PATHS)  # the recorder did observe the audit reading the tree
     # the recorder is not blind: it does see a write under the root made by the test itself
     with recording(tree) as seen:
@@ -2392,8 +2401,8 @@ def test_unreadable_and_vanished_files_are_recorded_and_do_not_fail_the_run(
     }
 
     def failing_opener(path: str, flags: int) -> int:
-        if path in failures:
-            raise failures[path]
+        if plain(path) in failures:
+            raise failures[plain(path)]
         return real_opener(path, flags)
 
     monkeypatch.setattr(audit, "_readonly_opener", failing_opener)
@@ -2432,7 +2441,7 @@ def test_unreadable_directory_is_recorded(
     blocked = str(tree / "engines" / "legacy")
 
     def failing_scandir(path: Any) -> Any:
-        if os.fspath(path) == blocked:
+        if plain(path) == blocked:
             raise PermissionError(13, "SYNTHETIC FIXTURE: permission denied")
         return real_scandir(path)
 
@@ -2465,7 +2474,7 @@ def test_file_that_changes_while_it_is_read_is_flagged(
 
     def unstable_read(path: str, *args: Any) -> Any:
         outcome = real_read(path, *args)
-        if path == str(target):
+        if plain(path) == str(target):
             outcome.changed = True
         return outcome
 
@@ -2584,7 +2593,7 @@ def test_offline_placeholder_files_are_listed_but_never_opened(
     real_opener = audit._readonly_opener
 
     def recording_opener(path: str, flags: int) -> int:
-        opened.append(path)
+        opened.append(plain(path))
         return real_opener(path, flags)
 
     monkeypatch.setattr(audit, "_entry_kind", kind_with_placeholder)
