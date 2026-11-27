@@ -1,20 +1,51 @@
 # GIE dependency graph (requirement S00-ASG-10, deliverable S00-DEL-03).
 # Source: "Launch and dependencies" of each session brief and the implementation directive of
-# the master specification.  Checked in CI by tools/check_architecture.py.
+# the master specification.  Checked in CI by tools/check_architecture.py (rules AR001-AR007).
 schema_version: 1
-status: PROPOSED   # layout and import rules await owner approval (decision D-002, D-006)
+status: PROPOSED   # layout and import rules await owner approval (decisions D-002, D-006)
+
+# ---------------------------------------------------------------------------------------------
+# Gates (M-DIR-01..06, M-GATE-09, COM-07, COM-08, COM-09).  The procedure is in docs/WORKTREES.md.
+# ---------------------------------------------------------------------------------------------
+gates:
+  start_gate:
+    description: >-
+      A session may START when (1) the owner has approved the Session 00 review package and the
+      shared contracts (M-DIR-02), (2) the owner has opened the session's wave, and (3) every
+      entry of contract_extensions whose required_before_start_of lists the session has been
+      integrated by the coordinator.  A depends_on session that is not integrated yet does not
+      block the start: it is replaced by explicitly labelled test fixtures (COM-07) and the
+      session may then not claim integration complete (COM-08).  contract_only dependencies
+      never delay a start.
+    requirements: [M-DIR-01, M-DIR-02, M-DIR-03, M-DIR-04, M-DIR-05, M-DIR-09, COM-07, COM-08]
+  integration_gate:
+    description: >-
+      The coordinator merges a session branch only when (1) the review packages of all its
+      depends_on sessions are approved and integrated, (2) its own review package is approved by
+      the owner, and (3) the full CI passes on the merge result.  Nothing is merged without owner
+      approval.
+    requirements: [M-DIR-06, M-GATE-09, M-AUTH-11, COM-09]
 
 # ---------------------------------------------------------------------------------------------
 # Sessions: who must be approved before whom.
 #   depends_on        - the dependency's review package must be approved before integration
-#   contract_only     - only the shared contracts of that session are needed (already in 00)
+#   contract_only     - only shared contracts are needed from that session (see
+#                       contract_extensions for the ones that do not exist yet)
 #   optional          - used when available; labelled fixtures otherwise (COM-07)
+#   early_scaffolding - may begin its harness with wave 2 (M-DIR-09)
+#   integrates_later  - subsystems that are plugged into this session's harness as each of them
+#                       is approved (S10-DEP-01 "integrated modules later"); the session cannot
+#                       claim integration with a subsystem before that
+#   ongoing           - runs through all waves and reviews every session (S12-DEP-01)
+#   owns              - paths only this session edits; a trailing slash means the whole directory
 # ---------------------------------------------------------------------------------------------
 sessions:
   S00: {name: Project Coordinator, wave: 1, depends_on: [], contract_only: [], optional: [],
-        owns: [gie/core/, gie/contracts/, specifications/, docs/, tools/, .github/, tests/gie/core/,
-               tests/gie/contracts/, tests/gie/tools/, tests/gie/baseline/, reviews/session_00/,
-               CLAUDE.md, pyproject.toml]}
+        owns: [gie/__init__.py, gie/core/, gie/contracts/, gie/app/, specifications/, docs/, tools/,
+               .github/, tests/__init__.py, tests/conftest.py, tests/gie/__init__.py,
+               tests/gie/samples.py, tests/gie/golden/, tests/gie/core/, tests/gie/contracts/,
+               tests/gie/tools/, tests/gie/baseline/, reviews/session_00/, CLAUDE.md, README.md,
+               pyproject.toml, .gitignore]}
   S01: {name: Market Data, wave: 2, depends_on: [S00], contract_only: [], optional: [],
         owns: [gie/market_data/, tests/gie/market_data/, reviews/session_01/]}
   S02: {name: Strategy Intelligence, wave: 2, depends_on: [S00], contract_only: [S01], optional: [],
@@ -35,13 +66,48 @@ sessions:
         owns: [gie/learning/, tests/gie/learning/, reviews/session_09/]}
   S10: {name: Research and Backtesting, wave: 4, depends_on: [S00], contract_only: [], optional: [],
         early_scaffolding: true,
+        integrates_later: [S01, S02, S03, S04, S05, S06, S07, S08],
         owns: [gie/backtesting/, tests/gie/backtesting/, reviews/session_10/]}
   S11: {name: Dashboard, wave: 4, depends_on: [S00], contract_only: [S01, S02, S03, S04, S05, S06, S07, S08, S09, S10],
         optional: [],
         owns: [dashboard/gie/, tests/gie/dashboard/, reviews/session_11/]}
   S12: {name: Quality Assurance, wave: 4, depends_on: [S00], contract_only: [], optional: [],
         early_scaffolding: true,
+        ongoing: true,
         owns: [tests/gie/qa/, reviews/qa/]}
+
+# ---------------------------------------------------------------------------------------------
+# Shared contract types that later sessions need and that Session 00 deliberately did NOT define
+# (docs/CHANGE_REQUESTS.md CR-003, CR-005): their content depends on the audit of the existing
+# system (B-001) and on broker / account facts (U-04, U-09, U-10).  Each is proposed by the
+# named session as its first deliverable, integrated into gie.contracts by the coordinator with
+# the framework, registry, schema lock, golden messages and tests of Session 00, and must exist
+# before the listed sessions start (start gate).
+# ---------------------------------------------------------------------------------------------
+contract_extensions:
+  - {id: CX-01, name: Candle, proposed_by: [S01], required_before_start_of: [S02, S03, S04],
+     change_request: CR-003, requirements: [S01-ASG-04, S02-DEP-01]}
+  - {id: CX-02, name: BrokerCalendar and session classifier, proposed_by: [S01],
+     required_before_start_of: [S02, S06, S08], change_request: CR-003,
+     requirements: [S01-ASG-05, S08-ASG-08, S08-ASG-10]}
+  - {id: CX-03, name: Tick usability policy per quality flag, proposed_by: [S01],
+     required_before_start_of: [S02, S06, S07], change_request: CR-005,
+     requirements: [S01-ASG-06, S01-ASG-08, G03-12]}
+  - {id: CX-04, name: InstrumentSpec (broker constraints of the instrument), proposed_by: [S07],
+     required_before_start_of: [S06, S08], change_request: CR-003,
+     requirements: [S07-ASG-15, S08-ASG-02]}
+  - {id: CX-05, name: AccountSnapshot (account-wide state including other systems' positions),
+     proposed_by: [S08], required_before_start_of: [S05, S06], change_request: CR-003,
+     requirements: [S08-ASG-01, S08-ASG-02, S08-ACC-08, S08-DEP-01]}
+  - {id: CX-06, name: Observation with release vintage / news and calendar events,
+     proposed_by: [S01, S03], required_before_start_of: [S03], change_request: CR-003,
+     requirements: [S01-ASG-12]}
+  - {id: CX-07, name: MarketCondition / TradingRestriction, proposed_by: [S03],
+     required_before_start_of: [S05], change_request: CR-003, requirements: [S08-ASG-10]}
+  - {id: CX-08, name: Decision (unified decision stream), proposed_by: [S05],
+     required_before_start_of: [S09, S11], change_request: CR-003, requirements: [S11-DEP-01]}
+  - {id: CX-09, name: Outcome / label record, proposed_by: [S04, S09],
+     required_before_start_of: [S09], change_request: CR-003, requirements: [S09-DEP-01]}
 
 # ---------------------------------------------------------------------------------------------
 # Brief path -> repository path (COM-03: "paths are proposed until coordinator approves").
@@ -70,6 +136,8 @@ path_mapping:
 # packages listed.  Subsystems never import each other: they exchange contract records and call
 # each other only through gie.contracts.interfaces.  The composition root gie.app (created by
 # the coordinator at integration time) is the only place that wires implementations together.
+#   read_only: true - the package only consumes records (RecordSource); it must not import or
+#                     call anything that submits, cancels or replaces orders (S11-ASG-16).
 # ---------------------------------------------------------------------------------------------
 packages:
   gie.core: {session: S00, may_import: []}
@@ -84,13 +152,37 @@ packages:
   gie.risk: {session: S08, may_import: [gie.core, gie.contracts]}
   gie.learning: {session: S09, may_import: [gie.core, gie.contracts]}
   gie.backtesting: {session: S10, may_import: [gie.core, gie.contracts]}
+  dashboard.gie: {session: S11, may_import: [gie.core, gie.contracts], read_only: true}
   gie.app: {session: S00, may_import: ["gie.*"]}
 
 # Third-party imports allowed per package (the standard library is always allowed).
-# gie.core and gie.contracts are standard-library only by design (decision D-004).
+# gie.core and gie.contracts are standard-library only by design (decision D-004).  Every other
+# session proposes its allow-list with its first review package; until then it is unrestricted
+# by this rule and restricted by review.
 third_party:
   gie.core: []
   gie.contracts: []
+
+# Paths that the documents name although they do not exist yet, each explicitly described there
+# as "not started" / "created at first integration" (tools/check_docs_paths.py).
+docs_path_ignore:
+  - gie/app/
+  - gie/market_data/
+  - gie/strategy_intelligence/
+  - gie/intermarket/
+  - gie/prediction/
+  - gie/decision/
+  - gie/reflex/
+  - gie/execution/
+  - gie/risk/
+  - gie/learning/
+  - gie/backtesting/
+  - dashboard/gie/
+  - models/research/
+  - tests/gie/qa/
+  - reviews/qa/
+  - reviews/session_01/
+  - specifications/baselines/frozen/
 
 # Paths that existed before the project and must stay byte-identical (OWN-13, M-AUTH-12).
 protected_paths:

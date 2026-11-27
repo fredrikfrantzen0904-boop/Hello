@@ -69,7 +69,9 @@ valid because their normative form is language neutral (JSON Schema + canonical 
 frozen, slotted dataclass whose fields are declared once with a field specification
 (`gie/contracts/_spec.py`); validation on construction, canonical encoding, strict decoding and the
 published JSON Schema are all derived from that single declaration, and cross-field invariants are
-declared next to the fields. Every record that exists in memory is valid.
+declared next to the fields. Every record that exists in memory is valid. A contract class can only
+be defined inside `gie.contracts` (the framework refuses any other module), so a subsystem cannot
+create a local variant (COM-06).
 Alternative considered: pydantic v2 (less code, faster validation in Rust) - not chosen so that the
 foundation has zero third-party dependencies in the tick path, full control of the canonical form,
 and no schema drift when a library version changes. Can be revisited by change request if measured
@@ -108,8 +110,12 @@ exactly the same components as paper mode.
 - Date: 2026-11-27
 - Requirements: M-DIR-02, S00-ACC-02, COM-06
 
-The nine contracts are proposed at version 1.0.0 (`specifications/SHARED_CONTRACTS.md`,
-`specifications/contracts/FIELDS.md`, `gie/contracts/schemas/`). The schema lock
+Ten contracts are proposed at version 1.0.0: the nine named by the brief and `RunManifest`
+(D-019). Rules: `specifications/SHARED_CONTRACTS.md`; fields: `specifications/contracts/FIELDS.md`;
+schemas: `gie/contracts/schemas/`. A schema also publishes the behaviour that is not expressible as
+structure (stream, ordering time, rank, identity rule, transition tables) as `x-gie-behaviour`, so
+that a change of behaviour is a detectable contract change, and every contract has golden messages
+under `tests/gie/golden/` that later versions must keep reading. The schema lock
 (`gie/contracts/schemas/LOCK.json`) has status `PROPOSED`: until the owner approves, 1.0.0 may be
 corrected in place. On approval the status is set to `APPROVED`; from then on every change needs a
 semantic-version bump according to section 8 of the contract specification, a decision-log entry
@@ -127,9 +133,18 @@ The canonical serialisation is RFC 8785 (JCS) with exact integers. Identifiers a
 their own identifier where all parts are fields. Market events de-duplicate by `market_event_id`;
 orders are idempotent by `client_order_id`.
 
+*Amended 2026-11-27 after review round 1 (findings PD-01..PD-03, DT-04..DT-08).* A trading
+opportunity has a stable `opportunity_id` (setup type, side, horizon and the market events it rests
+on - not the evidence revisions); `candidate_id` adds the scoring model and the revision, so an
+active model, a shadow model and an unscored candidate of the same opportunity are distinct records;
+`alternative_group_id` is derived from the opportunity and links the alternative plans of which at
+most one may be executed. `client_order_id` is derived from the authorising risk decision (entries)
+or from the position (protective and reducing orders).
+
 ## D-009 - Total order by availability time
 
-- Status: PROPOSED
+- Status: SUPERSEDED
+- Superseded by: D-020
 - Date: 2026-11-27
 - Requirements: S00-ASG-25, S10-ACC-02, S10-ACC-03
 
@@ -147,6 +162,13 @@ not reordered.
 A record is usable iff `now < valid_until`; data is fresh iff `0 <= age < max_age`; data from the
 future is an error, not fresh. All limits are research parameters.
 
+*Amended 2026-11-27 after review round 1 (findings SF-21, PD-14).* A tolerance for clock skew is
+bounded to one second and is refused entirely in replay (there is no skew between a virtual clock
+and replayed data). Expiry propagates: a derived record never outlives any of its inputs
+(`gie.contracts.causality.check_derivation`), and an order never outlives the plan and the approval
+that authorise it. No freshness limit is invented in Session 00: each consuming session requests the
+limits it needs as research parameters through the coordinator (D-018).
+
 ## D-011 - Paper-only routing lock; "paper" means in-process simulation
 
 - Status: PROPOSED
@@ -161,6 +183,20 @@ the GIE process against observed prices. Sending orders to a broker **demo** acc
 real routing and is locked as well. Unlocking is impossible by configuration; it would need a code
 change to the lock, a new MAJOR version of `OrderEvent` and a recorded owner decision.
 
+*Amended 2026-11-27 after review round 1 (safety lens, findings SF-01..SF-12).* The guard layer was
+hardened: the genuine enum members are captured at import and compared by identity; an adapter
+class can be registered only from the execution or backtesting package (or tests), must declare the
+simulated venue, must define `__slots__` throughout (so nothing can be replaced on an instance) and
+all six adapter methods as plain functions, which are remembered at registration - a class modified
+afterwards is refused; `RoutingGuard` is final and immutable. The guard is no longer something the
+execution engine "must remember to call": the only object through which an order can reach an
+adapter is the order gateway `gie.contracts.guarded.GuardedExecutionAdapter` (D-021), and the
+static scan forbids adapter calls anywhere else. The hashes of the lock module and of the gateway
+are pinned in `specifications/lock_pins.json`; changing either file fails CI until the pin is
+updated together with a decision-log entry.
+Honest limit, unchanged: Python cannot stop a person who rewrites the lock module or lies inside an
+adapter method; that is what the scan, the pins, the tests and review are for.
+
 ## D-012 - Master-specification safety rules are structural contract invariants
 
 - Status: PROPOSED
@@ -173,6 +209,17 @@ involve an interpretation (open item U-12): "no averaging down" is enforced as "
 position never increases" - adding exposure always needs a new plan, a new risk approval and
 becomes a new position; and "no widening protective stops" is enforced as "the stop never moves
 away from the entry and is never removed".
+
+*Amended 2026-11-27 after review round 1 (findings SF-13..SF-20, DT-02).* A single record can only
+carry single-record rules. Rules about a *sequence* of records (a stop is only ever tightened, a
+replacement adds no risk, nothing follows a terminal state, at most one alternative of a group is
+executed) are enforced by `gie.contracts.ledger.LifecycleLedger`, and rules about the *relation*
+between a plan, its approval and the order (same plan content as approved, volume within the grant,
+nothing expired) by `gie.contracts.authorization`; both are applied by the order gateway and by the
+journal (D-021), so a violating sequence is refused where it would be published or sent.
+Positions of other systems on the same account (`PositionOwner.EXTERNAL`) are observations, not
+GIE decisions: a widened or removed stop or a grown volume of an external position is recorded as
+observed, never refused, and GIE never sends an order for such a position.
 
 ## D-013 - Trading day is the Europe/Prague calendar date
 
@@ -195,6 +242,13 @@ Because the six engines could not be inspected, engine-specific vocabularies are
 (`EvidenceStage`, `MarketSession`, `TickFlag`, `ModelKind`); see section 11 of the contract
 specification. Session 02's feature dictionary will fix the vocabulary; refinements follow the
 version rules.
+
+*Amended 2026-11-27 after review round 1 (findings DI-15..DI-18).* Scores, levels and invalidation
+of an evidence record always describe the instrument named in its `symbol`; how an observation on
+another instrument relates to gold is learned and reported by session 04 (G06-09), never
+pre-translated by the producer. `INACTIVE` (the engine looked and found nothing: scores 0/0) and
+`MISSING` (the engine could not evaluate: scores null, reason mandatory) are different states and
+neither is ever stored as 0.5 or merged with another engine's record.
 
 ## D-015 - Requirement traceability and evidence are generated, never typed
 
@@ -241,6 +295,103 @@ All numerical settings named by the specification are in
 `specifications/research_parameters.toml` with unit and requirement id, labelled
 `PROPOSED_RESEARCH_PARAMETERS`, loaded through `gie.core.params`. The loader refuses any other
 label in this project phase.
+
+*Amended 2026-11-27 after review round 1 (findings DI-22, RM-01).* Every parameter declares its
+kind (duration, fraction, count) and is validated strictly; the hash of the parameter set is
+recorded in the `RunManifest` of every run, so results can always be tied to the exact settings.
+A session that needs a further parameter (for example a freshness limit) requests it through the
+coordinator with the requirement it serves; sessions never hard-code numbers and Session 00 invented
+none.
+
+## D-019 - `RunManifest` is added as a tenth shared contract
+
+- Status: PROPOSED
+- Date: 2026-11-27
+- Requirements: S10-DEL-03, S10-DEL-04, S10-ASG-10, S10-ACC-01, M-AUTH-16, M-GATE-05, S11-ASG-15
+
+The brief names nine contracts. The independent review showed that none of them can answer "which
+run produced this record, from which data, configuration, parameters, seed and code": every
+record carries a `run_id`, but nothing defined what a run is. `RunManifest` is the first record of
+every run (stream rank 0, `seq` 0): mode (REPLAY / PAPER), role (PRIMARY / SHADOW / RESEARCH), data
+origin, hashes of configuration and research parameters, seed, code commit and, for replay, the
+data period. Its `run_id` is derived from its content. This is an addition to the specification and
+is therefore also filed as change request CR-006; the owner may reject it, in which case the fields
+move into a session-10 specific record and `run_id` becomes an opaque label again.
+
+## D-020 - The order of a run is its journal; inputs are ordered by availability
+
+- Status: PROPOSED
+- Date: 2026-11-27
+- Supersedes: D-009
+- Requirements: S00-ASG-25, S10-ASG-01, S10-ACC-01, S10-ACC-02, S10-ACC-03, S07-ACC-08, G08-04
+
+Two different orders exist and D-009 conflated them.
+*Input order*: exogenous inputs (ticks, broker reports, timers) are delivered in ascending
+`(availability time, stream rank, stream, seq)`; availability is receive time, never source time.
+*Journal order*: the run loop takes one input, lets every consumer run to completion and publishes
+every record of that step to the journal before the next input is taken. The append position
+(`journal_seq`) is the total order of the run; records created at the same instant keep their
+causal order (tick, evidence, candidate, plan, risk decision, order request).
+The reference journal lives in `gie.contracts.journal` (`MemoryJournal`, `FileJournal`): it is
+append-only, idempotent per `(stream, seq)`, refuses conflicting content, gaps on run streams,
+decreasing times, look-ahead (a derived record whose market-data watermark `as_of_time_ns` lies
+beyond the newest journaled tick) and every lifecycle violation, and a file journal detects a torn
+or altered line when it is opened. Replay and paper use the same loop and the same journal; a
+deterministic replay is therefore "same inputs produce the same journal bytes".
+Sessions 01/07 may choose a different storage engine behind the same `RecordSink` / `RecordSource`
+interfaces; the rules above are the contract.
+
+## D-021 - One order gateway enforces authorisation, lifecycle and the routing lock
+
+- Status: PROPOSED
+- Date: 2026-11-27
+- Requirements: G08-03, G08-07, G08-10, G04-09, G04-10, G04-11, G04-12, G04-13, S07-ACC-06, S08-ACC-06, M-AUTH-19, OWN-14
+
+`gie.contracts.guarded.GuardedExecutionAdapter` is the only path from any GIE component to an
+execution adapter. For every call it (1) checks the routing lock and the adapter (D-011), (2) for
+an entry requires the selected plan and its risk approval and verifies them against the request
+(`validate_entry_authorization`: same run, same plan content as approved by fingerprint, same
+alternative group, side, order type, prices and attached stop as planned, volume within the grant,
+nothing expired - failing closed exactly at the boundary), (3) for any other order requires the
+position and verifies that the order can only reduce or protect it (`validate_reducing_order`),
+(4) admits the request and every report returned by the adapter to the lifecycle ledger, which
+refuses illegal transitions and a second executed alternative of the same group, and (5) treats an
+identical repeated request as a duplicate without calling the adapter again.
+Why in the shared contracts and not in session 07: the same rules must hold for the simulated
+broker, the reflex engine, the backtester and any later adapter, and they are the rules the owner
+stated without exception. Session 07 implements the simulator *behind* the gateway; session 08
+implements the risk gate that issues the approvals the gateway demands.
+
+## D-022 - Timers come from an injected scheduler; there are no timer threads
+
+- Status: PROPOSED
+- Date: 2026-11-27
+- Requirements: S00-ASG-19, S00-ACC-03, G03-12, G08-06, S06-ASG-06, S10-ASG-01
+
+Everything that must happen when no market data arrives (feed-silence detection, closing a candle
+in a quiet market, expiry, once-per-second tactical work) is scheduled through
+`gie.core.clock.Scheduler`. In replay the `ReplayClock` fires timers exactly at their due instant
+while it advances; in paper `PollingScheduler` fires them on the event-loop thread at the first poll
+at or after the due instant. Both fire in `(due time, registration order)` and never early, so the
+same component code runs unchanged in both modes and replay stays deterministic. `SystemClock`
+never goes backwards and never stands still when the operating-system clock is stepped back; it
+counts such steps so that health monitoring can fail closed on an unstable clock.
+
+## D-023 - Tests and reviews are written by someone other than the implementer
+
+- Status: PROPOSED
+- Date: 2026-11-27
+- Requirements: OWN-04, OWN-09, M-AUTH-06, M-AUTH-08, S12-ASG-08, COM-10
+
+Within the single coordinating session (D-001) independence is obtained by separation of roles:
+the coordinator writes the foundation code; separate sub-agents that did not write it derive the
+tests from the specification and report defects instead of fixing them; a panel of reviewer
+sub-agents, one per group of consuming sessions plus a safety and a determinism reviewer, examines
+the contracts against the owner's specification. Every finding and its disposition is kept verbatim
+in `reviews/session_00/` (136 findings in round 1). A failing test is never weakened to pass: either
+the documented behaviour changed (the test is rewritten to the new documentation, equally strict)
+or the code is wrong (it is fixed or the failure is reported). This does not replace the
+supervisor's independent review or session 12; it reduces what they have to find.
 
 ---
 
@@ -329,14 +480,17 @@ are licensed and available? Round 2 did not store raw ticks.
 Contract size per lot, price digits, volume step, minimum stop distance, margin and swap rules.
 They are broker data, not contract constants (see CR-003).
 
-## U-11 - Further shared contracts in wave 2
+## U-11 - Further shared contracts proposed by later sessions
 
 - Status: OPEN
-- Requirements: COM-06, S02-DEP-01, S08-DEP-01
+- Requirements: COM-06, S02-DEP-01, S08-DEP-01, S11-DEP-01
 
-`Candle`, `InstrumentSpec`, `AccountSnapshot` and the broker calendar are expected to be proposed
-by sessions 01, 07 and 08 as shared contracts (CR-003). Confirm that they are added through the
-coordinator with the same framework rather than defined locally.
+Nine further shared types are needed before later sessions can start (candle, broker calendar,
+tick usability policy, instrument specification, account snapshot, observations and news, market
+conditions, the decision stream record, outcome labels): CR-003 and CR-005 name the proposing
+session and the gate for each. Confirm that they are added through the coordinator with the same
+framework rather than defined locally, and that a session may not start before the types it needs
+exist (start gate in `specifications/dependency_graph.yaml`).
 
 ## U-12 - Confirm the two interpretations in D-012
 
@@ -373,3 +527,38 @@ protection) are fixed rules of the account or may be studied and changed.
 "Test hybrid, multiple positions, sizing, exits, news and intermarket ablations." Does "ablations"
 apply to all six items (an ablation study of each component) or only to news and intermarket? The
 broader reading is recorded so that nothing is lost.
+
+## U-16 - Which "uncertainty" gates a decision
+
+- Status: OPEN
+- Requirements: G02-04, S04-ASG-08, S05-ASG-13, S05-ACC-05, S11-ASG-04, G10-18
+
+The specification asks for "expected net R and uncertainty". Two different quantities fit that
+word and the contracts carry both: the dispersion of a single trade's outcome (`net_r_stdev`) and
+the uncertainty of the estimate itself (`expected_net_r_stderr` with `support_count`). Which of
+them the decision engine must use to reject a plan, and which the dashboard shows as "uncertainty",
+is the owner's (or supervisor's) call before session 05 starts. Until then a scored record must
+state at least one and consumers must say which one they used.
+
+## U-17 - Which model statuses may lead to paper orders
+
+- Status: OPEN
+- Requirements: G07-08, G07-09, G07-10, G07-12, G04-08
+
+Candidates and plans carry the status of the model that scored them. Proposed rule for session 05
+and 08: in a run with role PRIMARY only models that are ACTIVE (owner-approved) and approved
+rule-set baselines may lead to an entry and to quality-dependent sizing; SHADOW and RESEARCH models
+are scored and logged in SHADOW / RESEARCH runs only and never share a risk budget with the primary
+run. Consequence to confirm: until the owner has promoted a first model, the primary paper run
+trades only what the rule-set baselines propose.
+
+## U-18 - Read-only access for the paper data connection
+
+- Status: OPEN
+- Requirements: M-AUTH-13, M-AUTH-15, G08-10, S01-ASG-01
+
+Paper mode needs live prices from the broker terminal. The same terminal API that delivers prices
+can also send orders. Proposal for session 01: connect only with read-only ("investor") credentials
+if the broker offers them, keep all terminal access behind one read-only facade module that exposes
+no order function (enforced by the static scan), and never store credentials in the repository.
+Does the owner's account offer investor credentials, and may GIE use them?
