@@ -618,7 +618,11 @@ history.
 position and can only reduce or protect it: opposite side, volume within the open volume, a
 protective stop that covers the whole open volume and is never looser than the position's stop.
 While an entry order fills in parts the protective stop follows the open volume, so its volume may
-change in a replacement; the volume of an entry never grows.  The trigger side is normative: a
+change in a replacement; the volume of an entry never grows.  The open-volume rule is checked
+when an order is requested (gateway) and when the simulated broker creates one; a later *report*
+of the simulated broker that changes the volume of a reduce-only order (a reconciliation) is
+recorded as the fact it is and is not re-checked against the open volume - the reconciliation
+rules belong to extension CX-19.  The trigger side is normative: a
 protective stop of a long position triggers at or below its trigger price on the bid, of a short
 position at or above it on the ask.
 
