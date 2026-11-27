@@ -38,8 +38,16 @@ T = TypeVar("T", bound=Record)
 
 
 def to_wire(value: Record) -> dict[str, Any]:
-    """Record -> JSON-compatible ``dict`` including the envelope."""
-    record_type = type(value)
+    """Record -> JSON-compatible ``dict`` including the envelope.
+
+    Only an exact instance of a registered contract class is encoded.  Anything else - ``None``,
+    a ``dict`` or JSON text, a number, a list of records, a contract class instead of an instance,
+    a nested value object, a subclass or a look-alike - is refused with
+    :class:`UnknownContractError`.
+    """
+    record_type: type[Any] = type(value)  # the caller's annotation is not trusted at run time
+    if not issubclass(record_type, Record):
+        raise UnknownContractError("only contract records can be encoded", contract=record_type.__name__)
     if record_type.CONTRACT is None or record_type.VERSION is None:
         raise UnknownContractError(
             "only top-level contracts can be encoded with an envelope", contract=record_type.__name__

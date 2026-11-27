@@ -10,22 +10,28 @@ the same MAJOR version must decode them, forever.
 ``--force`` and only while the schema lock is still ``PROPOSED`` (before owner
 approval); afterwards a changed message means a new contract version and a new
 directory.  ``--check`` verifies that every sample variant has a golden file,
-that every golden file decodes with the current code, and that golden files of
-the current version re-encode byte for byte.
+that every golden file decodes with the current code, that every golden file is
+a message of the contract and version its directory is named after, and that
+golden files of the current version re-encode byte for byte.
 """
 
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from pathlib import Path
 
 from gie.contracts import Record, from_json, to_json
 from gie.contracts.registry import all_contracts
 from gie.contracts.schema_gen import APPROVED, load_lock
+from gie.core.canonical import strict_loads
 from tests.gie import samples
 
 GOLDEN_DIR = Path(__file__).resolve().parents[1] / "tests" / "gie" / "golden"
+
+#: A golden directory is named ``<Contract>-<MAJOR.MINOR.PATCH>``.
+_DIRECTORY_RE = re.compile(r"(?P<contract>[A-Za-z][A-Za-z0-9]*)-(?P<version>[0-9]+\.[0-9]+\.[0-9]+)")
 
 
 def golden_path(contract: str, version: str, variant: str, root: Path = GOLDEN_DIR) -> Path:
@@ -42,6 +48,25 @@ def expected_files(root: Path = GOLDEN_DIR) -> dict[Path, str]:
         for variant, record in by_variant.items():
             files[golden_path(contract, version, variant, root)] = to_json(record) + "\n"
     return files
+
+
+def envelope_problem(directory: str, text: str) -> str | None:
+    """Why the message *text* is not a golden message of *directory*, or ``None`` when it is.
+
+    A golden file is the compatibility reference of exactly the contract version its directory
+    names; a message of another contract or another version proves nothing about that version.
+    """
+    match = _DIRECTORY_RE.fullmatch(directory)
+    if match is None:
+        return "directory is not named <Contract>-<MAJOR.MINOR.PATCH>"
+    message = strict_loads(text)
+    contract, version = message.get("contract"), message.get("schema_version")
+    if (contract, version) != (match["contract"], match["version"]):
+        return (
+            f"is a message of {contract} {version}, "
+            f"not of the contract version of its directory ({match['contract']} {match['version']})"
+        )
+    return None
 
 
 def check(root: Path = GOLDEN_DIR) -> list[str]:
@@ -63,6 +88,9 @@ def check(root: Path = GOLDEN_DIR) -> list[str]:
         except Exception as exc:
             problems.append(f"{path.relative_to(root)}: no longer decodes: {exc}")
             continue
+        mismatch = envelope_problem(path.parent.name, text)
+        if mismatch is not None:
+            problems.append(f"{path.relative_to(root)}: {mismatch}")
         if path.parent in current_dirs and to_json(record) + "\n" != text:
             problems.append(f"{path.relative_to(root)}: does not re-encode byte for byte")
         if path.parent in current_dirs and path not in expected:

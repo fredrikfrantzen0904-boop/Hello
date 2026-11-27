@@ -1,9 +1,82 @@
 {
   "$comment": "Necessary but not sufficient: decimal bounds (x-gie-*), canonical order, cross-field invariants (x-gie-invariants), lifecycle rules (x-gie-behaviour), exact 64-bit integer tokens and printable-text rules are enforced by the reference implementation gie.contracts.",
+  "$defs": {
+    "RunModel": {
+      "additionalProperties": false,
+      "description": "One model version a run is allowed to use, pinned for the whole run.",
+      "minProperties": 5,
+      "properties": {
+        "model_version_id": {
+          "description": "The model (or rule set) version.",
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^mdl_[0-9a-f]{32}$",
+          "type": "string"
+        },
+        "status": {
+          "description": "Its promotion status as pinned for this run.",
+          "enum": [
+            "RESEARCH",
+            "SHADOW",
+            "ACTIVE",
+            "RETIRED",
+            "ROLLED_BACK",
+            "REJECTED"
+          ],
+          "type": "string"
+        },
+        "valid_from_ns": {
+          "anyOf": [
+            {
+              "maximum": 9223372036854775807,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "First instant at which the run may use it; null = from the start.",
+          "x-gie-unit": "ns since epoch, UTC"
+        },
+        "valid_until_ns": {
+          "anyOf": [
+            {
+              "maximum": 9223372036854775807,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "End (exclusive) of its use; null = until the end of the run.",
+          "x-gie-unit": "ns since epoch, UTC"
+        },
+        "validated": {
+          "description": "ModelVersion.validated as pinned for this run (ACTIVE and not resting on fixture data).",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "model_version_id",
+        "status",
+        "validated"
+      ],
+      "type": "object",
+      "x-gie-invariants": [
+        {
+          "id": "RMD-1",
+          "rule": "valid_from_ns < valid_until_ns when both are given; only an ACTIVE model can be validated"
+        }
+      ]
+    }
+  },
   "$id": "urn:gie:contract:RunManifest:1.0.0",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "Identity and reproducibility record of one run; the first record of its journal.",
+  "minProperties": 22,
   "properties": {
     "code_commit": {
       "description": "Commit of the code that executes the run.",
@@ -11,6 +84,10 @@
       "minLength": 40,
       "pattern": "^[0-9a-f]{40}$",
       "type": "string"
+    },
+    "code_tree_dirty": {
+      "description": "True if the working tree had uncommitted changes: the commit then does not identify the code.",
+      "type": "boolean"
     },
     "config_sha256": {
       "description": "SHA-256 of the complete run configuration (canonical JSON).",
@@ -31,10 +108,17 @@
       "type": "string"
     },
     "created_time_ns": {
-      "description": "When the run was created (system clock, also for replays).",
-      "maximum": 9223372036854775807,
-      "minimum": 0,
-      "type": "integer",
+      "anyOf": [
+        {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "When a paper run was started (system clock).  Always null for a replay, whose identity and journal must not depend on when it was executed.",
       "x-gie-unit": "ns since epoch, UTC"
     },
     "data_end_ns": {
@@ -52,7 +136,7 @@
       "x-gie-unit": "ns since epoch, UTC"
     },
     "data_origin": {
-      "description": "Least trustworthy origin of the market data the run will use.",
+      "description": "Least trustworthy origin of the market data the run uses; no record of the run may claim a better one.",
       "enum": [
         "BROKER_FEED",
         "HISTORICAL",
@@ -61,7 +145,7 @@
       "type": "string"
     },
     "data_sources": {
-      "description": "Tick sources (versioned feed ids) the run reads.",
+      "description": "Tick sources (versioned feed ids) the run reads; ticks of any other source are refused.",
       "items": {
         "maxLength": 64,
         "minLength": 1,
@@ -104,19 +188,15 @@
       ],
       "type": "string"
     },
-    "model_version_ids": {
-      "description": "Model versions the run uses (its model schedule comes from the configuration, not from the registry status of the moment).",
+    "models": {
+      "description": "Model versions the run may use, with the status pinned for the run and, optionally, the period in which each may be used (walk-forward schedule).",
       "items": {
-        "maxLength": 36,
-        "minLength": 36,
-        "pattern": "^mdl_[0-9a-f]{32}$",
-        "type": "string"
+        "$ref": "#/$defs/RunModel"
       },
-      "maxItems": 64,
+      "maxItems": 4096,
       "minItems": 0,
       "type": "array",
-      "uniqueItems": true,
-      "x-gie-canonical-order": "sorted ascending",
+      "x-gie-canonical-order": "sorted by start of validity, then id",
       "x-gie-unique": true
     },
     "parameters_sha256": {
@@ -133,6 +213,14 @@
       "pattern": "^[a-z][a-z0-9_]*(\\.[a-z0-9_]+){0,4}$",
       "type": "string"
     },
+    "risk_regime": {
+      "description": "Whether the daily risk states of the account are enforced in this run.",
+      "enum": [
+        "CHALLENGE_RULES",
+        "UNCONSTRAINED_RESEARCH"
+      ],
+      "type": "string"
+    },
     "role": {
       "description": "PRIMARY, SHADOW or RESEARCH.",
       "enum": [
@@ -143,7 +231,7 @@
       "type": "string"
     },
     "run_id": {
-      "description": "identity.run_id(mode, config_sha256, label).",
+      "description": "identity.run_id(mode, hash of all other fields); see derive_run_id.",
       "maxLength": 36,
       "minLength": 36,
       "pattern": "^run_[0-9a-f]{32}$",
@@ -165,7 +253,7 @@
           "type": "null"
         }
       ],
-      "description": "Seed of every pseudo-random element of the run."
+      "description": "Seed of the run; every pseudo-random element derives its own seed from it (gie.core.ids.derive_seed).  Null = the run uses no randomness."
     },
     "seq": {
       "description": "Position of the record in its stream: starts at 0 and increases by exactly 1.",
@@ -196,15 +284,16 @@
     "run_id",
     "mode",
     "role",
+    "risk_regime",
     "label",
     "config_sha256",
     "code_commit",
+    "code_tree_dirty",
     "contract_set_version",
     "parameters_sha256",
     "data_origin",
     "data_sources",
-    "model_version_ids",
-    "created_time_ns"
+    "models"
   ],
   "title": "RunManifest 1.0.0",
   "type": "object",
@@ -212,7 +301,7 @@
     "identity": {
       "run_id": "run_id(mode, config_sha256, label)"
     },
-    "ordering_time": "created_time_ns",
+    "ordering_time": "data_start_ns | created_time_ns",
     "rank": {
       "name": "RUN_MANIFEST",
       "value": 0
@@ -222,11 +311,11 @@
   "x-gie-invariants": [
     {
       "id": "RUN-1",
-      "rule": "run_id equals identity.run_id(mode, config_sha256, label)"
+      "rule": "run_id equals identity.run_id(mode, SHA-256 of the canonical form of all other fields)"
     },
     {
       "id": "RUN-2",
-      "rule": "a REPLAY run states its data period (start < end); a PAPER run has none"
+      "rule": "a REPLAY run states its data period (start < end) and no creation time; a PAPER run states its creation time and no data period"
     },
     {
       "id": "RUN-3",
@@ -235,6 +324,10 @@
     {
       "id": "RUN-4",
       "rule": "the manifest is the first record of its stream (seq 0)"
+    },
+    {
+      "id": "RUN-5",
+      "rule": "only a RESEARCH run may be UNCONSTRAINED_RESEARCH; a PRIMARY run uses owner-approved (ACTIVE) models only"
     }
   ]
 }

@@ -4,6 +4,7 @@
     "NamedValue": {
       "additionalProperties": false,
       "description": "A named number (feature value or metric).  ``null`` means unknown, never 0.",
+      "minProperties": 2,
       "properties": {
         "name": {
           "description": "Name from the owning dictionary.",
@@ -32,6 +33,7 @@
     "PriceCondition": {
       "additionalProperties": false,
       "description": "Observable price condition: the basis price compared with a level.",
+      "minProperties": 4,
       "properties": {
         "basis": {
           "description": "Which price is compared.",
@@ -100,6 +102,7 @@
     "PriceLevel": {
       "additionalProperties": false,
       "description": "A price with a role, e.g. the swept level or the bounds of a fair value gap.",
+      "minProperties": 3,
       "properties": {
         "identity": {
           "description": "True when the level is part of the market event's identity (it then never changes between revisions and all engines must report the same value).",
@@ -132,6 +135,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "Directional observation with scores, levels, stage, freshness and invalidation.",
+  "minProperties": 31,
   "properties": {
     "anchor_time_ns": {
       "description": "Source event time that pins the market event (part of its identity).",

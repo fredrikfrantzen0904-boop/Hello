@@ -2,34 +2,34 @@
   "approval_status": "PROPOSED",
   "contracts": {
     "Candidate": {
-      "1.0.0": "b0664c92172d55c3e093e2626f8ca250fbb56e01aa966d70104c43832b279d60"
+      "1.0.0": "a9db604fafce1f9362ef79d4e687846f5feb677032cebc91d9742559b1b4bf26"
     },
     "Clock": {
-      "1.0.0": "99e609d1049a08d80e79fb47400b758a364c715c2600d00a867a653ec81dea37"
+      "1.0.0": "953847d3af58a7117a5fb2d5a81f4badf493dee0a250f6a82d9d97cd77c37e62"
     },
     "Evidence": {
-      "1.0.0": "0a0dac3a43a45ee964c9eae2b81e866818508f46c177eec56f31936a4c6979b2"
+      "1.0.0": "c21e27f35e89b04d9b8b775cf363f27895436edeb36ab77be96f3192f43b2985"
     },
     "ModelVersion": {
-      "1.0.0": "9340b06da6ee8c18ec556e1b89e3aac3c2d6eccfa9f84bf4154cef7906ebc300"
+      "1.0.0": "f629bd6d3b6776b2a9c0373f38f9092d468feb49613f82e717afad1f98fefccc"
     },
     "OrderEvent": {
-      "1.0.0": "357877a6155dd4ff3f1f3fc3df41a8718b172d70e5d32cbce8575bc4e476ce45"
+      "1.0.0": "abfa68ab523b13f9e8c1872074022d1194d9ae8109b093d999e8276453cf044f"
     },
     "Position": {
-      "1.0.0": "62673ff5d19e266bbf480ed78b462b7d6d2f65ac7b65fd2f84d42e87273ca255"
+      "1.0.0": "cca71a8eda33a3bbaa535207eb71a521b709f73038ee2ea8f55ea3823ad4614e"
     },
     "RiskDecision": {
-      "1.0.0": "d1b5bf86afd950b44e087c1a8149cf4184bb8c6bade6cf0e31f4a02cea11e08e"
+      "1.0.0": "ddaf31495c1c35c5431d6d489c6dae1e9413bef0d2642028437de069b64fcda6"
     },
     "RunManifest": {
-      "1.0.0": "813fc85fec82d5a96f7a90d2f8cac643a89e76a727db5dc6a2ee18d4496920bb"
+      "1.0.0": "fae9e8fb760147455b670e544abfb017615202688929857cf74fb634765506eb"
     },
     "Tick": {
-      "1.0.0": "21993368393cef5c97235323c7455681d6c6d5399e592ce64171f3b7255689a1"
+      "1.0.0": "4eb4b161110233310b612e380987d02ad14b073c4c62bf61997688637ca47fa9"
     },
     "TradePlan": {
-      "1.0.0": "2bbbdce5da56e045dd55976599d0f77b9fead8773a10073ca4930354a603db7d"
+      "1.0.0": "c3387b3e4d4a1b32c9d6b4715699f5154a280d4db6da96d6b224ff20cb5519f9"
     }
   },
   "lock_version": 1

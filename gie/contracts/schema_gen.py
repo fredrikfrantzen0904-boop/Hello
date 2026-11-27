@@ -9,6 +9,15 @@ The schemas are JSON Schema 2020-12.  Keywords starting with ``x-gie-`` carry
 what plain JSON Schema cannot express: decimal bounds, units, canonical order
 and cross-field invariants.  A message must be validated against the schema of
 the version it declares.
+
+Every object is closed and complete: ``additionalProperties: false`` together
+with ``minProperties`` = number of declared properties, because every field is
+always written (optional ones as explicit ``null``).  ``required`` lists the
+fields that may not be ``null``.
+
+The lock records the SHA-256 of the *bytes* of each schema file.  Files are
+written with LF line ends on every platform, so the hashes are the same
+everywhere and a file whose line ends were converted is reported as modified.
 """
 
 from __future__ import annotations
@@ -23,8 +32,9 @@ from typing import Any, Final
 import gie.contracts  # noqa: F401  (registers all contracts)
 from gie.contracts._spec import ENVELOPE_CONTRACT, ENVELOPE_VERSION, Record, object_schema
 from gie.contracts.behaviour import behaviour
-from gie.contracts.compat import check_evolution
+from gie.contracts.compat import ROUTING_VOCABULARY, check_evolution
 from gie.contracts.registry import SEMVER_PATTERN, all_contracts, parse_semver
+from gie.core.errors import UnknownContractError
 
 SCHEMA_DIR: Final[Path] = Path(__file__).resolve().parent / "schemas"
 LOCK_NAME: Final[str] = "LOCK.json"
@@ -37,7 +47,9 @@ def json_schema(record_type: type[Record]) -> dict[str, Any]:
     """JSON Schema of one top-level contract at its current version."""
     name, version = record_type.CONTRACT, record_type.VERSION
     if name is None or version is None:
-        raise ValueError(f"{record_type.__name__} is not a top-level contract")
+        raise UnknownContractError(
+            f"{record_type.__name__} is not a top-level contract", contract=record_type.__name__
+        )
     defs: dict[str, Any] = {}
     body = object_schema(record_type, defs)
     properties = {
@@ -51,6 +63,7 @@ def json_schema(record_type: type[Record]) -> dict[str, Any]:
     properties.update(body["properties"])
     body["properties"] = properties
     body["required"] = [ENVELOPE_CONTRACT, ENVELOPE_VERSION, *body["required"]]
+    body["minProperties"] = len(properties)  # every key is written: envelope and all fields
     schema: dict[str, Any] = {
         "$schema": SCHEMA_DIALECT,
         "$id": f"urn:gie:contract:{name}:{version}",
@@ -66,10 +79,6 @@ def json_schema(record_type: type[Record]) -> dict[str, Any]:
     if defs:
         schema["$defs"] = {key: defs[key] for key in sorted(defs)}
     return schema
-
-
-#: The routing-lock vocabulary as it must appear in every schema that has the field.
-ROUTING_VOCABULARY: Final[dict[str, list[str]]] = {"mode": ["REPLAY", "PAPER"], "venue": ["SIMULATED"]}
 
 
 def routing_vocabulary_problems(name: str, schema: dict[str, Any]) -> list[str]:
@@ -89,25 +98,30 @@ def render(schema: dict[str, Any]) -> str:
     return json.dumps(schema, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
 
 
+def _file_bytes(text: str) -> bytes:
+    """Bytes of a published file: UTF-8, LF line ends on every platform."""
+    return text.encode("utf-8")
+
+
 def schema_filename(name: str, version: str) -> str:
     return f"{name}-{version}.schema.json"
 
 
-def _sha256(text: str) -> str:
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+def _sha256(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
 
 
 def load_lock(schema_dir: Path = SCHEMA_DIR) -> dict[str, Any]:
     path = schema_dir / LOCK_NAME
     if not path.exists():
         return {"lock_version": 1, "approval_status": PROPOSED, "contracts": {}}
-    loaded: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+    loaded: dict[str, Any] = json.loads(path.read_bytes().decode("utf-8"))
     return loaded
 
 
 def load_schema(name: str, version: str, schema_dir: Path = SCHEMA_DIR) -> dict[str, Any]:
     loaded: dict[str, Any] = json.loads(
-        (schema_dir / schema_filename(name, version)).read_text(encoding="utf-8")
+        (schema_dir / schema_filename(name, version)).read_bytes().decode("utf-8")
     )
     return loaded
 
@@ -124,7 +138,7 @@ def check(schema_dir: Path = SCHEMA_DIR) -> list[str]:
             path = schema_dir / schema_filename(locked_name, locked_version)
             if not path.exists():
                 problems.append(f"{path.name}: locked schema file is missing")
-            elif _sha256(path.read_text(encoding="utf-8")) != digest:
+            elif _sha256(path.read_bytes()) != digest:
                 problems.append(f"{path.name}: released schema was modified (hash differs from LOCK.json)")
     expected_files = {LOCK_NAME}
     for name, record_type in all_contracts().items():
@@ -132,16 +146,16 @@ def check(schema_dir: Path = SCHEMA_DIR) -> list[str]:
         assert version is not None
         current_schema = json_schema(record_type)
         problems.extend(routing_vocabulary_problems(name, current_schema))
-        text = render(current_schema)
+        data = _file_bytes(render(current_schema))
         path = schema_dir / schema_filename(name, version)
         expected_files.add(path.name)
         if path.exists():
             problems.extend(
-                routing_vocabulary_problems(path.name, json.loads(path.read_text(encoding="utf-8")))
+                routing_vocabulary_problems(path.name, json.loads(path.read_bytes().decode("utf-8")))
             )
         if not path.exists():
             problems.append(f"{path.name}: schema of the current version is not published")
-        elif path.read_text(encoding="utf-8") != text:
+        elif path.read_bytes() != data:
             problems.append(
                 f"{path.name}: committed schema differs from the code "
                 "(contract changed without a version bump?)"
@@ -193,22 +207,22 @@ def write(schema_dir: Path = SCHEMA_DIR) -> list[str]:
     for name, record_type in all_contracts().items():
         version = record_type.VERSION
         assert version is not None
-        text = render(json_schema(record_type))
-        digest = _sha256(text)
+        data = _file_bytes(render(json_schema(record_type)))
+        digest = _sha256(data)
         path = schema_dir / schema_filename(name, version)
         previous = locked.setdefault(name, {}).get(version)
         if previous is not None and previous != digest and approved:
             raise SystemExit(
                 f"{path.name} is released and approved; bump the version of {name} instead of editing it"
             )
-        if not path.exists() or path.read_text(encoding="utf-8") != text:
-            path.write_text(text, encoding="utf-8")
+        if not path.exists() or path.read_bytes() != data:
+            path.write_bytes(data)  # bytes: no newline translation on any platform
             written.append(path.name)
         locked[name][version] = digest
-    lock_text = json.dumps(lock, indent=2, sort_keys=True) + "\n"
+    lock_data = _file_bytes(json.dumps(lock, indent=2, sort_keys=True) + "\n")
     lock_path = schema_dir / LOCK_NAME
-    if not lock_path.exists() or lock_path.read_text(encoding="utf-8") != lock_text:
-        lock_path.write_text(lock_text, encoding="utf-8")
+    if not lock_path.exists() or lock_path.read_bytes() != lock_data:
+        lock_path.write_bytes(lock_data)
         written.append(LOCK_NAME)
     return written
 

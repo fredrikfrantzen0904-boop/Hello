@@ -11,7 +11,8 @@ from gie.contracts._spec import Dec, EnumOf, Int, Invariant, ListOf, Opt, Record
 from gie.contracts.common import PRICE, DataOrigin, symbol_field
 from gie.contracts.registry import contract
 from gie.core.canonical import EXACT
-from gie.core.errors import FutureDataError
+from gie.core.errors import ContractValidationError, FutureDataError, describe
+from gie.core.timeutil import MAX_TIME_NS
 
 SOURCE_PATTERN = r"^[a-z0-9][a-z0-9_.:-]{0,63}$"
 
@@ -144,7 +145,20 @@ def feed_silence_ns(last_tick: Tick, now_ns: int) -> int:
     time of the newest accepted tick, never its source event time.  A receive
     time later than *now_ns* is look-ahead or clock skew and raises
     :class:`~gie.core.errors.FutureDataError`.
+
+    Invalid input is refused with :class:`~gie.core.errors.ContractValidationError` and never
+    coerced: *last_tick* must be a :class:`Tick` (exact type) and *now_ns* an instant - an
+    ``int`` (not a ``bool``, not a ``float``: a double cannot hold a nanosecond instant and could
+    round a "now" that lies before the receive time up to one that lies after it) within
+    ``0 .. 2**63 - 1``.
     """
+    if type(last_tick) is not Tick:
+        raise ContractValidationError("last_tick must be a Tick", actual_type=type(last_tick).__name__)
+    if isinstance(now_ns, bool) or not isinstance(now_ns, int) or not 0 <= now_ns <= MAX_TIME_NS:
+        raise ContractValidationError(
+            "now_ns must be an instant: an int of nanoseconds within 0 .. 2**63 - 1",
+            value=describe(now_ns, 64),
+        )
     if now_ns < last_tick.receive_time_ns:
         raise FutureDataError(
             "tick was received after the current instant",

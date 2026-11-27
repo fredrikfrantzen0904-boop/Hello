@@ -293,7 +293,7 @@ def derive_run_id(**fields: Any) -> str:
     return identity.run_id(fields.get("mode"), _content_sha256(wire))
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class RunContext:
     """Everything a component needs from its run, injected by the composition root.
 
@@ -303,6 +303,10 @@ class RunContext:
     read-only views: a component can read step time and schedule timers, it
     cannot move time or fire timers - only the run loop can.
     """
+
+    # Slots are declared by hand (not ``slots=True``): the class is then not rebuilt by the
+    # decorator and ``super()`` works in ``__post_init__``.
+    __slots__ = ("clock", "manifest", "parameters", "scheduler", "sink")
 
     manifest: RunManifest
     clock: Clock
@@ -326,8 +330,8 @@ class RunContext:
             raise ConfigError("a REPLAY run needs a replay clock and a PAPER run the paper clock")
         if self.parameters.parameters_sha256 != self.manifest.parameters_sha256:
             raise ConfigError("research parameters differ from the ones named in the run manifest")
-        object.__setattr__(self, "clock", ClockView(self.clock))
-        object.__setattr__(self, "scheduler", SchedulerView(self.scheduler))
+        super().__setattr__("clock", ClockView(self.clock))
+        super().__setattr__("scheduler", SchedulerView(self.scheduler))
 
     @property
     def run_id(self) -> str:

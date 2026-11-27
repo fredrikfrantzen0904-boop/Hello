@@ -7,10 +7,13 @@ The expected behaviour is taken from the documented rules of the registers (modu
 the tool, ``CLAUDE.md``, the descriptions inside the two YAML registers and decision D-015), not
 from the implementation:
 
-* a requirement is never deleted, a changed specification text is noticed, ``verified`` needs
-  existing evidence, ``blocked`` needs a blocker id that exists in the Markdown logs;
-* an acceptance test is never ``passing`` without recorded evidence and an expected failure is
-  not a pass;
+* a requirement is never deleted and never reworded unnoticed (requirement lock), its source
+  clause is verbatim in the source text, a changed specification text is noticed;
+* ``verified`` needs a verified contribution with existing evidence of every session (and a
+  passing acceptance test for an acceptance requirement), a review status needs an APPROVED
+  decision, ``blocked`` needs a blocker id that exists in the Markdown logs;
+* an acceptance test is never ``passing`` without recorded evidence, an expected failure is not a
+  pass, and what the register records must equal what its evidence file gives;
 * the generated Markdown files are deterministic and ``render --check`` notices a stale copy;
 * updates written by the tool keep the formatting of the YAML files, so diffs stay small.
 
@@ -57,12 +60,6 @@ STATUS_VALUES = {
     "verified": "SYNTHETIC FIXTURE: backed by evidence.",
     "blocked": "SYNTHETIC FIXTURE: cannot proceed | see blocker.",
     "not_applicable": "SYNTHETIC FIXTURE: nothing to implement.",
-}
-
-#: SYNTHETIC FIXTURE extracted specification texts (file name -> content).
-SPECIFICATION_TEXTS = {
-    "FIXTURE_BRIEF.txt": "SYNTHETIC FIXTURE: text of an invented session brief.\n",
-    "FIXTURE_MASTER.txt": "SYNTHETIC FIXTURE: text of an invented master specification.\n",
 }
 
 #: SYNTHETIC FIXTURE decision log.
@@ -177,12 +174,43 @@ def _requirement(
     }
 
 
-def _matrix_document() -> dict[str, Any]:
+def _fixture_requirements() -> list[dict[str, Any]]:
     governance = _requirement(
         "FIX-GOV-01", "governance", ALL_SESSIONS, "Keep the registers.", section="G01 | Governance"
     )
     governance["source"] = "FIXTURE_MASTER.pdf"
     governance["notes"] = "SYNTHETIC FIXTURE note with a | pipe."
+    return [
+        governance,
+        _requirement("FIX-ASG-01", "assignment", ["S00"], "Build the widget."),
+        _requirement("FIX-ASG-02", "assignment", ["S00", "S01"], "Build the gadget."),
+        _requirement("FIX-ASG-03", "assignment", ["S01"], "Connect the supplier."),
+        _requirement("FIX-ACC-01", "acceptance", ["S00"], "Widget round trip.", section="Acceptance tests"),
+        _requirement("FIX-ACC-02", "acceptance", ["S01"], "Supplier handshake.", section="Acceptance tests"),
+        # An atom appended later: same section as FIX-ASG-01..03, after the acceptance section.
+        _requirement("FIX-ASG-04", "assignment", ["S02"], "Paint the widget."),
+    ]
+
+
+def _specification_text(title: str, source: str) -> str:
+    """SYNTHETIC FIXTURE extracted text of *source*: it holds the clause of every fixture requirement.
+
+    Every clause is broken over two lines and indented, as extracted PDF text is: the source clause
+    of a requirement is verbatim up to runs of whitespace.
+    """
+    clauses = [entry["source_clause"] for entry in _fixture_requirements() if entry["source"] == source]
+    paragraphs = [clause.replace(": ", ":\n    ", 1) for clause in clauses]
+    return f"SYNTHETIC FIXTURE: text of an invented {title}.\n\n" + "\n\n".join(paragraphs) + "\n"
+
+
+#: SYNTHETIC FIXTURE extracted specification texts (file name -> content).
+SPECIFICATION_TEXTS = {
+    "FIXTURE_BRIEF.txt": _specification_text("session brief", "FIXTURE_BRIEF.pdf"),
+    "FIXTURE_MASTER.txt": _specification_text("master specification", "FIXTURE_MASTER.pdf"),
+}
+
+
+def _matrix_document() -> dict[str, Any]:
     return {
         "schema_version": 1,
         "title": "Synthetic fixture requirements matrix",
@@ -199,20 +227,7 @@ def _matrix_document() -> dict[str, Any]:
         "minimum_requirement_count": 7,
         "status_values": dict(STATUS_VALUES),
         "review_status_values": ["unverified", "approved", "conditional", "rejected"],
-        "requirements": [
-            governance,
-            _requirement("FIX-ASG-01", "assignment", ["S00"], "Build the widget."),
-            _requirement("FIX-ASG-02", "assignment", ["S00", "S01"], "Build the gadget."),
-            _requirement("FIX-ASG-03", "assignment", ["S01"], "Connect the supplier."),
-            _requirement(
-                "FIX-ACC-01", "acceptance", ["S00"], "Widget round trip.", section="Acceptance tests"
-            ),
-            _requirement(
-                "FIX-ACC-02", "acceptance", ["S01"], "Supplier handshake.", section="Acceptance tests"
-            ),
-            # An atom appended later: same section as FIX-ASG-01..03, after the acceptance section.
-            _requirement("FIX-ASG-04", "assignment", ["S02"], "Paint the widget."),
-        ],
+        "requirements": _fixture_requirements(),
     }
 
 
@@ -249,8 +264,18 @@ def _acceptance_document() -> dict[str, Any]:
     }
 
 
+def lock(root: Path) -> None:
+    """Lock the requirements that are not locked yet the documented way: with the tool."""
+    report = gr.lock_requirements(root)
+    assert report.problems == [], report.problems
+
+
 def make_repo(tmp_path: Path, *, blocker_status: str = "OPEN") -> Path:
-    """A small, valid SYNTHETIC FIXTURE repository below ``tmp_path`` (all statuses not_started)."""
+    """A small, valid SYNTHETIC FIXTURE repository below ``tmp_path`` (all statuses not_started).
+
+    The extracted texts hold the source clause of every requirement, and the requirement lock is
+    created by the tool itself from the matrix written here.
+    """
     root = tmp_path / "repo"
     for name, text in SPECIFICATION_TEXTS.items():
         _write(root / gr.EXTRACTED_DIR / name, text)
@@ -260,6 +285,8 @@ def make_repo(tmp_path: Path, *, blocker_status: str = "OPEN") -> Path:
     _write(root / gr.CHANGE_REQUESTS_FILE, CHANGE_REQUESTS.format(blocker_status=blocker_status))
     _write(root / "tests/test_widget.py", WIDGET_TESTS)
     _write(root / "docs/widget.md", "SYNTHETIC FIXTURE: an invented evidence document.\n")
+    (root / gr.LOCK_FILE).unlink(missing_ok=True)
+    lock(root)
     return root
 
 
@@ -291,6 +318,28 @@ def edit_acceptance(root: Path, entry_id: str, change: Callable[[dict[str, Any]]
         change(next(entry for entry in document["acceptance_tests"] if entry["id"] == entry_id))
 
     edit(root, gr.ACCEPTANCE_FILE, apply)
+
+
+def extend_specification(root: Path, name: str, clause: str) -> None:
+    """Append an invented clause to a SYNTHETIC FIXTURE extracted text and record the new hash."""
+    path = root / gr.EXTRACTED_DIR / name
+    path.write_bytes(path.read_bytes() + f"\n{clause}\n".encode())
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    edit(root, gr.MATRIX_FILE, lambda d: d["specification"]["extracted_text_sha256"].update({name: digest}))
+
+
+def add_requirement(root: Path, requirement: dict[str, Any]) -> None:
+    """Append a requirement the documented way: its clause is in the source text and it is locked."""
+    extend_specification(root, requirement["source"].replace(".pdf", ".txt"), requirement["source_clause"])
+    edit(root, gr.MATRIX_FILE, lambda d: d["requirements"].append(requirement))
+    lock(root)
+
+
+def reword_requirement(root: Path, req_id: str, **changes: Any) -> None:
+    """Correct locked fields of a requirement the documented way: edit, then ``lock --reword``."""
+    edit_requirement(root, req_id, lambda entry: entry.update(changes))
+    report = gr.lock_requirements(root, reword=[req_id], reason="SYNTHETIC FIXTURE: a deliberate correction.")
+    assert report.problems == [], report.problems
 
 
 def requirement_of(root: Path, req_id: str) -> dict[str, Any]:
@@ -388,11 +437,40 @@ def result_record(
     }
 
 
-def write_evidence(root: Path, tests: list[dict[str, Any]], name: str = "evidence/pytest.json") -> Path:
+#: Marks a key that a fixture builder leaves out.
+_DROP = object()
+
+
+def evidence_payload(tests: list[dict[str, Any]], **changes: Any) -> dict[str, Any]:
+    """SYNTHETIC FIXTURE content of an evidence file, with the top-level keys of tests/conftest.py.
+
+    ``exit_status`` is what pytest returns for these outcomes (1 when a test failed, else 0); the
+    run collected every module.  ``changes`` replace top-level keys (``_DROP`` removes one).
+    """
+    failed = any(test["outcome"] in ("failed", "error", "xpassed") for test in tests)
+    payload: dict[str, Any] = {
+        "schema_version": 1,
+        "generated_by": "SYNTHETIC FIXTURE",
+        "exit_status": 1 if failed else 0,
+        "collection_errors": [],
+        "commit": None,
+        "tree_dirty": None,
+        "tests": tests,
+    }
+    for key, value in changes.items():
+        if value is _DROP:
+            del payload[key]
+        else:
+            payload[key] = value
+    return payload
+
+
+def write_evidence(
+    root: Path, tests: list[dict[str, Any]], name: str = "evidence/pytest.json", **changes: Any
+) -> Path:
     """A SYNTHETIC FIXTURE pytest evidence file inside the fixture repository."""
-    payload = {"schema_version": 1, "generated_by": "SYNTHETIC FIXTURE", "tests": tests}
     path = root / name
-    _write(path, json.dumps(payload, indent=2) + "\n")
+    _write(path, json.dumps(evidence_payload(tests, **changes), indent=2) + "\n")
     return path
 
 
@@ -401,6 +479,31 @@ def widget_results(*outcomes: str) -> list[dict[str, Any]]:
         result_record(f"tests/test_widget.py::test_{index}", outcome, acceptance=("FIX-ACC-01",))
         for index, outcome in enumerate(outcomes)
     ]
+
+
+def evidence_for(root: Path, passed: int, failed: int, skipped: int) -> dict[str, Any]:
+    """Write SYNTHETIC FIXTURE evidence with these results of FIX-ACC-01; returns what the register records.
+
+    A status typed into the register by hand needs a real evidence file behind its counts, exactly
+    like a status written by ``sync-evidence``.
+    """
+    outcomes = ["passed"] * passed + ["failed"] * failed + ["skipped"] * skipped
+    write_evidence(root, widget_results(*outcomes))
+    return _evidence(passed, failed, skipped)
+
+
+#: Counts (passed, failed, skipped) from which ``sync-evidence`` derives each status.
+COUNTS_OF_STATUS = {"passing": (2, 0, 0), "failing": (1, 1, 0), "blocked": (0, 0, 2), "partial": (1, 0, 1)}
+
+
+def _evidence(passed: int, failed: int, skipped: int) -> dict[str, Any]:
+    return {
+        "file": "evidence/pytest.json",
+        "tests": passed + failed + skipped,
+        "passed": passed,
+        "failed": failed,
+        "skipped": skipped,
+    }
 
 
 def write_patch(root: Path, updates: Any) -> Path:
@@ -428,9 +531,13 @@ def copy_real_registers(tmp_path: Path) -> Path:
     referenced: set[str] = set()
     for entry in load(root, gr.ACCEPTANCE_FILE)["acceptance_tests"]:
         referenced.update(entry["test_modules"])
+        if "evidence" in entry:
+            referenced.add(entry["evidence"]["file"])
     for entry in load(root, gr.MATRIX_FILE)["requirements"]:
         for item in entry["contributions"]:
             referenced.update(item["evidence"])
+        if not entry["source"].endswith(".pdf"):
+            referenced.add(entry["source"])  # a source that is itself a text file of the repository
     for relative in sorted(referenced):
         source, target = REPO_ROOT / relative, root / relative
         if source.is_file() and not target.exists():
@@ -438,6 +545,12 @@ def copy_real_registers(tmp_path: Path) -> Path:
             shutil.copyfile(source, target)
         elif source.is_dir() and not target.exists():
             shutil.copytree(source, target, ignore=shutil.ignore_patterns("__pycache__"))
+    # The requirement lock: the committed one, or - while the coordinator has not created it yet -
+    # one created in the copy by the tool.  The real repository is never written.
+    if (REPO_ROOT / gr.LOCK_FILE).is_file():
+        shutil.copyfile(REPO_ROOT / gr.LOCK_FILE, root / gr.LOCK_FILE)
+    else:
+        lock(root)
     return root
 
 
@@ -576,10 +689,10 @@ def test_specification_text_without_recorded_hash_is_a_problem(tmp_path: Path) -
 @pytest.mark.parametrize("clause", ["", "   ", "\n\t\n"])
 def test_empty_source_clause_is_a_problem(tmp_path: Path, clause: str) -> None:
     root = make_repo(tmp_path)
-    edit_requirement(root, "FIX-ASG-02", lambda entry: entry.update(source_clause=clause))
+    reword_requirement(root, "FIX-ASG-02", source_clause=clause)
     problem = only_problem(root)
     assert "FIX-ASG-02" in problem
-    assert "source_clause" in problem
+    assert "source_clause is empty" in problem
 
 
 # --------------------------------------------------------------------------- validate: never delete
@@ -597,7 +710,12 @@ def test_deleting_a_requirement_is_noticed(tmp_path: Path) -> None:
     )
     # U-01 names the deleted requirement: the dangling reference is reported as well.
     assert any("U-01" in problem and "FIX-ASG-04" in problem for problem in found)
-    assert len(found) == 2, found
+    # The requirement lock still holds the id.
+    assert any(
+        "FIX-ASG-04" in problem and gr.LOCK_FILE in problem and "requirements are never deleted" in problem
+        for problem in found
+    )
+    assert len(found) == 3, found
 
 
 @pytest.mark.requirement("OWN-08", "S00-ASG-28")
@@ -627,8 +745,6 @@ def _with_contribution(document: dict[str, Any], **changes: Any) -> None:
             item[key] = value
     _first(document)["contributions"] = [item]
 
-
-_DROP = object()
 
 MATRIX_SCHEMA_DEFECTS: list[tuple[str, Callable[[dict[str, Any]], Any], str]] = [
     ("top level is a list", lambda d: ["not", "a", "mapping"], "top level must be a mapping"),
@@ -777,6 +893,19 @@ MATRIX_SCHEMA_DEFECTS: list[tuple[str, Callable[[dict[str, Any]], Any], str]] = 
         lambda d: _first(d).update(blockers=["the supplier"]),
         "'blockers' must be a list of ids",
     ),
+    (
+        "review vocabulary without unverified",
+        lambda d: d["review_status_values"].remove("unverified"),
+        "review_status_values must contain 'unverified'",
+    ),
+    *(
+        (
+            f"review reference {reference!r}",
+            lambda d, reference=reference: _first(d).update(review_reference=reference),
+            "FIX-ASG-01: 'review_reference' must be the id of a decision (D-nnn)",
+        )
+        for reference in ("D-1", "D-01", "d-001", "D-001 ", "U-01", "B-001", "CR-001", "", 7, None, ["D-001"])
+    ),
 ]
 
 
@@ -804,12 +933,9 @@ def test_matrix_schema_and_type_defects_are_reported(
 )
 def test_requirement_ids_of_the_documented_form_are_accepted(tmp_path: Path, req_id: str) -> None:
     root = make_repo(tmp_path)
-    edit(
-        root,
-        gr.MATRIX_FILE,
-        lambda d: d["requirements"].append(_requirement(req_id, "assignment", ["S03"], "Invented atom.")),
-    )
+    add_requirement(root, _requirement(req_id, "assignment", ["S03"], "Invented atom."))
     assert problems(root) == []
+    assert req_id in json.loads((root / gr.LOCK_FILE).read_text(encoding="utf-8"))["atoms"]
 
 
 @pytest.mark.requirement("OWN-08", "S00-ASG-28")
@@ -881,27 +1007,42 @@ def test_every_session_s00_to_s12_is_valid(tmp_path: Path, session: str) -> None
 
 
 # --------------------------------------------------------------------------- validate: evidence, blockers
-@pytest.mark.requirement("OWN-08", "S00-ASG-28")
+@pytest.mark.requirement("OWN-08", "OWN-21", "S00-ASG-28")
 @pytest.mark.parametrize(
-    "contributions",
+    ("contributions", "also"),
     [
-        [],
-        [contribution("S00", "verified", [])],
-        [contribution("S00", "verified", []), contribution("S01", "verified", [])],
+        ([], ["there is none of S00, S01"]),
+        (
+            [contribution("S00", "verified", [])],
+            [
+                "contributions[0] (S00) has status 'verified' but lists no evidence path",
+                "there is none of S01",
+            ],
+        ),
+        (
+            [contribution("S00", "verified", []), contribution("S01", "verified", [])],
+            [
+                "contributions[0] (S00) has status 'verified' but lists no evidence path",
+                "contributions[1] (S01) has status 'verified' but lists no evidence path",
+            ],
+        ),
     ],
     ids=["no contribution", "contribution without evidence", "two contributions without evidence"],
 )
 def test_verified_needs_a_contribution_with_evidence(
-    tmp_path: Path, contributions: list[dict[str, Any]]
+    tmp_path: Path, contributions: list[dict[str, Any]], also: list[str]
 ) -> None:
+    """FIX-ASG-02 belongs to S00 and S01; ``also`` are the other rules the same state breaks."""
     root = make_repo(tmp_path, blocker_status="RESOLVED")
     edit_requirement(
         root, "FIX-ASG-02", lambda entry: entry.update(status="verified", contributions=contributions)
     )
-    problem = only_problem(root)
-    assert "FIX-ASG-02" in problem
-    assert "'verified'" in problem
-    assert "evidence" in problem
+    found = problems(root)
+    assert all("FIX-ASG-02" in problem for problem in found), found
+    expected = ["'verified' needs at least one contribution with an existing evidence path", *also]
+    for fragment in expected:
+        assert sum(1 for problem in found if fragment in problem) == 1, (fragment, found)
+    assert len(found) == len(expected), found
 
 
 @pytest.mark.requirement("OWN-08", "S00-ASG-28")
@@ -913,7 +1054,7 @@ def test_verified_with_existing_evidence_is_valid(tmp_path: Path) -> None:
         lambda entry: entry.update(
             status="verified",
             contributions=[
-                contribution("S00", "verified", []),
+                contribution("S00", "verified", ["docs"]),
                 contribution("S01", "verified", ["docs/widget.md"]),
             ],
         ),
@@ -926,7 +1067,7 @@ def test_verified_with_only_a_missing_evidence_path_is_not_verified(tmp_path: Pa
     root = make_repo(tmp_path, blocker_status="RESOLVED")
     edit_requirement(
         root,
-        "FIX-ASG-02",
+        "FIX-ASG-01",  # a requirement of S00 alone: its one contribution covers every session
         lambda entry: entry.update(
             status="verified", contributions=[contribution("S00", "verified", ["docs/never_written.md"])]
         ),
@@ -973,7 +1114,7 @@ def test_evidence_may_be_a_directory(tmp_path: Path) -> None:
     root = make_repo(tmp_path, blocker_status="RESOLVED")
     edit_requirement(
         root,
-        "FIX-ASG-02",
+        "FIX-ASG-01",  # a requirement of S00 alone: its one contribution covers every session
         lambda entry: entry.update(
             status="verified", contributions=[contribution("S00", "verified", ["docs"])]
         ),
@@ -1593,7 +1734,10 @@ def test_acceptance_requirement_shared_by_two_sessions_does_not_equal_one_sessio
 @pytest.mark.parametrize("status", ["blocked", "partial"])
 def test_blocked_or_partial_acceptance_needs_blockers(tmp_path: Path, status: str) -> None:
     root = make_repo(tmp_path)
-    edit_acceptance(root, "AT-FIX-ACC-01", lambda entry: entry.update(status=status))
+    # 'partial' is derived from tests (one passed, one skipped), so it has evidence behind it;
+    # 'blocked' is typed here without any test result.
+    extra = {"evidence": evidence_for(root, 1, 0, 1)} if status == "partial" else {}
+    edit_acceptance(root, "AT-FIX-ACC-01", lambda entry: entry.update(status=status, **extra))
     problem = only_problem(root)
     assert "AT-FIX-ACC-01" in problem
     assert f"'{status}' needs at least one id in 'blockers'" in problem
@@ -1601,16 +1745,6 @@ def test_blocked_or_partial_acceptance_needs_blockers(tmp_path: Path, status: st
     assert problems(root) == []
     edit_acceptance(root, "AT-FIX-ACC-01", lambda entry: entry.update(blockers=["B-404"]))
     assert "B-404" in only_problem(root)
-
-
-def _evidence(passed: int, failed: int, skipped: int) -> dict[str, Any]:
-    return {
-        "file": "evidence/pytest.json",
-        "tests": passed + failed + skipped,
-        "passed": passed,
-        "failed": failed,
-        "skipped": skipped,
-    }
 
 
 @pytest.mark.requirement("OWN-18")
@@ -1631,23 +1765,23 @@ def test_passing_that_contradicts_the_recorded_counts_is_a_problem(
     tmp_path: Path, passed: int, failed: int, skipped: int
 ) -> None:
     root = make_repo(tmp_path)
-    edit_acceptance(
-        root,
-        "AT-FIX-ACC-01",
-        lambda entry: entry.update(status="passing", evidence=_evidence(passed, failed, skipped)),
-    )
-    problem = only_problem(root)
-    assert "AT-FIX-ACC-01" in problem
-    assert "'passing' contradicts the recorded evidence" in problem
-    assert f"{passed} passed, {failed} failed, {skipped} skipped" in problem
+    recorded = evidence_for(root, passed, failed, skipped)  # the evidence file really holds these results
+    edit_acceptance(root, "AT-FIX-ACC-01", lambda entry: entry.update(status="passing", evidence=recorded))
+    found = problems(root)
+    assert all("AT-FIX-ACC-01" in problem for problem in found), found
+    contradiction = [p for p in found if "'passing' contradicts the recorded evidence" in p]
+    assert len(contradiction) == 1, found
+    assert f"{passed} passed, {failed} failed, {skipped} skipped" in contradiction[0]
+    # The same state also differs from what the evidence file gives: 'passing' was typed by hand.
+    assert sum(1 for p in found if "the register was edited by hand or the evidence file changed" in p) == 1
+    assert len(found) == 2, found
 
 
 @pytest.mark.requirement("OWN-18")
 def test_passing_with_evidence_and_marked_test_module_is_valid(tmp_path: Path) -> None:
     root = make_repo(tmp_path)
-    edit_acceptance(
-        root, "AT-FIX-ACC-01", lambda entry: entry.update(status="passing", evidence=_evidence(4, 0, 0))
-    )
+    recorded = evidence_for(root, 4, 0, 0)
+    edit_acceptance(root, "AT-FIX-ACC-01", lambda entry: entry.update(status="passing", evidence=recorded))
     assert problems(root) == []
 
 
@@ -1661,7 +1795,7 @@ def test_listed_test_module_must_exist_unless_planned(tmp_path: Path, status: st
         "AT-FIX-ACC-01",
         lambda entry: entry.update(
             status=status,
-            evidence=_evidence(2, 0, 0),
+            evidence=evidence_for(root, *COUNTS_OF_STATUS[status]),
             blockers=["B-001"],
             test_modules=["tests/test_widget.py", "tests/test_never_written.py"],
         ),
@@ -1697,7 +1831,8 @@ def test_planned_entry_may_list_modules_that_do_not_exist_yet(tmp_path: Path) ->
 def test_listed_test_module_must_contain_the_acceptance_marker(tmp_path: Path, module_text: str) -> None:
     root = make_repo(tmp_path)
     _write(root / "tests/test_widget.py", module_text)
-    edit_acceptance(root, "AT-FIX-ACC-01", lambda entry: entry.update(status="failing"))
+    recorded = evidence_for(root, *COUNTS_OF_STATUS["failing"])
+    edit_acceptance(root, "AT-FIX-ACC-01", lambda entry: entry.update(status="failing", evidence=recorded))
     problem = only_problem(root)
     assert "AT-FIX-ACC-01" in problem
     assert "'tests/test_widget.py' does not contain the marker" in problem
@@ -1718,7 +1853,8 @@ def test_listed_test_module_must_contain_the_acceptance_marker(tmp_path: Path, m
 def test_acceptance_marker_spellings_that_are_recognised(tmp_path: Path, marker: str) -> None:
     root = make_repo(tmp_path)
     _write(root / "tests/test_widget.py", f"import pytest\n\n{marker}\ndef test_it():\n    assert True\n")
-    edit_acceptance(root, "AT-FIX-ACC-01", lambda entry: entry.update(status="failing"))
+    recorded = evidence_for(root, *COUNTS_OF_STATUS["failing"])
+    edit_acceptance(root, "AT-FIX-ACC-01", lambda entry: entry.update(status="failing", evidence=recorded))
     assert problems(root) == []
 
 
@@ -1730,7 +1866,10 @@ def test_status_derived_from_tests_needs_a_listed_test_module(tmp_path: Path, st
         root,
         "AT-FIX-ACC-01",
         lambda entry: entry.update(
-            status=status, evidence=_evidence(1, 0, 0), blockers=["B-001"], test_modules=[]
+            status=status,
+            evidence=evidence_for(root, *COUNTS_OF_STATUS[status]),
+            blockers=["B-001"],
+            test_modules=[],
         ),
     )
     problem = only_problem(root)
@@ -2190,8 +2329,10 @@ def test_render_check_is_byte_for_byte(tmp_path: Path, file: str, tamper: Callab
 
 
 # --------------------------------------------------------------------------- sync-evidence
-SYNC_CASES: list[tuple[str, list[str], list[str], str, tuple[int, int, int] | None, str | None]] = [
-    # name, outcomes of the marked tests, blockers, expected status, (passed, failed, skipped), problem
+SYNC_CASES: list[
+    tuple[str, list[str], list[str], str, tuple[int, int, int] | None, str | tuple[str, ...] | None]
+] = [
+    # name, outcomes of the marked tests, blockers, expected status, (passed, failed, skipped), problem(s)
     ("no tests, no blockers", [], [], "planned", None, None),
     ("no tests, blockers", [], ["B-001"], "blocked", None, None),
     ("all passed", ["passed", "passed", "passed"], [], "passing", (3, 0, 0), None),
@@ -2215,14 +2356,23 @@ SYNC_CASES: list[tuple[str, list[str], list[str], str, tuple[int, int, int] | No
     ("all skipped, blockers", ["skipped", "skipped"], ["B-001"], "blocked", (0, 0, 2), None),
     ("all skipped, no blockers", ["skipped"], [], "blocked", (0, 0, 1), "needs a blocker id"),
     ("a test did not run", ["passed", "not_run"], ["B-001"], "partial", (1, 0, 1), "did not run"),
-    ("no test ran", ["not_run"], ["B-001"], "blocked", (0, 0, 1), "did not run"),
+    # The listed module holds one marked test and it did not run: the module contributed nothing.
+    (
+        "no test ran",
+        ["not_run"],
+        ["B-001"],
+        "blocked",
+        (0, 0, 1),
+        ("did not run", "listed test module contributed no test: tests/test_widget.py"),
+    ),
 ]
 
 
 @pytest.mark.requirement("OWN-18")
 @pytest.mark.parametrize("case", [pytest.param(case, id=case[0]) for case in SYNC_CASES])
 def test_sync_evidence_derives_the_status(
-    tmp_path: Path, case: tuple[str, list[str], list[str], str, tuple[int, int, int] | None, str | None]
+    tmp_path: Path,
+    case: tuple[str, list[str], list[str], str, tuple[int, int, int] | None, str | tuple[str, ...] | None],
 ) -> None:
     _name, outcomes, blockers, status, counts, problem = case
     root = make_repo(tmp_path)
@@ -2251,9 +2401,11 @@ def test_sync_evidence_derives_the_status(
         assert report.problems == []
         assert gr.validate(root).problems == [], "a clean sync leaves valid registers"
     else:
-        assert len(report.problems) == 1, report.problems
-        assert "AT-FIX-ACC-01" in report.problems[0]
-        assert problem in report.problems[0]
+        expected = (problem,) if isinstance(problem, str) else problem
+        assert len(report.problems) == len(expected), report.problems
+        for fragment, reported in zip(expected, report.problems, strict=True):
+            assert "AT-FIX-ACC-01" in reported
+            assert fragment in reported
     if status in ("partial", "blocked") and not blockers:
         assert f"'{status}' needs at least one id in 'blockers'" in only_problem(root)
 
@@ -2412,21 +2564,22 @@ def test_sync_reports_marker_ids_that_are_not_in_the_registers(
     [
         "not json at all",
         "[]",
-        '{"tests": []}',
-        '{"schema_version": 2, "tests": []}',
-        '{"schema_version": 1}',
-        '{"schema_version": 1, "tests": {}}',
-        '{"schema_version": 1, "tests": ["tests/test_widget.py::test_0"]}',
-        '{"schema_version": 1, "tests": [{"requirements": [], "acceptance": [], "outcome": "passed"}]}',
-        '{"schema_version": 1, "tests": [{"nodeid": "t::a", "requirements": [], "acceptance": [], '
-        '"outcome": "ok"}]}',
-        '{"schema_version": 1, "tests": [{"nodeid": "t::a", "requirements": [], "acceptance": [], '
-        '"outcome": null}]}',
-        '{"schema_version": 1, "tests": [{"nodeid": "t::a", "requirements": [], "acceptance": "FIX-ACC-01", '
-        '"outcome": "passed"}]}',
-        '{"schema_version": 1, "tests": [{"nodeid": "t::a", "acceptance": ["FIX-ACC-01"], '
-        '"outcome": "passed"}]}',
-        '{"schema_version": 1, "tests": ['
+        '{"exit_status": 0, "tests": []}',
+        '{"schema_version": 2, "exit_status": 0, "tests": []}',
+        '{"schema_version": 1, "exit_status": 0}',
+        '{"schema_version": 1, "exit_status": 0, "tests": {}}',
+        '{"schema_version": 1, "exit_status": 0, "tests": ["tests/test_widget.py::test_0"]}',
+        '{"schema_version": 1, "exit_status": 0, '
+        '"tests": [{"requirements": [], "acceptance": [], "outcome": "passed"}]}',
+        '{"schema_version": 1, "exit_status": 0, '
+        '"tests": [{"nodeid": "t::a", "requirements": [], "acceptance": [], "outcome": "ok"}]}',
+        '{"schema_version": 1, "exit_status": 0, '
+        '"tests": [{"nodeid": "t::a", "requirements": [], "acceptance": [], "outcome": null}]}',
+        '{"schema_version": 1, "exit_status": 0, '
+        '"tests": [{"nodeid": "t::a", "requirements": [], "acceptance": "FIX-ACC-01", "outcome": "passed"}]}',
+        '{"schema_version": 1, "exit_status": 0, '
+        '"tests": [{"nodeid": "t::a", "acceptance": ["FIX-ACC-01"], "outcome": "passed"}]}',
+        '{"schema_version": 1, "exit_status": 0, "tests": ['
         '{"nodeid": "t::a", "requirements": [], "acceptance": ["FIX-ACC-01"], "outcome": "passed"}, '
         '{"nodeid": "t::a", "requirements": [], "acceptance": ["FIX-ACC-01"], "outcome": "passed"}]}',
     ],
@@ -2443,6 +2596,7 @@ def test_sync_refuses_a_malformed_evidence_file(tmp_path: Path, content: str) ->
     assert len(report.problems) == 1, report.problems
     assert "broken.json" in report.problems[0]
     assert "nothing was written" in report.problems[0]
+    assert "exit_status" not in report.problems[0], "refused for its shape, not as an incomplete run"
     assert snapshot(root) == before
 
 
@@ -2457,7 +2611,7 @@ def test_sync_refuses_missing_or_outside_evidence(tmp_path: Path) -> None:
     assert "cannot read the evidence file" in missing.problems[0]
 
     outside = tmp_path / "outside.json"
-    _write(outside, json.dumps({"schema_version": 1, "tests": widget_results("passed")}))
+    _write(outside, json.dumps(evidence_payload(widget_results("passed"))))
     report = gr.sync_evidence(root, outside)
     assert len(report.problems) == 1
     assert "must be inside the repository" in report.problems[0]
@@ -2530,6 +2684,7 @@ def test_sync_accepts_evidence_written_by_the_real_conftest(tmp_path: Path) -> N
         "skipped": 1,
     }
     assert gr.validate(project).problems == []
+    assert gr.sync_evidence(project, project / "evidence/pytest.json", check=True).problems == []
 
 
 # --------------------------------------------------------------------------- apply
@@ -2544,6 +2699,7 @@ def test_apply_updates_status_review_status_and_notes(tmp_path: Path) -> None:
                 "ids": ["FIX-ASG-02"],
                 "status": "in_progress",
                 "review_status": "conditional",
+                "review_reference": "D-001",  # the APPROVED decision of the fixture decision log
                 "notes": "SYNTHETIC FIXTURE: work started.",
             }
         ],
@@ -2553,6 +2709,7 @@ def test_apply_updates_status_review_status_and_notes(tmp_path: Path) -> None:
     entry = requirement_of(root, "FIX-ASG-02")
     assert entry["status"] == "in_progress"
     assert entry["review_status"] == "conditional"
+    assert entry["review_reference"] == "D-001"
     assert entry["notes"] == "SYNTHETIC FIXTURE: work started."
     assert entry["contributions"] == []
     assert changed_files(before, snapshot(root)) == {gr.MATRIX_FILE}
@@ -2575,7 +2732,8 @@ def test_apply_selects_requirements_by_id_or_shell_style_glob(
     tmp_path: Path, pattern: str, expected: list[str]
 ) -> None:
     root = make_repo(tmp_path, blocker_status="RESOLVED")
-    report = gr.apply_patch(root, write_patch(root, [{"ids": [pattern], "review_status": "approved"}]))
+    update = {"ids": [pattern], "review_status": "approved", "review_reference": "D-001"}
+    report = gr.apply_patch(root, write_patch(root, [update]))
     assert report.problems == []
     approved = [
         entry["id"]
@@ -2742,7 +2900,30 @@ def test_apply_refuses_to_leave_requirements_of_an_open_blocker_unblocked(tmp_pa
         ({"sessions": ["S05"]}, "unknown key 'sessions'"),
         ({"text": "A rewritten requirement."}, "unknown key 'text'"),
         ({"id": "FIX-ASG-77"}, "unknown key 'id'"),
+        ({"source": "FIXTURE_MASTER.pdf"}, "unknown key 'source'"),
+        ({"section": "Another section"}, "unknown key 'section'"),
+        ({"source_clause": "Another clause."}, "unknown key 'source_clause'"),
         ({}, "nothing to change"),
+        # FIX-ASG-02 belongs to S00 and S01: one verified contribution does not verify it.
+        (
+            {"status": "verified", "contribution": contribution("S00", "verified", ["docs/widget.md"])},
+            "status 'verified' of every session in 'sessions'; there is none of S01",
+        ),
+        (
+            {"contribution": contribution("S00", "verified", [])},
+            "contributions[0] (S00) has status 'verified' but lists no evidence path",
+        ),
+        ({"review_status": "approved"}, "review_status 'approved' needs a 'review_reference'"),
+        (
+            {"review_status": "approved", "review_reference": "D-002"},
+            "review_reference D-002 must be a decision with '- Status: APPROVED'",
+        ),
+        (
+            {"review_status": "approved", "review_reference": "D-099"},
+            "references D-099, which is not a heading",
+        ),
+        ({"review_reference": "U-01"}, "'review_reference' must be the id of a decision (D-nnn)"),
+        ({"review_reference": 7}, "'review_reference' must be the id of a decision (D-nnn)"),
     ],
 )
 def test_apply_refuses_a_state_that_validate_would_reject(
@@ -2809,7 +2990,13 @@ def test_apply_never_deletes_or_adds_requirements(tmp_path: Path) -> None:
     patch = write_patch(
         root,
         [
-            {"ids": ["*"], "status": "in_progress", "review_status": "conditional", "notes": ""},
+            {
+                "ids": ["*"],
+                "status": "in_progress",
+                "review_status": "conditional",
+                "review_reference": "D-001",
+                "notes": "",
+            },
             {"ids": ["FIX-A*"], "contribution": contribution("S00", "in_progress", ["docs/widget.md"])},
             {"ids": ["FIX-GOV-01"], "status": "not_applicable", "notes": "SYNTHETIC FIXTURE: informational."},
         ],
@@ -2818,9 +3005,11 @@ def test_apply_never_deletes_or_adds_requirements(tmp_path: Path) -> None:
     after = load(root, gr.MATRIX_FILE)
     assert [entry["id"] for entry in after["requirements"]] == ids_before
     assert after["minimum_requirement_count"] == 7
+    keys = list(_requirement("X-01", "k", ["S00"], "t"))
+    keys.insert(keys.index("review_status") + 1, "review_reference")
     for entry in after["requirements"]:
         assert {key: entry[key] for key in constant[entry["id"]]} == constant[entry["id"]]
-        assert list(entry) == list(_requirement("X-01", "k", ["S00"], "t")), "key order is unchanged"
+        assert list(entry) == keys, "key order is unchanged; the review reference follows the review status"
 
 
 @pytest.mark.requirement("OWN-08", "S00-ASG-28")
@@ -2844,10 +3033,10 @@ def test_apply_writes_small_diffs_and_nothing_when_nothing_changes(tmp_path: Pat
     before = snapshot(root)
     header_before, blocks_before = blocks(before[gr.MATRIX_FILE].decode("utf-8"))
     item = contribution("S00", "verified", ["docs/widget.md"])
-    patch = write_patch(root, [{"ids": ["FIX-ASG-02"], "status": "verified", "contribution": item}])
+    patch = write_patch(root, [{"ids": ["FIX-ASG-01"], "status": "verified", "contribution": item}])
     report = gr.apply_patch(root, patch)
     assert report.problems == []
-    assert "1 requirement(s) updated: FIX-ASG-02" in report.messages[0]
+    assert "1 requirement(s) updated: FIX-ASG-01" in report.messages[0]
 
     after = snapshot(root)
     assert changed_files(before, after) == {gr.MATRIX_FILE}, "no other file, no temporary file"
@@ -2855,10 +3044,10 @@ def test_apply_writes_small_diffs_and_nothing_when_nothing_changes(tmp_path: Pat
     assert header_after == header_before
     assert list(blocks_after) == list(blocks_before)
     for req_id, block in blocks_before.items():
-        if req_id != "FIX-ASG-02":
+        if req_id != "FIX-ASG-01":
             assert blocks_after[req_id] == block
     expected = (
-        blocks_before["FIX-ASG-02"]
+        blocks_before["FIX-ASG-01"]
         .replace("  status: not_started\n", "  status: verified\n")
         .replace(
             "  contributions: []\n",
@@ -2866,7 +3055,7 @@ def test_apply_writes_small_diffs_and_nothing_when_nothing_changes(tmp_path: Pat
             "    status: verified\n    evidence:\n    - docs/widget.md\n",
         )
     )
-    assert blocks_after["FIX-ASG-02"] == expected
+    assert blocks_after["FIX-ASG-01"] == expected
 
     again = gr.apply_patch(root, patch)
     assert again.problems == []
@@ -3010,6 +3199,12 @@ def test_command_line_exit_codes_and_output(tmp_path: Path, capsys: pytest.Captu
         ["apply"],
         ["validate", "--check"],
         ["render", "--evidence", "x"],
+        ["sync-evidence", "--check"],
+        ["lock", "--reword"],
+        ["lock", "--reword", "FIX-ASG-02"],
+        ["lock", "--reword", "FIX-ASG-02", "--reason", "  "],
+        ["lock", "--reason", "SYNTHETIC FIXTURE: a reason without an id."],
+        ["lock", "--check"],
     ],
 )
 def test_command_line_usage_errors_exit_with_2(
@@ -3030,9 +3225,8 @@ def test_module_entry_point(tmp_path: Path) -> None:
     assert "registers valid: 7 requirements" in valid.stdout
     assert "NOTE: B-001 is OPEN" in valid.stdout
 
-    (root / gr.EXTRACTED_DIR / "FIXTURE_BRIEF.txt").write_bytes(
-        b"SYNTHETIC FIXTURE: a changed specification.\n"
-    )
+    brief = root / gr.EXTRACTED_DIR / "FIXTURE_BRIEF.txt"
+    brief.write_bytes(brief.read_bytes() + b"SYNTHETIC FIXTURE: a sentence added to the specification.\n")
     invalid = subprocess.run(command, cwd=REPO_ROOT, capture_output=True, text=True, check=False)
     assert invalid.returncode == 1, invalid.stdout + invalid.stderr
     assert "the specification text changed" in invalid.stdout
@@ -3086,6 +3280,7 @@ def test_apply_help_documents_the_patch_format(capsys: pytest.CaptureFixture[str
         "ids:",
         "status:",
         "review_status:",
+        "review_reference:",
         "notes:",
         "contribution:",
         "evidence:",
@@ -3101,9 +3296,13 @@ def _tolerated_on_the_real_repository(problem: str) -> bool:
     return "does not exist" in problem and any(file in problem for file in markdown)
 
 
+def _missing_lock(problem: str) -> bool:
+    return problem.startswith(f"{gr.LOCK_FILE}: the requirement lock does not exist")
+
+
 @pytest.mark.requirement("OWN-08", "OWN-16", "OWN-17", "OWN-18", "S00-ASG-27", "S00-ASG-28")
 def test_real_repository_registers_load_and_validate() -> None:
-    watched = [gr.MATRIX_FILE, gr.ACCEPTANCE_FILE, *gr.LOG_FILES, *gr.GENERATED_FILES]
+    watched = [gr.MATRIX_FILE, gr.ACCEPTANCE_FILE, gr.LOCK_FILE, *gr.LOG_FILES, *gr.GENERATED_FILES]
     before = {file: (REPO_ROOT / file).read_bytes() for file in watched if (REPO_ROOT / file).is_file()}
 
     registers, loaded = gr.load_registers(REPO_ROOT)
@@ -3121,7 +3320,14 @@ def test_real_repository_registers_load_and_validate() -> None:
     )
 
     report = gr.validate(REPO_ROOT)
-    assert [p for p in report.problems if not _tolerated_on_the_real_repository(p)] == []
+    # The requirement lock of the real repository is created by the coordinator with
+    # 'python -m tools.gie_registers lock'.  Exactly two states are valid here: the lock exists and
+    # nothing about it is reported, or it does not exist yet and exactly that is reported.
+    lock_exists = (REPO_ROOT / gr.LOCK_FILE).is_file()
+    assert sum(1 for p in report.problems if _missing_lock(p)) == (0 if lock_exists else 1), report.problems
+    assert [
+        p for p in report.problems if not _tolerated_on_the_real_repository(p) and not _missing_lock(p)
+    ] == []
     assert report.structure_ok
 
     totals = gr.stats(REPO_ROOT)
@@ -3146,7 +3352,8 @@ def test_real_registers_render_completely_and_deterministically(tmp_path: Path) 
         row = matrix_rows[entry["id"]]
         assert len(row) == 6, row
         assert row[3] == entry["status"]
-        assert row[4] == entry["review_status"]
+        reference = entry.get("review_reference")
+        assert row[4] == (f"{entry['review_status']} ({reference})" if reference else entry["review_status"])
     sections = list(dict.fromkeys((e["source"], e["section"]) for e in registers.matrix["requirements"]))
     headings = [line for line in documents[gr.MATRIX_MD].splitlines() if line.startswith("## ")]
     assert headings[2:] == [f"## {source} - {section}" for source, section in sections]
@@ -3195,8 +3402,10 @@ def test_sync_on_a_copy_of_the_real_register_changes_only_the_intended_entries(t
     original = load(root, gr.ACCEPTANCE_FILE)
     header_before, blocks_before = blocks(before[gr.ACCEPTANCE_FILE].decode("utf-8"))
     # SYNTHETIC FIXTURE evidence: two invented passing results marked for S00-ACC-03, nothing else.
+    # They are placed in the test module that the register lists for AT-S00-ACC-03.
+    (module,) = acceptance_of(root, "AT-S00-ACC-03")["test_modules"]
     tests = [
-        result_record(f"tests/fixture/test_invented.py::test_{index}", "passed", acceptance=("S00-ACC-03",))
+        result_record(f"{module}::test_invented_{index}", "passed", acceptance=("S00-ACC-03",))
         for index in range(2)
     ]
     evidence = write_evidence(root, tests, "fixture_evidence/pytest.json")
@@ -3250,7 +3459,8 @@ def test_sync_on_a_copy_of_the_real_register_changes_only_the_intended_entries(t
 def test_a_gloss_in_the_requirement_text_is_a_problem(tmp_path: Path, text: str, reported: list[str]) -> None:
     root = make_repo(tmp_path)
     clause = "SYNTHETIC FIXTURE clause: Build the widget; test widgets under load."
-    edit_requirement(root, "FIX-ASG-02", lambda entry: entry.update(text=text, source_clause=clause))
+    extend_specification(root, "FIXTURE_BRIEF.txt", clause)
+    reword_requirement(root, "FIX-ASG-02", text=text, source_clause=clause)
     problem = only_problem(root)
     assert "FIX-ASG-02" in problem
     assert "not in its source_clause" in problem
@@ -3271,7 +3481,8 @@ def test_a_gloss_in_the_requirement_text_is_a_problem(tmp_path: Path, text: str,
 def test_fragments_of_the_source_clause_are_accepted(tmp_path: Path, text: str) -> None:
     root = make_repo(tmp_path)
     clause = "SYNTHETIC FIXTURE clause: Build the widget; test widgets under load; bid/ask tests at -1.75%."
-    edit_requirement(root, "FIX-ASG-02", lambda entry: entry.update(text=text, source_clause=clause))
+    extend_specification(root, "FIXTURE_BRIEF.txt", clause)
+    reword_requirement(root, "FIX-ASG-02", text=text, source_clause=clause)
     assert problems(root) == []
 
 
@@ -3295,3 +3506,1745 @@ def test_every_real_requirement_text_comes_from_its_source_clause() -> None:
         if (added := gr.words_not_in_clause(entry["text"], entry["source_clause"]))
     }
     assert offenders == {}
+
+
+# --------------------------------------------------------------------------- requirement lock (R1)
+#: The problem that asks for a recorded correction of FIX-ASG-02.
+REWORDED_FIX_ASG_02 = (
+    "requirement FIX-ASG-02: text, source, section or source_clause changed since it was locked - if this "
+    "is a deliberate correction run: python -m tools.gie_registers lock --reword FIX-ASG-02 --reason ..."
+)
+REASON = "SYNTHETIC FIXTURE: the owner corrected the wording."
+
+
+def lock_document(root: Path) -> dict[str, Any]:
+    document: dict[str, Any] = json.loads((root / gr.LOCK_FILE).read_text(encoding="utf-8"))
+    return document
+
+
+def write_lock(root: Path, document: Any) -> None:
+    """Write a lock by hand, in the formatting of the tool (what a hand edit would leave behind)."""
+    _write(root / gr.LOCK_FILE, json.dumps(document, indent=2, sort_keys=True) + "\n")
+
+
+def expected_atom_hash(entry: dict[str, Any]) -> str:
+    """The documented hash, computed without the tool: compact JSON, sorted keys, unescaped Unicode."""
+    fields = {key: entry[key] for key in ("id", "source", "section", "text", "source_clause")}
+    encoded = json.dumps(fields, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def unlocked_requirement(root: Path, req_id: str = "FIX-ASG-05") -> dict[str, Any]:
+    """Append a requirement whose clause is in the source text, without locking it."""
+    requirement = _requirement(req_id, "assignment", ["S03"], "Polish the widget.")
+    extend_specification(root, "FIXTURE_BRIEF.txt", requirement["source_clause"])
+    edit(root, gr.MATRIX_FILE, lambda d: d["requirements"].append(requirement))
+    return requirement
+
+
+@pytest.mark.requirement("OWN-03", "OWN-08", "S00-ASG-28")
+def test_atom_hash_is_the_documented_sha256() -> None:
+    atom = {
+        "id": "X-01",
+        "source": "s.pdf",
+        "section": "c",
+        "text": "t ≤ 1",
+        "source_clause": 'q "t ≤ 1"',
+        "kind": "assignment",
+        "notes": "not locked",
+        "status": "verified",
+    }
+    # The canonical form typed by hand: keys sorted, no spaces, Unicode as is, quotes escaped.
+    canonical = '{"id":"X-01","section":"c","source":"s.pdf","source_clause":"q \\"t ≤ 1\\"","text":"t ≤ 1"}'
+    assert gr.atom_hash(atom) == hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    assert gr.atom_hash(atom) == expected_atom_hash(atom)
+    assert gr.LOCKED_FIELDS == ("id", "source", "section", "text", "source_clause")
+    for key in gr.LOCKED_FIELDS:
+        assert gr.atom_hash({**atom, key: atom[key] + " "}) != gr.atom_hash(atom), key
+    unlocked = {**atom, "kind": "system", "notes": "", "status": "blocked", "sessions": ["S01"]}
+    assert gr.atom_hash(unlocked) == gr.atom_hash(atom)
+
+
+@pytest.mark.requirement("OWN-03", "OWN-08", "OWN-20", "S00-ASG-28")
+def test_lock_file_holds_every_requirement_in_the_documented_format(tmp_path: Path) -> None:
+    root = make_repo(tmp_path)
+    assert gr.LOCK_FILE == "specifications/requirements_lock.json"
+    raw = (root / gr.LOCK_FILE).read_bytes()
+    document = json.loads(raw)
+    assert raw == (json.dumps(document, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    assert b"\r" not in raw
+    assert list(document) == ["atoms", "changes", "description", "schema_version"]
+    assert document["schema_version"] == 1
+    assert document["description"] == gr.LOCK_DESCRIPTION
+    assert document["changes"] == []
+    requirements = load(root, gr.MATRIX_FILE)["requirements"]
+    assert len(requirements) == 7
+    assert document["atoms"] == {entry["id"]: expected_atom_hash(entry) for entry in requirements}
+
+
+@pytest.mark.requirement("OWN-08", "S00-ASG-28")
+def test_lock_creates_the_file_when_it_does_not_exist_and_is_idempotent(tmp_path: Path) -> None:
+    root = make_repo(tmp_path)
+    created = (root / gr.LOCK_FILE).read_bytes()
+    (root / gr.LOCK_FILE).unlink()
+    before = snapshot(root)
+    report = gr.lock_requirements(root)
+    assert report.problems == []
+    assert report.messages == [f"{gr.LOCK_FILE}: created - 7 requirement(s) added, 0 reworded, 7 locked"]
+    after = snapshot(root)
+    assert changed_files(before, after) == {gr.LOCK_FILE}, "no other file, no temporary file"
+    assert after[gr.LOCK_FILE] == created, "the same matrix always gives the same lock"
+
+    again = gr.lock_requirements(root)
+    assert again.problems == []
+    assert again.messages == [f"{gr.LOCK_FILE}: unchanged (7 requirement(s) locked)"]
+    assert snapshot(root) == after
+
+
+@pytest.mark.requirement("OWN-03", "OWN-08", "OWN-20", "S00-ASG-28")
+def test_missing_lock_is_a_problem_while_the_matrix_has_requirements(tmp_path: Path) -> None:
+    root = make_repo(tmp_path)
+    (root / gr.LOCK_FILE).unlink()
+    report = gr.validate(root)
+    assert report.problems == [
+        f"{gr.LOCK_FILE}: the requirement lock does not exist although the matrix holds 7 requirement(s) "
+        "- run: python -m tools.gie_registers lock"
+    ]
+    # Not a structural defect: what the registers say can still be rendered and counted ...
+    assert report.structure_ok
+    assert gr.render(root).problems == []
+    assert gr.stats(root)["requirements"]["total"] == 7
+    # ... but 'apply' never writes a state that 'validate' rejects.
+    before = snapshot(root)
+    patch = write_patch(root, [{"ids": ["FIX-ASG-04"], "notes": "SYNTHETIC FIXTURE: a note."}])
+    refused = gr.apply_patch(root, patch)
+    assert any("the requirement lock does not exist" in problem for problem in refused.problems)
+    assert snapshot(root) == before
+
+
+@pytest.mark.requirement("OWN-08", "S00-ASG-28")
+def test_no_lock_is_needed_while_the_matrix_has_no_requirement(tmp_path: Path) -> None:
+    root = make_repo(tmp_path)
+    (root / gr.LOCK_FILE).unlink()
+    (root / gr.DECISION_LOG_FILE).unlink()
+    (root / gr.CHANGE_REQUESTS_FILE).unlink()
+    edit(root, gr.MATRIX_FILE, lambda d: d.update(requirements=[], minimum_requirement_count=0))
+    edit(root, gr.ACCEPTANCE_FILE, lambda d: d.update(acceptance_tests=[]))
+    assert problems(root) == []
+    report = gr.lock_requirements(root)
+    assert report.problems == []
+    assert not (root / gr.LOCK_FILE).exists(), "there is nothing to lock"
+
+
+def _change_entry(root: Path, req_id: str, **changes: Any) -> dict[str, Any]:
+    """A SYNTHETIC FIXTURE history entry that agrees with the locked hash of ``req_id``."""
+    entry = {"id": req_id, "old": "0" * 64, "new": lock_document(root)["atoms"][req_id], "reason": REASON}
+    for key, value in changes.items():
+        if value is _DROP:
+            del entry[key]
+        else:
+            entry[key] = value
+    return entry
+
+
+LOCK_DEFECTS: list[tuple[str, Callable[[Path, dict[str, Any]], Any], str]] = [
+    ("not JSON", lambda root, d: b"not json at all", "not valid JSON"),
+    ("truncated", lambda root, d: b'{"schema_version": 1, "atoms": {', "not valid JSON"),
+    ("not UTF-8", lambda root, d: b"\xff\xfe\x00{}", "not UTF-8 text"),
+    ("empty file", lambda root, d: b"", "not valid JSON"),
+    (
+        "duplicate key",
+        lambda root, d: (
+            b'{"schema_version": 1, "schema_version": 1, "description": "x", "atoms": {}, "changes": []}'
+        ),
+        "duplicate key 'schema_version'",
+    ),
+    ("top level is a list", lambda root, d: [], "the top level must be a JSON object"),
+    ("no changes key", lambda root, d: _drop(d, "changes"), "missing key 'changes'"),
+    ("no atoms key", lambda root, d: _drop(d, "atoms"), "missing key 'atoms'"),
+    ("unknown key", lambda root, d: d.update(waived=["FIX-ASG-04"]), "unknown key 'waived'"),
+    ("schema version 2", lambda root, d: d.update(schema_version=2), "schema_version must be 1"),
+    ("schema version true", lambda root, d: d.update(schema_version=True), "schema_version must be 1"),
+    ("no description", lambda root, d: d.update(description=" "), "'description' must be a non-empty string"),
+    ("atoms is a list", lambda root, d: d.update(atoms=list(d["atoms"])), "'atoms' must be an object"),
+    (
+        "hash is not a digest",
+        lambda root, d: d["atoms"].update({"FIX-ASG-01": "abc123"}),
+        "the hash locked for FIX-ASG-01 is not a lower-case SHA-256 hex digest",
+    ),
+    (
+        "hash in upper case",
+        lambda root, d: d["atoms"].update({"FIX-ASG-01": d["atoms"]["FIX-ASG-01"].upper()}),
+        "the hash locked for FIX-ASG-01 is not a lower-case SHA-256 hex digest",
+    ),
+    (
+        "hash is null",
+        lambda root, d: d["atoms"].update({"FIX-ASG-01": None}),
+        "the hash locked for FIX-ASG-01",
+    ),
+    ("changes is an object", lambda root, d: d.update(changes={}), "'changes' must be a list"),
+    ("change is a string", lambda root, d: d.update(changes=["FIX-ASG-01"]), "changes[0] must be an object"),
+    (
+        "change without reason",
+        lambda root, d: d.update(changes=[_change_entry(root, "FIX-ASG-01", reason=_DROP)]),
+        "changes[0]: missing key 'reason'",
+    ),
+    (
+        "change with an empty reason",
+        lambda root, d: d.update(changes=[_change_entry(root, "FIX-ASG-01", reason=" ")]),
+        "changes[0]: 'reason' must be a non-empty string",
+    ),
+    (
+        "change with an unknown key",
+        lambda root, d: d.update(changes=[_change_entry(root, "FIX-ASG-01", author="nobody")]),
+        "changes[0]: unknown key 'author'",
+    ),
+    (
+        "change without a digest",
+        lambda root, d: d.update(changes=[_change_entry(root, "FIX-ASG-01", old="unknown")]),
+        "changes[0]: 'old' must be a lower-case SHA-256 hex digest",
+    ),
+    (
+        "change of a number",
+        lambda root, d: d.update(changes=[_change_entry(root, "FIX-ASG-01", id=1)]),
+        "changes[0]: 'id' must be a non-empty string",
+    ),
+]
+
+
+@pytest.mark.requirement("OWN-08", "S00-ASG-28")
+@pytest.mark.parametrize(
+    ("change", "expected"),
+    [pytest.param(change, expected, id=name) for name, change, expected in LOCK_DEFECTS],
+)
+def test_unreadable_or_malformed_lock_is_structural(
+    tmp_path: Path, change: Callable[[Path, dict[str, Any]], Any], expected: str
+) -> None:
+    root = make_repo(tmp_path)
+    document = lock_document(root)
+    replacement = change(root, document)
+    if isinstance(replacement, bytes):
+        (root / gr.LOCK_FILE).write_bytes(replacement)
+    else:
+        write_lock(root, document if replacement is None else replacement)
+
+    report = gr.validate(root)
+    assert any(problem.startswith(gr.LOCK_FILE) and expected in problem for problem in report.problems), (
+        report.problems
+    )
+    assert not report.structure_ok
+    # A lock that cannot be trusted stops every command that renders or writes, 'lock' included.
+    before = snapshot(root)
+    for outcome in (gr.render(root), gr.lock_requirements(root), gr.lock_requirements(root, reason=REASON)):
+        assert "not structurally valid" in outcome.problems[0]
+    with pytest.raises(gr.RegisterError, match="not structurally valid"):
+        gr.stats(root)
+    assert snapshot(root) == before
+
+
+@pytest.mark.requirement("OWN-08", "S00-ASG-28")
+def test_tool_written_history_entry_is_a_valid_lock_shape(tmp_path: Path) -> None:
+    """The accepted counterpart of the malformed cases: a complete history entry is fine."""
+    root = make_repo(tmp_path)
+    document = lock_document(root)
+    document["changes"] = [_change_entry(root, "FIX-ASG-01")]
+    write_lock(root, document)
+    assert problems(root) == []
+
+
+@pytest.mark.requirement("OWN-03", "OWN-08", "OWN-20", "S00-ASG-28")
+def test_a_requirement_cannot_be_deleted_by_lowering_the_minimum_count(tmp_path: Path) -> None:
+    """Deleting an atom and lowering ``minimum_requirement_count`` with it used to stay green."""
+    root = make_repo(tmp_path)
+    add_requirement(root, _requirement("FIX-ASG-05", "assignment", ["S03"], "Polish the widget."))
+    edit(root, gr.MATRIX_FILE, lambda d: d.update(minimum_requirement_count=8))
+    assert problems(root) == []
+
+    def delete(document: dict[str, Any]) -> None:
+        document["requirements"] = [e for e in document["requirements"] if e["id"] != "FIX-ASG-05"]
+        document["minimum_requirement_count"] = 7
+
+    edit(root, gr.MATRIX_FILE, delete)
+    deleted = (
+        f"requirement FIX-ASG-05: locked in {gr.LOCK_FILE} but missing from the requirements matrix - "
+        "requirements are never deleted"
+    )
+    assert problems(root) == [deleted]
+
+    # No command takes the id out of the lock again.
+    before = snapshot(root)
+    refused = gr.lock_requirements(root)
+    assert refused.problems == [f"{gr.LOCK_FILE}: refused, nothing was written", deleted]
+    reworded = gr.lock_requirements(root, reword=["FIX-ASG-05"], reason=REASON)
+    assert reworded.problems[0] == f"{gr.LOCK_FILE}: refused, nothing was written"
+    assert "lock --reword: 'FIX-ASG-05' is not in the requirements matrix" in reworded.problems
+    assert deleted in reworded.problems
+    assert snapshot(root) == before
+
+
+@pytest.mark.requirement("OWN-03", "OWN-08", "OWN-20", "S00-ASG-28")
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("text", "Build gadget."),  # every word still comes from the clause
+        ("text", "Build the gadget"),  # one character
+        ("section", "Another section"),
+        ("source", "FIXTURE_MASTER.pdf"),
+        ("source_clause", "FIX-ASG-02: Build the gadget."),  # another verbatim excerpt
+        ("source_clause", "SYNTHETIC FIXTURE clause of FIX-ASG-02:  Build the gadget."),  # one more space
+    ],
+)
+def test_a_reworded_requirement_is_noticed(tmp_path: Path, field: str, value: str) -> None:
+    root = make_repo(tmp_path)
+    if field == "source":  # the clause is verbatim in the other source as well: only the lock objects
+        extend_specification(root, "FIXTURE_MASTER.txt", requirement_of(root, "FIX-ASG-02")["source_clause"])
+    edit_requirement(root, "FIX-ASG-02", lambda entry: entry.update({field: value}))
+    assert problems(root) == [REWORDED_FIX_ASG_02]
+
+    before = snapshot(root)
+    refused = gr.lock_requirements(root)
+    assert refused.problems == [f"{gr.LOCK_FILE}: refused, nothing was written", REWORDED_FIX_ASG_02]
+    assert snapshot(root) == before
+
+
+@pytest.mark.requirement("OWN-08", "S00-ASG-28")
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"notes": "SYNTHETIC FIXTURE: an interpretation added by the coordinator."},
+        {"kind": "system"},
+        {"sessions": ["S03"]},
+        {"status": "in_progress"},
+    ],
+    ids=["notes", "kind", "sessions", "status"],
+)
+def test_fields_that_are_not_locked_can_change(tmp_path: Path, changes: dict[str, Any]) -> None:
+    root = make_repo(tmp_path, blocker_status="RESOLVED")
+    locked = (root / gr.LOCK_FILE).read_bytes()
+    edit_requirement(root, "FIX-ASG-02", lambda entry: entry.update(changes))
+    assert problems(root) == []
+    report = gr.lock_requirements(root)
+    assert report.problems == []
+    assert (root / gr.LOCK_FILE).read_bytes() == locked
+
+
+@pytest.mark.requirement("OWN-03", "OWN-08", "S00-ASG-28")
+def test_a_new_requirement_must_be_locked(tmp_path: Path) -> None:
+    root = make_repo(tmp_path)
+    new = unlocked_requirement(root)
+    assert problems(root) == [
+        f"requirement FIX-ASG-05: not in {gr.LOCK_FILE} (a new requirement is locked before it is used) - "
+        "run: python -m tools.gie_registers lock"
+    ]
+    locked_before = lock_document(root)
+    before = snapshot(root)
+    report = gr.lock_requirements(root)
+    assert report.problems == []
+    assert report.messages == [f"{gr.LOCK_FILE}: written - 1 requirement(s) added, 0 reworded, 8 locked"]
+    assert changed_files(before, snapshot(root)) == {gr.LOCK_FILE}
+    assert lock_document(root) == {
+        **locked_before,
+        "atoms": {**locked_before["atoms"], "FIX-ASG-05": expected_atom_hash(new)},
+    }, "the id is added and nothing else changes"
+    assert problems(root) == []
+
+
+@pytest.mark.requirement("OWN-03", "OWN-08", "S00-ASG-28")
+def test_lock_reword_records_a_deliberate_correction(tmp_path: Path) -> None:
+    root = make_repo(tmp_path)
+    original = lock_document(root)
+    edit_requirement(root, "FIX-ASG-02", lambda entry: entry.update(text="Build gadget."))
+    edit_requirement(root, "FIX-ASG-04", lambda entry: entry.update(section="Later atoms"))
+    before = snapshot(root)
+    report = gr.lock_requirements(
+        root, reword=["FIX-ASG-04", "FIX-ASG-02"], reason="  SYNTHETIC FIXTURE: the owner\n corrected it. "
+    )
+    assert report.problems == []
+    assert report.messages[0] == f"{gr.LOCK_FILE}: written - 0 requirement(s) added, 2 reworded, 7 locked"
+    assert changed_files(before, snapshot(root)) == {gr.LOCK_FILE}
+
+    corrected = lock_document(root)
+    new_02 = expected_atom_hash(requirement_of(root, "FIX-ASG-02"))
+    new_04 = expected_atom_hash(requirement_of(root, "FIX-ASG-04"))
+    assert new_02 != original["atoms"]["FIX-ASG-02"]
+    assert corrected["changes"] == [
+        {
+            "id": "FIX-ASG-04",
+            "old": original["atoms"]["FIX-ASG-04"],
+            "new": new_04,
+            "reason": "SYNTHETIC FIXTURE: the owner corrected it.",
+        },
+        {
+            "id": "FIX-ASG-02",
+            "old": original["atoms"]["FIX-ASG-02"],
+            "new": new_02,
+            "reason": "SYNTHETIC FIXTURE: the owner corrected it.",
+        },
+    ]
+    assert corrected["atoms"] == {**original["atoms"], "FIX-ASG-02": new_02, "FIX-ASG-04": new_04}
+    assert corrected["description"] == original["description"]
+    raw = (root / gr.LOCK_FILE).read_bytes()
+    assert raw == (json.dumps(corrected, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    assert problems(root) == []
+
+    # 'changes' is append-only: a second correction of the same id keeps the first entries.
+    edit_requirement(root, "FIX-ASG-02", lambda entry: entry.update(text="Build the gadget."))
+    assert problems(root) == [REWORDED_FIX_ASG_02]
+    assert gr.lock_requirements(root, reword=["FIX-ASG-02"], reason=REASON).problems == []
+    latest = lock_document(root)
+    assert latest["changes"][:2] == corrected["changes"]
+    assert latest["changes"][2:] == [
+        {"id": "FIX-ASG-02", "old": new_02, "new": original["atoms"]["FIX-ASG-02"], "reason": REASON}
+    ]
+    assert latest["atoms"] == {**original["atoms"], "FIX-ASG-04": new_04}
+    assert problems(root) == []
+
+
+@pytest.mark.requirement("OWN-03", "OWN-08", "S00-ASG-28")
+def test_lock_reword_also_locks_new_requirements(tmp_path: Path) -> None:
+    root = make_repo(tmp_path)
+    edit_requirement(root, "FIX-ASG-02", lambda entry: entry.update(text="Build gadget."))
+    new = unlocked_requirement(root)
+    report = gr.lock_requirements(root, reword=["FIX-ASG-02"], reason=REASON)
+    assert report.problems == []
+    assert report.messages[0] == f"{gr.LOCK_FILE}: written - 1 requirement(s) added, 1 reworded, 8 locked"
+    document = lock_document(root)
+    assert document["atoms"]["FIX-ASG-05"] == expected_atom_hash(new)
+    assert [change["id"] for change in document["changes"]] == ["FIX-ASG-02"], "an added id has no history"
+    assert problems(root) == []
+
+
+@pytest.mark.requirement("OWN-03", "OWN-08", "OWN-20", "S00-ASG-28")
+@pytest.mark.parametrize(
+    ("reword", "reason", "expected"),
+    [
+        (["FIX-NOPE-01"], REASON, "lock --reword: 'FIX-NOPE-01' is not in the requirements matrix"),
+        (["FIX-ASG-01"], REASON, "lock --reword: FIX-ASG-01 has not changed since it was locked"),
+        (["FIX-ASG-05"], REASON, "lock --reword: FIX-ASG-05 is not locked yet"),
+        (["FIX-ASG-02"], REASON, "requirement FIX-ASG-04: text, source, section or source_clause changed"),
+        (["FIX-ASG-02", "FIX-ASG-04", "FIX-ASG-02"], REASON, "FIX-ASG-02 is named more than once"),
+        (["FIX-ASG-02", "FIX-ASG-04"], None, "lock --reword needs --reason TEXT"),
+        (["FIX-ASG-02", "FIX-ASG-04"], "", "lock --reword needs --reason TEXT"),
+        (["FIX-ASG-02", "FIX-ASG-04"], " \n\t", "lock --reword needs --reason TEXT"),
+        ([], REASON, "lock --reason is only used together with --reword"),
+    ],
+    ids=[
+        "unknown id",
+        "id that did not change",
+        "id that is not locked",
+        "another id changed too",
+        "id named twice",
+        "no reason",
+        "empty reason",
+        "blank reason",
+        "reason without ids",
+    ],
+)
+def test_lock_reword_refuses_and_writes_nothing(
+    tmp_path: Path, reword: list[str], reason: str | None, expected: str
+) -> None:
+    """FIX-ASG-02 and FIX-ASG-04 were reworded, FIX-ASG-05 is new: naming the two with a reason works."""
+    root = make_repo(tmp_path)
+    edit_requirement(root, "FIX-ASG-02", lambda entry: entry.update(text="Build gadget."))
+    edit_requirement(root, "FIX-ASG-04", lambda entry: entry.update(section="Later atoms"))
+    unlocked_requirement(root)
+    before = snapshot(root)
+    report = gr.lock_requirements(root, reword=reword, reason=reason)
+    assert report.problems[0] == f"{gr.LOCK_FILE}: refused, nothing was written"
+    assert sum(1 for problem in report.problems if expected in problem) == 1, report.problems
+    assert snapshot(root) == before
+
+    accepted = gr.lock_requirements(root, reword=["FIX-ASG-02", "FIX-ASG-04"], reason=REASON)
+    assert accepted.problems == []
+    assert problems(root) == []
+
+
+@pytest.mark.requirement("OWN-03", "OWN-08", "OWN-20", "S00-ASG-28")
+def test_lock_edited_by_hand_contradicts_its_history(tmp_path: Path) -> None:
+    root = make_repo(tmp_path)
+    reword_requirement(root, "FIX-ASG-02", text="Build gadget.")
+    assert problems(root) == [], "the state written by the tool is valid"
+
+    # A later rewording hidden by typing the new hash into the lock: the history gives it away.
+    edit_requirement(root, "FIX-ASG-02", lambda entry: entry.update(text="Build."))
+    document = lock_document(root)
+    document["atoms"]["FIX-ASG-02"] = expected_atom_hash(requirement_of(root, "FIX-ASG-02"))
+    write_lock(root, document)
+    problem = only_problem(root)
+    assert problem.startswith(f"{gr.LOCK_FILE}: the hash locked for FIX-ASG-02 is not the 'new' hash")
+    assert "the lock was edited by hand" in problem
+    assert "lock --reword FIX-ASG-02 --reason" in problem
+    before = snapshot(root)
+    refused = gr.lock_requirements(root)
+    assert refused.problems == [f"{gr.LOCK_FILE}: refused, nothing was written", problem]
+    assert snapshot(root) == before
+
+    # An id taken out of the lock by hand: its history entry still names it.
+    del document["atoms"]["FIX-ASG-02"]
+    write_lock(root, document)
+    found = problems(root)
+    assert any(
+        "changes[0] names FIX-ASG-02, which is not a locked id" in p and "never removed" in p for p in found
+    ), found
+    assert any(p.startswith(f"requirement FIX-ASG-02: not in {gr.LOCK_FILE}") for p in found), found
+    assert len(found) == 2, found
+
+
+@pytest.mark.requirement("OWN-08", "OWN-18", "S00-ASG-28")
+def test_apply_and_sync_evidence_never_touch_the_lock(tmp_path: Path) -> None:
+    root = make_repo(tmp_path, blocker_status="RESOLVED")
+    locked = (root / gr.LOCK_FILE).read_bytes()
+    patch = write_patch(
+        root, [{"ids": ["*"], "status": "in_progress", "notes": "SYNTHETIC FIXTURE: a note."}]
+    )
+    assert gr.apply_patch(root, patch).problems == []
+    evidence = write_evidence(root, widget_results("passed"))
+    assert gr.sync_evidence(root, evidence).problems == []
+    assert gr.sync_evidence(root, evidence, check=True).problems == []
+    assert gr.render(root).problems == []
+    assert (root / gr.LOCK_FILE).read_bytes() == locked
+
+    # Neither of them creates a lock that does not exist.
+    (root / gr.LOCK_FILE).unlink()
+    assert gr.sync_evidence(root, write_evidence(root, widget_results("passed", "passed"))).problems == []
+    assert not gr.apply_patch(root, write_patch(root, [{"ids": ["FIX-ASG-01"], "notes": ""}])).ok
+    assert not (root / gr.LOCK_FILE).exists()
+
+
+@pytest.mark.requirement("OWN-03", "OWN-08", "OWN-20", "S00-ASG-28")
+def test_lock_command_line(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root = make_repo(tmp_path)
+    arguments = ["--root", str(root)]
+    assert gr.main(["lock", *arguments]) == 0
+    assert f"{gr.LOCK_FILE}: unchanged (7 requirement(s) locked)" in capsys.readouterr().out
+
+    edit_requirement(root, "FIX-ASG-02", lambda entry: entry.update(text="Build gadget."))
+    assert gr.main(["validate", *arguments]) == 1
+    assert REWORDED_FIX_ASG_02 in capsys.readouterr().out
+    before = snapshot(root)
+    assert gr.main(["lock", *arguments]) == 1
+    output = capsys.readouterr().out
+    assert f"{gr.LOCK_FILE}: refused, nothing was written" in output
+    assert "2 problem(s)" in output
+    assert gr.main(["lock", "--reword", "FIX-ASG-01", "--reason", REASON, *arguments]) == 1
+    assert "FIX-ASG-01 has not changed since it was locked" in capsys.readouterr().out
+    assert snapshot(root) == before
+
+    assert gr.main(["lock", "--reword", "FIX-ASG-02", "--reason", REASON, *arguments]) == 0
+    output = capsys.readouterr().out
+    assert "0 requirement(s) added, 1 reworded, 7 locked" in output
+    assert f"reworded FIX-ASG-02: {REASON}" in output
+    assert lock_document(root)["changes"][0]["reason"] == REASON
+    assert gr.main(["validate", *arguments]) == 0
+    capsys.readouterr()
+
+    # Several ids before --reason, and the reason is mandatory (usage error, nothing written).
+    edit_requirement(root, "FIX-ASG-02", lambda entry: entry.update(text="Build the gadget."))
+    edit_requirement(root, "FIX-ASG-04", lambda entry: entry.update(text="Paint widget."))
+    before = snapshot(root)
+    for usage_error in (
+        ["lock", "--reword", "FIX-ASG-02", "FIX-ASG-04", *arguments],
+        ["lock", "--reword", "FIX-ASG-02", "FIX-ASG-04", "--reason", " ", *arguments],
+        ["lock", "--reason", REASON, *arguments],
+    ):
+        with pytest.raises(SystemExit) as raised:
+            gr.main(usage_error)
+        assert raised.value.code == 2
+        assert "--reason" in capsys.readouterr().err
+    assert snapshot(root) == before
+    assert gr.main(["lock", "--reword", "FIX-ASG-02", "FIX-ASG-04", "--reason", REASON, *arguments]) == 0
+    assert "2 reworded" in capsys.readouterr().out
+    assert [change["id"] for change in lock_document(root)["changes"]] == [
+        "FIX-ASG-02",
+        "FIX-ASG-02",
+        "FIX-ASG-04",
+    ]
+
+
+@pytest.mark.requirement("OWN-08", "OWN-18", "S00-ASG-28")
+def test_lock_and_sync_help_document_the_new_options(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as raised:
+        gr.main(["lock", "--help"])
+    assert raised.value.code == 0
+    output = capsys.readouterr().out
+    for word in ("--reword", "--reason", gr.LOCK_FILE, "append-only", "never", "source_clause"):
+        assert word in output
+    with pytest.raises(SystemExit) as raised:
+        gr.main(["sync-evidence", "--help"])
+    assert raised.value.code == 0
+    output = " ".join(capsys.readouterr().out.split())
+    for word in ("--check", "write nothing", "exit_status", "collection_errors"):
+        assert word in output
+
+
+@pytest.mark.requirement("OWN-08", "S00-ASG-28")
+@settings(
+    derandomize=True,
+    database=None,
+    deadline=None,
+    max_examples=80,
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+)
+@given(
+    damage=st.tuples(
+        st.integers(min_value=0, max_value=10_000),
+        st.sampled_from(["replace", "delete", "add"]),
+        st.sampled_from(JUNK_VALUES),
+        st.booleans(),
+    )
+)
+def test_damaged_lock_is_reported_never_a_crash(tmp_path: Path, damage: tuple[int, str, Any, bool]) -> None:
+    """Whatever the lock holds, every command answers with problems instead of a traceback.
+
+    What cannot be noticed from the files alone is a change of free text (description, reason) and
+    a history entry that was taken out; the locked hashes themselves never change unnoticed.
+    """
+    position, action, junk, reworded = damage
+    root = make_repo(tmp_path)
+    if reworded:
+        reword_requirement(root, "FIX-ASG-02", text="Build gadget.")
+    original = lock_document(root)
+    document = copy.deepcopy(original)
+    paths = _paths(document)
+    path = paths[position % len(paths)]
+    parent: Any = document
+    for key in path[:-1]:
+        parent = parent[key]
+    if action == "delete":
+        del parent[path[-1]]
+    elif action == "add" and isinstance(parent, dict):
+        parent[f"extra_{path[-1]}"] = copy.deepcopy(junk)
+    else:
+        parent[path[-1]] = copy.deepcopy(junk)
+    (root / gr.LOCK_FILE).write_bytes(json.dumps(document, default=str).encode("utf-8"))
+
+    report = gr.validate(root)
+    if report.ok:
+        assert document["atoms"] == original["atoms"], "a changed or removed hash is always reported"
+    patch = write_patch(root, [{"ids": ["FIX-ASG-04"], "notes": "SYNTHETIC FIXTURE: a note."}])
+    applied = gr.apply_patch(root, patch)
+    assert applied.ok is report.ok, "apply never produces a state that validate rejects"
+    if not report.structure_ok:
+        assert "not structurally valid" in gr.render(root, check=True).problems[0]
+
+    before = snapshot(root)
+    assert not gr.lock_requirements(root, reword=["FIX-ASG-02"], reason=REASON).ok, "nothing was reworded"
+    assert snapshot(root) == before
+    locked = gr.lock_requirements(root)
+    after = snapshot(root)
+    if not report.structure_ok:
+        assert not locked.ok
+    if not locked.ok:
+        assert after == before, "a refused command writes nothing"
+    else:
+        # The only damage 'lock' repairs is a missing id without history: it is locked again.
+        assert changed_files(before, after) <= {gr.LOCK_FILE}
+        assert lock_document(root)["atoms"] == original["atoms"]
+        assert problems(root) == []
+
+
+@pytest.mark.requirement("OWN-03", "OWN-08", "OWN-20", "S00-ASG-28")
+def test_lock_of_a_copy_of_the_real_matrix_is_complete(tmp_path: Path) -> None:
+    root = copy_real_registers(tmp_path)
+    requirements = load(root, gr.MATRIX_FILE)["requirements"]
+    document = lock_document(root)
+    assert document["atoms"] == {entry["id"]: expected_atom_hash(entry) for entry in requirements}
+    assert len(document["atoms"]) >= load(root, gr.MATRIX_FILE)["minimum_requirement_count"]
+    assert [p for p in problems(root) if not _tolerated_on_the_real_repository(p)] == []
+    assert gr.lock_requirements(root).messages == [
+        f"{gr.LOCK_FILE}: unchanged ({len(requirements)} requirement(s) locked)"
+    ]
+
+
+@pytest.mark.requirement("OWN-03", "OWN-08", "OWN-20", "S00-ASG-28")
+def test_rewording_or_deleting_a_real_requirement_is_noticed_on_a_copy(tmp_path: Path) -> None:
+    root = copy_real_registers(tmp_path)
+    assert [p for p in problems(root) if not _tolerated_on_the_real_repository(p)] == []
+    original = requirement_of(root, "OWN-20")["text"]
+    assert original == "Do not omit requirements."
+    # Every word of the new text comes from the source clause, so only the lock can object.
+    edit_requirement(root, "OWN-20", lambda entry: entry.update(text="Omit requirements."))
+    found = [p for p in problems(root) if not _tolerated_on_the_real_repository(p)]
+    assert len(found) == 1, found
+    assert found[0].startswith("requirement OWN-20: text, source, section or source_clause changed")
+    edit_requirement(root, "OWN-20", lambda entry: entry.update(text=original))
+    assert [p for p in problems(root) if not _tolerated_on_the_real_repository(p)] == []
+
+    def delete(document: dict[str, Any]) -> None:
+        document["requirements"] = [e for e in document["requirements"] if e["id"] != "OWN-20"]
+        document["minimum_requirement_count"] = len(document["requirements"])
+
+    edit(root, gr.MATRIX_FILE, delete)
+    assert (
+        f"requirement OWN-20: locked in {gr.LOCK_FILE} but missing from the requirements matrix - "
+        "requirements are never deleted"
+    ) in problems(root)
+
+
+# --------------------------------------------------------------------------- source clause is verbatim (R2)
+BRIEF_TEXT_FILE = f"{gr.EXTRACTED_DIR}/FIXTURE_BRIEF.txt"
+
+
+@pytest.mark.requirement("OWN-03", "OWN-20", "S00-ASG-28")
+@pytest.mark.parametrize(
+    "clause",
+    [
+        "SYNTHETIC FIXTURE clause of FIX-ASG-02: Build the gadget.",
+        "SYNTHETIC  FIXTURE clause\nof FIX-ASG-02:\tBuild\n\n   the gadget.  ",
+        "FIX-ASG-02: Build the gadget.",
+        "of FIX-ASG-02: Build the gadget. SYNTHETIC FIXTURE clause of FIX-ASG-03: Connect",
+        "SYNTHETIC FIXTURE clause ... Build the gadget.",
+        "FIX-ASG-01: Build the widget. ... FIX-ASG-02: Build the gadget. ... Paint the widget.",
+    ],
+    ids=[
+        "the paragraph",
+        "other whitespace",
+        "an excerpt",
+        "across two paragraphs",
+        "one omission",
+        "two omissions in the order of the source",
+    ],
+)
+def test_verbatim_source_clauses_are_accepted(tmp_path: Path, clause: str) -> None:
+    root = make_repo(tmp_path)
+    if clause != requirement_of(root, "FIX-ASG-02")["source_clause"]:  # the first case is the locked clause
+        reword_requirement(root, "FIX-ASG-02", source_clause=clause)
+    assert requirement_of(root, "FIX-ASG-02")["source_clause"] == clause
+    assert problems(root) == []
+
+
+@pytest.mark.requirement("OWN-03", "OWN-20", "S00-ASG-28")
+@pytest.mark.parametrize(
+    ("clause", "part", "detail"),
+    [
+        (
+            "SYNTHETIC FIXTURE clause of FIX-ASG-02: Build the gadgets.",
+            "SYNTHETIC FIXTURE clause of FIX-ASG-02: Build the gadgets.",
+            "does not occur in",
+        ),
+        (
+            "SYNTHETIC FIXTURE clause of FIX-ASG-02: build the gadget.",
+            "SYNTHETIC FIXTURE clause of FIX-ASG-02: build the gadget.",
+            "does not occur in",
+        ),
+        (
+            "SYNTHETIC FIXTURE clause of FIX-ASG-02 Build the gadget.",
+            "SYNTHETIC FIXTURE clause of FIX-ASG-02 Build the gadget.",
+            "does not occur in",
+        ),
+        (
+            "SYNTHETIC FIXTUREclause of FIX-ASG-02: Build the gadget.",
+            "SYNTHETIC FIXTUREclause of FIX-ASG-02: Build the gadget.",
+            "does not occur in",
+        ),
+        (
+            "SYNTHETIC FIXTURE clause of FIX-ASG-02: ... Build the gizmo and the gadget.",
+            "Build the gizmo and the gadget.",
+            "does not occur in",
+        ),
+        (
+            "Build the gadget. ... SYNTHETIC FIXTURE clause of FIX-ASG-01",
+            "SYNTHETIC FIXTURE clause of FIX-ASG-01",
+            "does not occur after the part before it (order of the source) in",
+        ),
+        (
+            "Build the gadget. ... Build the gadget.",
+            "Build the gadget.",
+            "does not occur after the part before",
+        ),
+        ("Build the gadget...", "Build the gadget...", "does not occur in"),
+        ("Build the gadget. ...  ... Paint the widget.", "... Paint the widget.", "does not occur in"),
+        ("... Build the gadget.", "... Build the gadget.", "does not occur in"),
+    ],
+    ids=[
+        "a letter added",
+        "another case",
+        "punctuation dropped",
+        "a space dropped",
+        "second part invented",
+        "parts in the wrong order",
+        "one occurrence used twice",
+        "three dots without spaces",
+        "two omission marks in a row",
+        "omission mark at the start",
+    ],
+)
+def test_source_clause_that_is_not_verbatim_is_a_problem(
+    tmp_path: Path, clause: str, part: str, detail: str
+) -> None:
+    root = make_repo(tmp_path)
+    reword_requirement(root, "FIX-ASG-02", source_clause=clause)
+    problem = only_problem(root)
+    assert problem.startswith("requirement FIX-ASG-02: source_clause is not verbatim: ")
+    assert f"the part {part!r} {detail}" in problem
+    assert problem.count(BRIEF_TEXT_FILE) == 1
+
+
+@pytest.mark.requirement("OWN-03", "OWN-20", "S00-ASG-28")
+def test_not_verbatim_problem_shows_the_first_60_characters_of_the_part(tmp_path: Path) -> None:
+    root = make_repo(tmp_path)
+    invented = "Build the gadget and then also build many more things that the owner never asked anybody for."
+    assert len(invented) > 60
+    reword_requirement(root, "FIX-ASG-02", source_clause=f"FIX-ASG-02: ... {invented}")
+    problem = only_problem(root)
+    assert f"the part {invented[:60]!r} does not occur in {BRIEF_TEXT_FILE}" in problem
+    assert invented[:61] not in problem
+
+
+@pytest.mark.requirement("OWN-03", "OWN-20", "S00-ASG-28")
+def test_source_clause_defect_and_source_text_file() -> None:
+    text = "alpha beta gamma delta"  # a source text with its whitespace already collapsed
+    assert gr.source_clause_defect("alpha beta", text) is None
+    assert gr.source_clause_defect(" alpha\n\tbeta ... delta ", text) is None
+    assert gr.source_clause_defect("alpha ... gamma ... delta", text) is None
+    assert gr.source_clause_defect("alpha beta gamma delta", text) is None
+    assert gr.source_clause_defect("alpha ... epsilon", text) == "the part 'epsilon' does not occur"
+    assert gr.source_clause_defect("alpha gamma", text) == "the part 'alpha gamma' does not occur"
+    wrong_order = gr.source_clause_defect("gamma ... alpha", text)
+    assert wrong_order == "the part 'alpha' does not occur after the part before it (order of the source)"
+    assert gr.source_clause_defect("gamma ... gamma", text) is not None, "one occurrence cannot serve twice"
+    assert gr.source_clause_defect("a ... a ... a", "a a a") is None
+    assert gr.source_clause_defect("a ... a ... a ... a", "a a a") is not None
+    assert gr.source_clause_defect("alpha...beta", text) is not None, (
+        "an omission mark has a space on both sides"
+    )
+    assert gr.CLAUSE_OMISSION == " ... "
+
+    assert gr.source_text_file("FIXTURE_BRIEF.pdf") == "specifications/extracted/FIXTURE_BRIEF.txt"
+    assert gr.source_text_file("specifications/source/DIRECTIVE.md") == "specifications/source/DIRECTIVE.md"
+    assert gr.source_text_file("notes.pdf.txt") == "notes.pdf.txt"
+
+
+#: SYNTHETIC FIXTURE directive in the layout of the owner's directive: a quoted Markdown block.
+DIRECTIVE_FILE = "specifications/source/FIXTURE_DIRECTIVE.md"
+DIRECTIVE = """\
+# Synthetic fixture directive (verbatim)
+
+SYNTHETIC FIXTURE: an invented message, quoted line by line.
+
+> Build the gadget before
+> the widget is painted.
+>
+> Never paint a gadget.
+>Build it > once.
+"""
+
+
+@pytest.mark.requirement("OWN-03", "OWN-20", "S00-ASG-28")
+@pytest.mark.parametrize(
+    "clause",
+    [
+        "Build the gadget before the widget is painted.",
+        "Build the gadget before the widget is painted. Never paint a gadget.",
+        "invented message, quoted line by line. Build the gadget",
+        "Never paint a gadget. Build it > once.",
+    ],
+    ids=[
+        "across a line break",
+        "across an empty quote line",
+        "from prose into the quote",
+        "marker inside a line",
+    ],
+)
+def test_markdown_source_is_compared_without_its_quote_markers(tmp_path: Path, clause: str) -> None:
+    root = make_repo(tmp_path)
+    _write(root / DIRECTIVE_FILE, DIRECTIVE)
+    reword_requirement(root, "FIX-ASG-02", source=DIRECTIVE_FILE, source_clause=clause)
+    assert problems(root) == []
+
+
+@pytest.mark.requirement("OWN-03", "OWN-20", "S00-ASG-28")
+@pytest.mark.parametrize(
+    "clause",
+    [
+        "Build the gadget before > the widget is painted.",  # the marker is not part of the owner's words
+        "Build the gadget before the widget is painted. > Never paint a gadget.",
+        "Never paint a gadget. Build it once.",  # a '>' inside a line is text
+        "Build the gadget after the widget is painted.",
+    ],
+)
+def test_markdown_source_clause_that_is_not_verbatim_is_a_problem(tmp_path: Path, clause: str) -> None:
+    root = make_repo(tmp_path)
+    _write(root / DIRECTIVE_FILE, DIRECTIVE)
+    reword_requirement(root, "FIX-ASG-02", source=DIRECTIVE_FILE, source_clause=clause)
+    problem = only_problem(root)
+    assert problem.startswith("requirement FIX-ASG-02: source_clause is not verbatim: ")
+    assert f"does not occur in {DIRECTIVE_FILE}" in problem
+
+
+@pytest.mark.requirement("OWN-03", "OWN-20", "S00-ASG-28")
+def test_quote_markers_are_only_dropped_from_markdown_sources(tmp_path: Path) -> None:
+    root = make_repo(tmp_path)
+    _write(root / "docs/fixture_note.txt", "SYNTHETIC FIXTURE.\n> Build the gadget\n> today.\n")
+    reword_requirement(
+        root, "FIX-ASG-02", source="docs/fixture_note.txt", source_clause="> Build the gadget > today."
+    )
+    assert problems(root) == []
+    reword_requirement(root, "FIX-ASG-02", source_clause="Build the gadget today.")
+    assert "source_clause is not verbatim" in only_problem(root)
+
+
+@pytest.mark.requirement("OWN-03", "OWN-20", "S00-ASG-28")
+@pytest.mark.parametrize(
+    ("source", "file", "reason"),
+    [
+        (
+            "specifications/source/NEVER_WRITTEN.md",
+            "specifications/source/NEVER_WRITTEN.md",
+            "does not exist",
+        ),
+        ("FIXTURE_OTHER.pdf", f"{gr.EXTRACTED_DIR}/FIXTURE_OTHER.txt", "does not exist"),
+        ("sub/FIXTURE_BRIEF.pdf", f"{gr.EXTRACTED_DIR}/sub/FIXTURE_BRIEF.txt", "does not exist"),
+        ("../FIXTURE_BRIEF.pdf", f"{gr.EXTRACTED_DIR}/../FIXTURE_BRIEF.txt", "is not a normalised"),
+        ("docs", "docs", "is not a file"),
+        ("/etc/hostname", "/etc/hostname", "is not a repository-relative path"),
+        ("../repo/docs/widget.md", "../repo/docs/widget.md", "is not a normalised repository-relative path"),
+        ("docs\\widget.md", "docs\\widget.md", "is not a repository-relative path"),
+        ("docs/binary.md", "docs/binary.md", "is not UTF-8 text"),
+        ("the owner's e-mail", "the owner's e-mail", "does not exist"),
+    ],
+)
+def test_source_text_that_cannot_be_used_is_a_problem(
+    tmp_path: Path, source: str, file: str, reason: str
+) -> None:
+    root = make_repo(tmp_path)
+    (root / "docs/binary.md").write_bytes(b"\xff\xfe\x00Build the gadget.")
+    reword_requirement(root, "FIX-ASG-02", source=source)
+    problem = only_problem(root)
+    assert problem.startswith(f"source text {file!r} {reason}")
+    assert problem.endswith(": the source_clause of 1 requirement(s) (FIX-ASG-02) cannot be compared with it")
+
+
+@pytest.mark.requirement("OWN-03", "OWN-20", "S00-ASG-28")
+def test_unusable_source_text_is_reported_once_for_all_its_requirements(tmp_path: Path) -> None:
+    root = make_repo(tmp_path)
+    ids = ["FIX-ASG-01", "FIX-ASG-02", "FIX-ASG-03", "FIX-ACC-01", "FIX-ACC-02", "FIX-ASG-04"]
+
+    def move(document: dict[str, Any]) -> None:
+        for entry in document["requirements"]:
+            if entry["id"] in ids:
+                entry["source"] = "FIXTURE_LOST.pdf"
+
+    edit(root, gr.MATRIX_FILE, move)
+    assert gr.lock_requirements(root, reword=ids, reason=REASON).problems == []
+    assert problems(root) == [
+        f"source text '{gr.EXTRACTED_DIR}/FIXTURE_LOST.txt' does not exist: the source_clause of 6 "
+        "requirement(s) (FIX-ASG-01, FIX-ASG-02, FIX-ASG-03, FIX-ACC-01, FIX-ACC-02 and 1 more) cannot be "
+        "compared with it"
+    ]
+
+
+@pytest.mark.requirement("OWN-03", "OWN-20", "S00-ASG-28")
+def test_every_real_source_clause_is_verbatim_in_its_source() -> None:
+    """Independent of the tool: the comparison documented in the conventions of the matrix."""
+    document = yaml.safe_load((REPO_ROOT / gr.MATRIX_FILE).read_text(encoding="utf-8"))
+
+    def unquoted(line: str) -> str:
+        return line[1:].removeprefix(" ") if line.startswith(">") else line
+
+    texts: dict[str, str] = {}
+    offenders: list[tuple[str, str]] = []
+    for entry in document["requirements"]:
+        source: str = entry["source"]
+        if source not in texts:
+            if source.endswith(".pdf"):
+                raw = (REPO_ROOT / gr.EXTRACTED_DIR / (source[:-4] + ".txt")).read_text(encoding="utf-8")
+            else:
+                assert source.endswith(".md"), source
+                raw = (REPO_ROOT / source).read_text(encoding="utf-8")
+                raw = "\n".join(unquoted(line) for line in raw.split("\n"))
+            texts[source] = " ".join(raw.split())
+        position = 0
+        for part in " ".join(entry["source_clause"].split()).split(" ... "):
+            found = texts[source].find(part, position) if part else -1
+            if found < 0:
+                offenders.append((entry["id"], part[:60]))
+                break
+            position = found + len(part)
+    assert offenders == []
+    reported = [p for p in gr.validate(REPO_ROOT).problems if "verbatim" in p or p.startswith("source text")]
+    assert reported == [], "the tool agrees"
+
+
+# --------------------------------------------------------------------------- verified needs more (R3)
+@pytest.mark.requirement("OWN-21", "M-AUTH-08", "OWN-18", "S00-ASG-28")
+def test_acceptance_requirement_is_verified_only_while_its_acceptance_test_passes(tmp_path: Path) -> None:
+    root = make_repo(tmp_path)
+    start(root)
+    assert gr.sync_evidence(root, write_evidence(root, widget_results("passed", "passed"))).problems == []
+    verified = contribution("S00", "verified", ["evidence/pytest.json"])
+    edit_requirement(
+        root, "FIX-ACC-01", lambda entry: entry.update(status="verified", contributions=[verified])
+    )
+    assert acceptance_of(root, "AT-FIX-ACC-01")["status"] == "passing"
+    assert problems(root) == []
+
+    # A later run in which one of the marked tests fails: the requirement is no longer verified.
+    assert gr.sync_evidence(root, write_evidence(root, widget_results("passed", "failed"))).problems == []
+    assert problems(root) == [
+        "requirement FIX-ACC-01: status 'verified' needs the acceptance test AT-FIX-ACC-01 with status "
+        "'passing' (its status is 'failing')"
+    ]
+
+
+@pytest.mark.requirement("OWN-21", "M-AUTH-08", "OWN-18", "S00-ASG-28")
+def test_acceptance_requirement_cannot_be_verified_by_an_evidence_path_alone(tmp_path: Path) -> None:
+    root = make_repo(tmp_path)
+    start(root)
+    verified = contribution("S00", "verified", ["docs/widget.md"])
+    edit_requirement(
+        root, "FIX-ACC-01", lambda entry: entry.update(status="verified", contributions=[verified])
+    )
+    assert problems(root) == [
+        "requirement FIX-ACC-01: status 'verified' needs the acceptance test AT-FIX-ACC-01 with status "
+        "'passing' (its status is 'planned')"
+    ]
+    # The same through 'apply': refused, nothing written.
+    edit_requirement(root, "FIX-ACC-01", lambda entry: entry.update(status="not_started", contributions=[]))
+    before = snapshot(root)
+    refused = gr.apply_patch(
+        root, write_patch(root, [{"ids": ["FIX-ACC-01"], "status": "verified", "contribution": verified}])
+    )
+    assert any("needs the acceptance test AT-FIX-ACC-01 with status 'passing'" in p for p in refused.problems)
+    assert snapshot(root) == before
+
+    # Without a register entry there is nothing that could be passing.
+    edit_requirement(
+        root, "FIX-ACC-01", lambda entry: entry.update(status="verified", contributions=[verified])
+    )
+    edit(root, gr.ACCEPTANCE_FILE, lambda d: _drop(d["acceptance_tests"], 0))
+    found = problems(root)
+    assert any(
+        p.startswith("requirement FIX-ACC-01: status 'verified' needs the acceptance test AT-FIX-ACC-01")
+        and f"({gr.ACCEPTANCE_FILE} has no usable entry for it)" in p
+        for p in found
+    ), found
+    assert any("kind 'acceptance' but" in p for p in found), found
+    assert len(found) == 2, found
+
+
+@pytest.mark.requirement("OWN-21", "M-AUTH-08", "S00-ASG-28")
+def test_verified_needs_a_verified_contribution_of_every_session(tmp_path: Path) -> None:
+    root = make_repo(tmp_path, blocker_status="RESOLVED")
+    first = contribution("S00", "verified", ["docs/widget.md"])
+    missing_s01 = (
+        "requirement FIX-ASG-02: status 'verified' needs a contribution with status 'verified' of every "
+        "session in 'sessions'; there is none of S01"
+    )
+    edit_requirement(root, "FIX-ASG-02", lambda entry: entry.update(status="verified", contributions=[first]))
+    assert problems(root) == [missing_s01]
+    for status in ("implemented", "partial", "in_progress", "not_applicable"):
+        second = contribution("S01", status, ["docs/widget.md"])
+        edit_requirement(
+            root, "FIX-ASG-02", lambda entry, second=second: entry.update(contributions=[first, second])
+        )
+        assert problems(root) == [missing_s01], status
+    second = contribution("S01", "verified", ["docs/widget.md"])
+    edit_requirement(root, "FIX-ASG-02", lambda entry: entry.update(contributions=[first, second]))
+    assert problems(root) == []
+
+    # A verified contribution of a session that the requirement does not list does not count.
+    edit_requirement(root, "FIX-ASG-04", lambda entry: entry.update(status="verified", contributions=[first]))
+    assert "there is none of S02" in only_problem(root)
+    edit_requirement(root, "FIX-ASG-04", lambda entry: entry.update(status="partial"))
+    assert problems(root) == [], "only 'verified' asks for every session"
+
+    # A requirement of all sessions is verified by all sessions, not by the first one.
+    edit_requirement(root, "FIX-GOV-01", lambda entry: entry.update(status="verified", contributions=[first]))
+    assert f"there is none of {', '.join(ALL_SESSIONS[1:])}" in only_problem(root)
+
+
+@pytest.mark.requirement("OWN-21", "M-AUTH-08", "S00-ASG-28")
+def test_verified_contribution_needs_an_evidence_path(tmp_path: Path) -> None:
+    root = make_repo(tmp_path, blocker_status="RESOLVED")
+    # The requirement itself is only partial: the rule is about the contribution.
+    edit_requirement(
+        root,
+        "FIX-ASG-02",
+        lambda entry: entry.update(status="partial", contributions=[contribution("S00", "verified", [])]),
+    )
+    assert problems(root) == [
+        "requirement FIX-ASG-02: contributions[0] (S00) has status 'verified' but lists no evidence path"
+    ]
+    edit_requirement(
+        root,
+        "FIX-ASG-02",
+        lambda entry: entry.update(contributions=[contribution("S00", "verified", ["docs/widget.md"])]),
+    )
+    assert problems(root) == []
+    for status in ("implemented", "partial", "in_progress", "not_started"):
+        edit_requirement(
+            root,
+            "FIX-ASG-02",
+            lambda entry, status=status: entry.update(contributions=[contribution("S00", status, [])]),
+        )
+        assert problems(root) == [], f"a contribution with status '{status}' may come without evidence"
+
+
+@pytest.mark.requirement("OWN-21", "M-AUTH-08", "OWN-17", "S00-ASG-28")
+@pytest.mark.parametrize("status", ["approved", "conditional", "rejected"])
+def test_review_status_needs_an_approved_decision(tmp_path: Path, status: str) -> None:
+    root = make_repo(tmp_path)
+    edit_requirement(root, "FIX-ASG-04", lambda entry: entry.update(review_status=status))
+    assert problems(root) == [
+        f"requirement FIX-ASG-04: review_status '{status}' needs a 'review_reference': the id D-nnn of the "
+        f"decision in {gr.DECISION_LOG_FILE} with '- Status: APPROVED' that records the review"
+    ]
+    edit_requirement(root, "FIX-ASG-04", lambda entry: entry.update(review_reference="D-002"))
+    assert problems(root) == [
+        "requirement FIX-ASG-04: review_reference D-002 must be a decision with '- Status: APPROVED' in "
+        f"{gr.DECISION_LOG_FILE}; it has '- Status: PROPOSED'"
+    ]
+    edit_requirement(root, "FIX-ASG-04", lambda entry: entry.update(review_reference="D-099"))
+    assert problems(root) == [
+        f"requirement FIX-ASG-04: references D-099, which is not a heading in {gr.DECISION_LOG_FILE}"
+    ]
+    edit_requirement(root, "FIX-ASG-04", lambda entry: entry.update(review_reference="D-001"))
+    assert problems(root) == []
+
+
+@pytest.mark.requirement("OWN-21", "OWN-17", "S00-ASG-28")
+def test_review_reference_stops_counting_when_the_decision_is_no_longer_approved(tmp_path: Path) -> None:
+    root = make_repo(tmp_path)
+    edit_requirement(
+        root, "FIX-ASG-04", lambda entry: entry.update(review_status="approved", review_reference="D-001")
+    )
+    assert problems(root) == []
+    path = root / gr.DECISION_LOG_FILE
+    approved = path.read_text(encoding="utf-8")
+    for line, shown in (
+        ("- Status: SUPERSEDED", "it has '- Status: SUPERSEDED'"),
+        ("- Status: REJECTED", "it has '- Status: REJECTED'"),
+    ):
+        _write(path, approved.replace("- Status: APPROVED", line, 1))
+        problem = only_problem(root)
+        assert problem.startswith("requirement FIX-ASG-04: review_reference D-001 must be a decision with")
+        assert shown in problem
+    # A decision whose status line is not valid is not an approved decision either.
+    _write(path, approved.replace("- Status: APPROVED", "- Status: APPROVED by nobody", 1))
+    found = problems(root)
+    assert any("review_reference D-001 must be a decision with '- Status: APPROVED'" in p for p in found)
+    assert any(p.startswith(f"{gr.DECISION_LOG_FILE}:") and "D-001" in p for p in found)
+    assert len(found) == 2, found
+    path.unlink()
+    assert f"references D-001 but {gr.DECISION_LOG_FILE} does not exist" in only_problem(root)
+
+
+@pytest.mark.requirement("OWN-21", "OWN-17", "S00-ASG-28")
+def test_review_reference_is_checked_while_the_review_is_still_unverified(tmp_path: Path) -> None:
+    root = make_repo(tmp_path)
+    edit_requirement(root, "FIX-ASG-04", lambda entry: entry.update(review_reference="D-001"))
+    assert problems(root) == [], "an approved decision may be recorded before the status is set"
+    edit_requirement(root, "FIX-ASG-04", lambda entry: entry.update(review_reference="D-002"))
+    assert "review_reference D-002 must be a decision with '- Status: APPROVED'" in only_problem(root)
+
+
+@pytest.mark.requirement("OWN-08", "OWN-16", "OWN-21", "S00-ASG-28")
+def test_review_reference_is_applied_and_rendered_only_where_present(tmp_path: Path) -> None:
+    root = make_repo(tmp_path, blocker_status="RESOLVED")
+    assert gr.render(root).problems == []
+    plain = snapshot(root)
+    patch = write_patch(
+        root,
+        [
+            {
+                "ids": ["FIX-ASG-02"],
+                "status": "in_progress",
+                "review_status": "approved",
+                "review_reference": "D-001",
+            }
+        ],
+    )
+    assert gr.apply_patch(root, patch).problems == []
+    entry = requirement_of(root, "FIX-ASG-02")
+    assert list(entry)[list(entry).index("review_status") + 1] == "review_reference"
+    matrix_text = (root / gr.MATRIX_FILE).read_text(encoding="utf-8")
+    assert "  review_status: approved\n  review_reference: D-001\n" in matrix_text
+    assert matrix_text.count("review_reference") == 1, "no other requirement gets the key"
+    assert problems(root) == []
+
+    assert gr.render(root).problems == []
+    rendered = snapshot(root)
+    rows = {
+        row[0]: row for row in _table_rows(rendered[gr.MATRIX_MD].decode("utf-8")) if row[0][:4] == "FIX-"
+    }
+    assert rows["FIX-ASG-02"][4] == "approved (D-001)"
+    plain_rows = {
+        row[0]: row for row in _table_rows(plain[gr.MATRIX_MD].decode("utf-8")) if row[0][:4] == "FIX-"
+    }
+    assert plain_rows["FIX-ASG-02"][4] == "unverified"
+    del rows["FIX-ASG-02"], plain_rows["FIX-ASG-02"]
+    assert rows == plain_rows, "entries without a review reference are rendered as before"
+    assert all(row[4] == "unverified" for row in rows.values())
+    status_text = rendered[gr.STATUS_MD].decode("utf-8")
+    assert "- **FIX-ASG-02** (S00, S01; review: approved (D-001)) - Build the gadget." in status_text
+    assert rendered[gr.ACCEPTANCE_MD] == plain[gr.ACCEPTANCE_MD]
+
+    # The reference can be replaced by a later patch; the key stays where it is.
+    edit_requirement(root, "FIX-ASG-02", lambda entry: entry.update(review_status="unverified"))
+    again = write_patch(root, [{"ids": ["FIX-ASG-02"], "review_reference": "D-001", "notes": "SYNTHETIC."}])
+    assert gr.apply_patch(root, again).problems == []
+    assert list(requirement_of(root, "FIX-ASG-02")) == list(entry)
+
+
+# --------------------------------------------------------------------------- bound to its evidence (R4)
+HAND_EDIT = "the register was edited by hand or the evidence file changed"
+
+
+def supplier_result(outcome: str) -> dict[str, Any]:
+    return result_record("tests/test_supplier.py::test_handshake", outcome, acceptance=("FIX-ACC-02",))
+
+
+@pytest.mark.requirement("OWN-18", "OWN-21", "S12-ASG-07")
+@pytest.mark.parametrize(
+    ("status", "counts", "recorded", "derived"),
+    [
+        # The run failed, the register was typed to a consistent 'passing': only the file gives it away.
+        (
+            "passing",
+            (2, 0, 0),
+            "status 'passing' with 2 test(s) (2 passed, 0 failed, 0 skipped)",
+            "status 'failing' with 2 test(s) (1 passed, 1 failed, 0 skipped)",
+        ),
+        (
+            "failing",
+            (1, 1, 1),
+            "status 'failing' with 3 test(s) (1 passed, 1 failed, 1 skipped)",
+            "status 'failing' with 2 test(s) (1 passed, 1 failed, 0 skipped)",
+        ),
+        (
+            "failing",
+            (0, 2, 0),
+            "status 'failing' with 2 test(s) (0 passed, 2 failed, 0 skipped)",
+            "status 'failing' with 2 test(s) (1 passed, 1 failed, 0 skipped)",
+        ),
+    ],
+    ids=["status and counts", "one more test", "same total, other counts"],
+)
+def test_register_typed_by_hand_differs_from_its_evidence_file(
+    tmp_path: Path, status: str, counts: tuple[int, int, int], recorded: str, derived: str
+) -> None:
+    root = make_repo(tmp_path)
+    assert gr.sync_evidence(root, write_evidence(root, widget_results("passed", "failed"))).problems == []
+    assert acceptance_of(root, "AT-FIX-ACC-01")["status"] == "failing"
+    assert problems(root) == [], "what sync-evidence wrote agrees with the file"
+    edit_acceptance(
+        root, "AT-FIX-ACC-01", lambda entry: entry.update(status=status, evidence=_evidence(*counts))
+    )
+    assert problems(root) == [
+        f"acceptance test AT-FIX-ACC-01: the register records {recorded}, but evidence/pytest.json gives "
+        f"{derived} - {HAND_EDIT} (run sync-evidence)"
+    ]
+    # sync-evidence is the repair.
+    assert gr.sync_evidence(root, root / "evidence/pytest.json").problems == []
+    assert problems(root) == []
+
+
+@pytest.mark.requirement("OWN-18", "OWN-21", "S12-ASG-07")
+def test_status_alone_typed_by_hand_differs_from_its_evidence_file(tmp_path: Path) -> None:
+    root = make_repo(tmp_path)
+    assert gr.sync_evidence(root, write_evidence(root, widget_results("passed", "passed"))).problems == []
+    # A pessimistic lie is a lie as well: the counts say passing.
+    edit_acceptance(root, "AT-FIX-ACC-01", lambda entry: entry.update(status="failing"))
+    problem = only_problem(root)
+    assert "records status 'failing' with 2 test(s) (2 passed, 0 failed, 0 skipped)" in problem
+    assert "gives status 'passing' with 2 test(s) (2 passed, 0 failed, 0 skipped)" in problem
+    assert HAND_EDIT in problem
+    # 'planned' with recorded evidence is not what the file gives either.
+    edit_acceptance(root, "AT-FIX-ACC-01", lambda entry: entry.update(status="planned"))
+    assert "records status 'planned'" in only_problem(root)
+
+
+@pytest.mark.requirement("OWN-18", "OWN-21", "S12-ASG-07")
+def test_evidence_file_that_changed_after_the_sync_is_noticed(tmp_path: Path) -> None:
+    root = make_repo(tmp_path)
+    assert gr.sync_evidence(root, write_evidence(root, widget_results("passed", "passed"))).problems == []
+    assert problems(root) == []
+    write_evidence(root, widget_results("passed", "failed"))  # the same path, another run
+    problem = only_problem(root)
+    assert problem.startswith("acceptance test AT-FIX-ACC-01: the register records status 'passing'")
+    assert (
+        "evidence/pytest.json gives status 'failing' with 2 test(s) (1 passed, 1 failed, 0 skipped)"
+        in problem
+    )
+    assert HAND_EDIT in problem
+
+    # The marked tests are gone from the file: the recorded evidence has nothing behind it.
+    write_evidence(
+        root, [result_record("tests/test_other.py::test_x", "passed", requirements=("FIX-ASG-01",))]
+    )
+    assert problems(root) == [
+        "acceptance test AT-FIX-ACC-01: records evidence from evidence/pytest.json, but that file holds no "
+        f'test marked acceptance("FIX-ACC-01") - {HAND_EDIT} (run sync-evidence)'
+    ]
+
+
+@pytest.mark.requirement("OWN-18", "OWN-21", "S12-ASG-07")
+@pytest.mark.parametrize(
+    ("damage", "file", "reason"),
+    [
+        ("delete", "evidence/pytest.json", "does not exist"),
+        ("directory", "evidence/pytest.json", "is not a file"),
+        ("garbage", "evidence/pytest.json", "cannot be used (not a JSON evidence file"),
+        (
+            "other schema",
+            "evidence/pytest.json",
+            "cannot be used (not a pytest evidence file with schema_version 1)",
+        ),
+        (
+            "interrupted run",
+            "evidence/pytest.json",
+            "is not usable evidence ('exit_status' is 2, not 0 or 1: the test run did not complete)",
+        ),
+        (
+            "collection error",
+            "evidence/pytest.json",
+            "is not usable evidence (1 module(s) could not be collected; a test that could not be imported "
+            "is not a pass: tests/test_gadget.py)",
+        ),
+        ("outside", "../repo/evidence/pytest.json", "is not a normalised repository-relative path"),
+        ("absolute", "/tmp/evidence/pytest.json", "is not a repository-relative path with forward slashes"),
+        ("elsewhere", "evidence/never_written.json", "does not exist"),
+    ],
+)
+def test_recorded_evidence_file_must_be_usable_evidence_inside_the_repository(
+    tmp_path: Path, damage: str, file: str, reason: str
+) -> None:
+    root = make_repo(tmp_path)
+    tests = widget_results("passed", "passed")
+    path = write_evidence(root, tests)
+    assert gr.sync_evidence(root, path).problems == []
+    assert problems(root) == []
+    if damage in ("delete", "directory"):
+        path.unlink()
+    if damage == "directory":
+        path.mkdir()
+    elif damage == "garbage":
+        _write(path, "not json at all")
+    elif damage == "other schema":
+        write_evidence(root, tests, schema_version=2)
+    elif damage == "interrupted run":
+        write_evidence(root, tests, exit_status=2)
+    elif damage == "collection error":
+        write_evidence(root, tests, exit_status=1, collection_errors=["tests/test_gadget.py"])
+    else:
+        edit_acceptance(root, "AT-FIX-ACC-01", lambda entry: entry["evidence"].update(file=file))
+    problem = only_problem(root)
+    assert problem.startswith(f"evidence file {file!r} {reason}")
+    assert problem.endswith(f": it is recorded as the evidence of AT-FIX-ACC-01 - {HAND_EDIT}")
+
+
+@pytest.mark.requirement("OWN-18", "OWN-21", "S12-ASG-07")
+def test_unusable_evidence_file_is_reported_once_for_all_its_entries(tmp_path: Path) -> None:
+    root = make_repo(tmp_path)
+    edit_acceptance(root, "AT-FIX-ACC-02", lambda entry: entry.update(blockers=["B-001"]))
+    path = write_evidence(root, [*widget_results("passed"), supplier_result("skipped")])
+    assert gr.sync_evidence(root, path).problems == []
+    assert acceptance_of(root, "AT-FIX-ACC-02")["status"] == "blocked"
+    assert "evidence" in acceptance_of(root, "AT-FIX-ACC-02")
+    assert problems(root) == []
+    path.unlink()
+    assert problems(root) == [
+        "evidence file 'evidence/pytest.json' does not exist: it is recorded as the evidence of "
+        f"AT-FIX-ACC-01, AT-FIX-ACC-02 - {HAND_EDIT}"
+    ]
+
+
+@pytest.mark.requirement("OWN-18", "OWN-21")
+@pytest.mark.parametrize("status", ["failing", "partial"])
+def test_status_derived_from_tests_needs_recorded_evidence(tmp_path: Path, status: str) -> None:
+    root = make_repo(tmp_path)
+    edit_acceptance(root, "AT-FIX-ACC-01", lambda entry: entry.update(status=status, blockers=["B-001"]))
+    assert problems(root) == [
+        f"acceptance test AT-FIX-ACC-01: status '{status}' without recorded evidence (run sync-evidence)"
+    ]
+    recorded = evidence_for(root, *COUNTS_OF_STATUS[status])
+    edit_acceptance(root, "AT-FIX-ACC-01", lambda entry: entry.update(evidence=recorded))
+    assert problems(root) == []
+
+
+@pytest.mark.requirement("OWN-18")
+def test_blocked_by_its_blockers_alone_needs_no_evidence(tmp_path: Path) -> None:
+    root = make_repo(tmp_path)
+    edit_acceptance(root, "AT-FIX-ACC-01", lambda entry: entry.update(status="blocked", blockers=["B-001"]))
+    assert problems(root) == []
+    # That is also what sync-evidence derives when no test is marked for the entry.
+    other = [result_record("tests/test_other.py::test_x", "passed", requirements=("FIX-ASG-01",))]
+    report = gr.sync_evidence(root, write_evidence(root, other))
+    assert report.problems == []
+    assert report.messages == [f"{gr.ACCEPTANCE_FILE}: unchanged"]
+    # A planned entry may name its blockers before any test exists (as the real register does).
+    edit_acceptance(root, "AT-FIX-ACC-01", lambda entry: entry.update(status="planned"))
+    assert problems(root) == []
+
+
+EVIDENCE_REFUSALS: list[tuple[str, dict[str, Any], str]] = [
+    ("interrupted", {"exit_status": 2}, "'exit_status' is 2, not 0 or 1: the test run did not complete"),
+    ("internal error", {"exit_status": 3}, "'exit_status' is 3, not 0 or 1: the test run did not complete"),
+    ("usage error", {"exit_status": 4}, "'exit_status' is 4, not 0 or 1: the test run did not complete"),
+    ("no tests", {"exit_status": 5}, "'exit_status' is 5, not 0 or 1: the test run did not complete"),
+    ("negative", {"exit_status": -1}, "'exit_status' is -1, not 0 or 1: the test run did not complete"),
+    (
+        "no exit status",
+        {"exit_status": _DROP},
+        "'exit_status' is missing, not 0 or 1: the test run did not complete",
+    ),
+    (
+        "null exit status",
+        {"exit_status": None},
+        "'exit_status' is missing, not 0 or 1: the test run did not complete",
+    ),
+    (
+        "one collection error",
+        {"exit_status": 1, "collection_errors": ["tests/test_gadget.py"]},
+        "1 module(s) could not be collected; a test that could not be imported is not a pass: "
+        "tests/test_gadget.py",
+    ),
+    (
+        "two collection errors",
+        {"collection_errors": ["tests/test_gadget.py", "tests/sub/test_gizmo.py"]},
+        "2 module(s) could not be collected; a test that could not be imported is not a pass: "
+        "tests/test_gadget.py, tests/sub/test_gizmo.py",
+    ),
+    ("exit status as text", {"exit_status": "0"}, "'exit_status' must be an integer"),
+    ("exit status true", {"exit_status": True}, "'exit_status' must be an integer"),
+    ("exit status as float", {"exit_status": 0.0}, "'exit_status' must be an integer"),
+    (
+        "collection errors as text",
+        {"collection_errors": "tests/test_gadget.py"},
+        "'collection_errors' must be a list of node ids",
+    ),
+    (
+        "collection errors of numbers",
+        {"collection_errors": [1]},
+        "'collection_errors' must be a list of node ids",
+    ),
+    (
+        "collection errors null",
+        {"collection_errors": None},
+        "'collection_errors' must be a list of node ids",
+    ),
+    ("commit is a number", {"commit": 7}, "'commit' must be a string or null"),
+    ("commit is a list", {"commit": ["0123abc"]}, "'commit' must be a string or null"),
+    ("tree_dirty as text", {"tree_dirty": "no"}, "'tree_dirty' must be true, false or null"),
+    ("tree_dirty as number", {"tree_dirty": 0}, "'tree_dirty' must be true, false or null"),
+]
+
+
+@pytest.mark.requirement("OWN-18", "OWN-21", "M-AUTH-16", "S12-ASG-07")
+@pytest.mark.parametrize(
+    ("changes", "expected"),
+    [pytest.param(changes, expected, id=name) for name, changes, expected in EVIDENCE_REFUSALS],
+)
+@pytest.mark.parametrize("check", [False, True], ids=["sync", "check"])
+def test_evidence_of_a_run_that_did_not_complete_is_refused(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], changes: dict[str, Any], expected: str, check: bool
+) -> None:
+    root = make_repo(tmp_path)
+    # A recorded result: a sync that wrongly went on would overwrite it with three passed tests.
+    assert gr.sync_evidence(root, write_evidence(root, widget_results("passed"))).problems == []
+    refused = write_evidence(
+        root, widget_results("passed", "passed", "passed"), "evidence/refused.json", **changes
+    )
+    before = snapshot(root)
+    report = gr.sync_evidence(root, refused, check=check)
+    assert len(report.problems) == 1, report.problems
+    assert report.problems[0].endswith(f"refused.json: {expected} (nothing was written)")
+    command = ["sync-evidence", "--evidence", str(refused), "--root", str(root)]
+    assert gr.main([*command, "--check"] if check else command) == 1
+    assert "1 problem(s)" in capsys.readouterr().out
+    assert snapshot(root) == before
+
+
+@pytest.mark.requirement("OWN-18", "M-AUTH-16", "S12-ASG-07")
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {},
+        {"exit_status": 1},
+        {"collection_errors": _DROP, "commit": _DROP, "tree_dirty": _DROP},
+        {"commit": "0123456789abcdef0123456789abcdef01234567", "tree_dirty": False},
+        {"commit": "0123456789abcdef0123456789abcdef01234567", "tree_dirty": True},
+        {"commit": None, "tree_dirty": None},
+    ],
+    ids=[
+        "all passed",
+        "some other test failed",
+        "file without the new keys",
+        "clean tree",
+        "dirty tree",
+        "no git",
+    ],
+)
+def test_evidence_of_a_completed_run_is_accepted(tmp_path: Path, changes: dict[str, Any]) -> None:
+    root = make_repo(tmp_path)
+    evidence = write_evidence(root, widget_results("passed", "passed"), **changes)
+    report = gr.sync_evidence(root, evidence)
+    assert report.problems == []
+    assert acceptance_of(root, "AT-FIX-ACC-01")["status"] == "passing"
+    assert problems(root) == []
+    assert gr.sync_evidence(root, evidence, check=True).problems == []
+    loaded = gr.load_evidence(evidence)
+    assert loaded.refusal() is None
+    assert loaded.exit_status == changes.get("exit_status", 0)
+    assert loaded.collection_errors == ()
+    assert loaded.commit == (None if changes.get("commit") in (None, _DROP) else changes["commit"])
+    assert loaded.tree_dirty is (
+        None if changes.get("tree_dirty") in (None, _DROP) else changes["tree_dirty"]
+    )
+
+
+def _two_module_repo(tmp_path: Path) -> Path:
+    """FIX-ACC-01 lists two existing test modules that both carry its acceptance marker."""
+    root = make_repo(tmp_path)
+    _write(root / "tests/test_gadget.py", WIDGET_TESTS)
+    edit_acceptance(
+        root,
+        "AT-FIX-ACC-01",
+        lambda entry: entry.update(test_modules=["tests/test_widget.py", "tests/test_gadget.py"]),
+    )
+    return root
+
+
+@pytest.mark.requirement("OWN-18", "OWN-21", "S12-ASG-07")
+def test_sync_reports_a_listed_module_that_contributed_no_test(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = _two_module_repo(tmp_path)
+    evidence = write_evidence(root, widget_results("passed", "passed"))
+    report = gr.sync_evidence(root, evidence)
+    assert report.problems == [
+        "AT-FIX-ACC-01: listed test module contributed no test: tests/test_gadget.py (no test marked "
+        'acceptance("FIX-ACC-01") from it was executed; a module that lost its tests must not go unnoticed)'
+    ]
+    entry = acceptance_of(root, "AT-FIX-ACC-01")
+    assert entry["status"] == "passing", "the status is still written: the counts are facts"
+    assert entry["evidence"] == _evidence(2, 0, 0)
+    # The register is up to date now, the module is still silent: exit status 1 again, also with --check.
+    command = ["sync-evidence", "--evidence", str(evidence), "--root", str(root)]
+    for arguments in (command, [*command, "--check"]):
+        assert gr.main(arguments) == 1
+        output = capsys.readouterr().out
+        assert "listed test module contributed no test: tests/test_gadget.py" in output
+        assert "1 problem(s)" in output
+
+
+@pytest.mark.requirement("OWN-18", "OWN-21", "S12-ASG-07")
+@pytest.mark.parametrize("outcome", ["passed", "failed", "error", "xfailed", "xpassed", "skipped"])
+def test_a_listed_module_with_an_executed_or_skipped_test_contributes(tmp_path: Path, outcome: str) -> None:
+    root = _two_module_repo(tmp_path)
+    edit_acceptance(root, "AT-FIX-ACC-01", lambda entry: entry.update(blockers=["B-001"]))
+    gadget = result_record("tests/test_gadget.py::test_gadget", outcome, acceptance=("FIX-ACC-01",))
+    report = gr.sync_evidence(root, write_evidence(root, [*widget_results("passed"), gadget]))
+    assert report.problems == []
+    assert acceptance_of(root, "AT-FIX-ACC-01")["evidence"]["tests"] == 2
+
+
+@pytest.mark.requirement("OWN-18", "OWN-21", "S12-ASG-07")
+@pytest.mark.parametrize(
+    ("gadget", "expected"),
+    [
+        (result_record("tests/test_gadget.py::test_gadget", "passed", requirements=("FIX-ACC-01",)), 1),
+        (result_record("tests/test_gadget.py::test_gadget", "passed", acceptance=("FIX-ACC-02",)), 1),
+        (result_record("tests/test_gadgets.py::test_gadget", "passed", acceptance=("FIX-ACC-01",)), 1),
+        (result_record("tests/test_gadget.py::test_gadget", "not_run", acceptance=("FIX-ACC-01",)), 2),
+    ],
+    ids=["requirement marker only", "marker of another entry", "another module", "collected but not run"],
+)
+def test_a_listed_module_without_an_executed_marked_test_does_not_contribute(
+    tmp_path: Path, gadget: dict[str, Any], expected: int
+) -> None:
+    root = _two_module_repo(tmp_path)
+    for entry_id in ("AT-FIX-ACC-01", "AT-FIX-ACC-02"):
+        edit_acceptance(root, entry_id, lambda entry: entry.update(blockers=["B-001"]))
+    report = gr.sync_evidence(root, write_evidence(root, [*widget_results("passed"), gadget]))
+    silent = [p for p in report.problems if "listed test module contributed no test" in p]
+    assert silent == [p for p in report.problems if p.startswith("AT-FIX-ACC-01: listed test module")]
+    assert len(silent) == 1, report.problems
+    assert "tests/test_gadget.py (" in silent[0]
+    assert len(report.problems) == expected, report.problems
+
+
+@pytest.mark.requirement("OWN-18", "S12-ASG-07")
+def test_sync_check_passes_when_the_register_holds_what_the_evidence_gives(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = make_repo(tmp_path)
+    edit_acceptance(root, "AT-FIX-ACC-02", lambda entry: entry.update(blockers=["B-001"]))
+    tests = [*widget_results("passed", "passed"), supplier_result("skipped")]
+    assert gr.sync_evidence(root, write_evidence(root, tests)).problems == []
+    before = snapshot(root)
+
+    # Fresh evidence of the same results, written outside the repository as CI does.
+    fresh = tmp_path / "ci" / "fresh.json"
+    _write(fresh, json.dumps(evidence_payload(tests)))
+    report = gr.sync_evidence(root, fresh, check=True)
+    assert report.problems == []
+    assert report.messages == [f"{gr.ACCEPTANCE_FILE}: equals what sync-evidence would write for {fresh}"]
+    assert gr.main(["sync-evidence", "--evidence", str(fresh), "--check", "--root", str(root)]) == 0
+    assert "equals what sync-evidence would write" in capsys.readouterr().out
+    assert acceptance_of(root, "AT-FIX-ACC-01")["evidence"]["file"] == "evidence/pytest.json"
+    assert snapshot(root) == before, "--check writes nothing"
+
+    # Only --check accepts a file outside the repository: the register could not record its path.
+    outside = gr.sync_evidence(root, fresh)
+    assert len(outside.problems) == 1
+    assert "must be inside the repository" in outside.problems[0]
+    assert snapshot(root) == before
+
+
+@pytest.mark.requirement("OWN-18", "OWN-21", "S12-ASG-07")
+def test_sync_check_reports_every_differing_entry_and_writes_nothing(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = make_repo(tmp_path)
+    edit_acceptance(root, "AT-FIX-ACC-02", lambda entry: entry.update(blockers=["B-001"]))
+    assert gr.sync_evidence(root, write_evidence(root, widget_results("passed", "passed"))).problems == []
+    assert acceptance_of(root, "AT-FIX-ACC-02")["status"] == "blocked"
+    before = snapshot(root)
+
+    fresh = tmp_path / "ci" / "fresh.json"
+    _write(
+        fresh, json.dumps(evidence_payload([*widget_results("passed", "failed"), supplier_result("skipped")]))
+    )
+    report = gr.sync_evidence(root, fresh, check=True)
+    assert report.problems == [
+        f"{gr.ACCEPTANCE_FILE}: 2 entries differ from what sync-evidence would write for {fresh} "
+        "(nothing was written)",
+        "AT-FIX-ACC-01: the register records status 'passing' with 2 test(s) (2 passed, 0 failed, 0 skipped)"
+        f", but {fresh} gives status 'failing' with 2 test(s) (1 passed, 1 failed, 0 skipped)",
+        "AT-FIX-ACC-02: the register records status 'blocked' without recorded evidence, "
+        f"but {fresh} gives status 'blocked' with 1 test(s) (0 passed, 0 failed, 1 skipped)",
+    ]
+    assert report.messages == [], "nothing was done"
+    assert gr.main(["sync-evidence", "--evidence", str(fresh), "--check", "--root", str(root)]) == 1
+    assert "3 problem(s)" in capsys.readouterr().out
+    assert snapshot(root) == before
+
+
+@pytest.mark.requirement("OWN-18", "OWN-21", "S12-ASG-07")
+@pytest.mark.parametrize(
+    ("outcomes", "difference"),
+    [
+        (
+            ["passed", "passed", "passed"],
+            "gives status 'passing' with 3 test(s) (3 passed, 0 failed, 0 skipped)",
+        ),
+        (["passed", "skipped"], "gives status 'partial' with 2 test(s) (1 passed, 0 failed, 1 skipped)"),
+        (["passed", "xfailed"], "gives status 'failing' with 2 test(s) (1 passed, 1 failed, 0 skipped)"),
+        ([], "gives status 'planned' without recorded evidence"),
+    ],
+    ids=["one more test", "a test is skipped now", "an expected failure", "the marked tests are gone"],
+)
+def test_sync_check_compares_status_and_counts(tmp_path: Path, outcomes: list[str], difference: str) -> None:
+    root = make_repo(tmp_path)
+    assert gr.sync_evidence(root, write_evidence(root, widget_results("passed", "passed"))).problems == []
+    before = snapshot(root)
+    fresh = tmp_path / "fresh.json"
+    _write(fresh, json.dumps(evidence_payload(widget_results(*outcomes))))
+    report = gr.sync_evidence(root, fresh, check=True)
+    differing = [p for p in report.problems if p.startswith("AT-FIX-ACC-01: the register records")]
+    assert len(differing) == 1, report.problems
+    assert "records status 'passing' with 2 test(s) (2 passed, 0 failed, 0 skipped)" in differing[0]
+    assert difference in differing[0]
+    assert "1 entry differs" in report.problems[0]
+    assert snapshot(root) == before
+
+
+@pytest.mark.requirement("OWN-18", "S12-ASG-07")
+def test_sync_check_on_a_register_that_was_never_synced(tmp_path: Path) -> None:
+    root = make_repo(tmp_path)
+    before = snapshot(root)
+    fresh = tmp_path / "fresh.json"
+    _write(fresh, json.dumps(evidence_payload(widget_results("passed"))))
+    report = gr.sync_evidence(root, fresh, check=True)
+    assert report.problems[1:] == [
+        "AT-FIX-ACC-01: the register records status 'planned' without recorded evidence, "
+        f"but {fresh} gives status 'passing' with 1 test(s) (1 passed, 0 failed, 0 skipped)"
+    ]
+    assert snapshot(root) == before
+    # No marked test at all: the planned register already holds what the evidence gives.
+    _write(fresh, json.dumps(evidence_payload([])))
+    assert gr.sync_evidence(root, fresh, check=True).problems == []
+
+
+@pytest.mark.requirement("OWN-18", "S12-ASG-07")
+def test_sync_check_ignores_only_the_recorded_path(tmp_path: Path) -> None:
+    root = make_repo(tmp_path)
+    tests = widget_results("passed", "passed")
+    assert gr.sync_evidence(root, write_evidence(root, tests)).problems == []
+    other = write_evidence(root, tests, "reviews/other_run.json")
+    before = snapshot(root)
+    assert gr.sync_evidence(root, other, check=True).problems == []
+    assert snapshot(root) == before
+    assert acceptance_of(root, "AT-FIX-ACC-01")["evidence"]["file"] == "evidence/pytest.json"
+    # A real sync from the other file records the other path.
+    assert gr.sync_evidence(root, other).problems == []
+    assert acceptance_of(root, "AT-FIX-ACC-01")["evidence"]["file"] == "reviews/other_run.json"
+
+
+@pytest.mark.requirement("OWN-18", "OWN-21", "S12-ASG-07")
+def test_sync_check_reports_what_sync_evidence_would_report(tmp_path: Path) -> None:
+    """Equal counts are not enough: a test that did not run is reported by --check as well."""
+    root = make_repo(tmp_path)
+    edit_acceptance(root, "AT-FIX-ACC-01", lambda entry: entry.update(blockers=["B-001"]))
+    assert gr.sync_evidence(root, write_evidence(root, widget_results("passed", "skipped"))).problems == []
+    before = snapshot(root)
+    fresh = tmp_path / "fresh.json"
+    _write(fresh, json.dumps(evidence_payload(widget_results("passed", "not_run"))))
+    report = gr.sync_evidence(root, fresh, check=True)
+    assert report.problems == [
+        "AT-FIX-ACC-01: 1 marked test(s) did not run; the evidence is incomplete (they are counted as "
+        "skipped, never as passed)"
+    ]
+    unknown = [
+        *widget_results("passed", "skipped"),
+        result_record("t.py::test_a", "passed", acceptance=("X-ACC-09",)),
+    ]
+    _write(fresh, json.dumps(evidence_payload(unknown)))
+    report = gr.sync_evidence(root, fresh, check=True)
+    assert len(report.problems) == 1
+    assert (
+        "acceptance id 'X-ACC-09' used in a test marker is not in the requirements matrix"
+        in report.problems[0]
+    )
+    assert snapshot(root) == before
+
+
+@pytest.mark.requirement("OWN-18", "S12-ASG-07")
+def test_sync_check_needs_structurally_valid_registers_and_readable_evidence(tmp_path: Path) -> None:
+    root = make_repo(tmp_path)
+    missing = gr.sync_evidence(root, tmp_path / "never_written.json", check=True)
+    assert len(missing.problems) == 1
+    assert "cannot read the evidence file" in missing.problems[0]
+    fresh = tmp_path / "fresh.json"
+    _write(fresh, json.dumps(evidence_payload(widget_results("passed"))))
+    edit(root, gr.ACCEPTANCE_FILE, lambda d: d.update(acceptance_tests={}))
+    before = snapshot(root)
+    report = gr.sync_evidence(root, fresh, check=True)
+    assert report.problems[0] == (
+        "cannot check the evidence: the registers are not structurally valid (nothing was written)"
+    )
+    assert snapshot(root) == before
+
+
+@pytest.mark.requirement("OWN-08", "OWN-18", "OWN-21", "S00-ASG-28")
+def test_module_documentation_states_the_rules_and_their_limit() -> None:
+    documentation = " ".join((gr.__doc__ or "").split())
+    for phrase in (
+        gr.LOCK_FILE,
+        "lock [--reword ID [ID ...] --reason TEXT]",
+        "sync-evidence --evidence FILE [--check]",
+        "never reworded unnoticed",
+        "is verbatim",
+        "``review_reference``",
+        "``- Status: APPROVED``",
+        "*every* session",
+        "bound to its evidence file",
+        "``collection_errors``",
+        "contributed no executed test",
+        # R4 (e): the limit of what can be checked.
+        "Out of scope, because it cannot be detected statically",
+        "whose body can never fail",
+    ):
+        assert phrase in documentation, phrase

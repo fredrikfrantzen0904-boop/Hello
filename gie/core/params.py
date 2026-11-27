@@ -83,10 +83,9 @@ class ResearchParameters:
 
     def __init__(self, parameters: dict[str, ResearchParameter], approval_status: str) -> None:
         frozen = MappingProxyType(dict(parameters))
-        object.__setattr__(self, "_parameters", frozen)
-        object.__setattr__(self, "approval_status", approval_status)
-        object.__setattr__(
-            self,
+        super().__setattr__("_parameters", frozen)
+        super().__setattr__("approval_status", approval_status)
+        super().__setattr__(
             "parameters_sha256",
             content_hash(
                 {

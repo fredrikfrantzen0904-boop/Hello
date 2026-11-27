@@ -4,6 +4,7 @@
     "ContractRef": {
       "additionalProperties": false,
       "description": "A contract version a model was built against.",
+      "minProperties": 2,
       "properties": {
         "contract": {
           "description": "Contract name.",
@@ -29,6 +30,7 @@
     "NamedValue": {
       "additionalProperties": false,
       "description": "A named number (feature value or metric).  ``null`` means unknown, never 0.",
+      "minProperties": 2,
       "properties": {
         "name": {
           "description": "Name from the owning dictionary.",
@@ -59,6 +61,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "Registry entry of one model artifact and its promotion status.",
+  "minProperties": 38,
   "properties": {
     "approval_reference": {
       "anyOf": [
@@ -173,6 +176,22 @@
       ],
       "description": "Embargo applied after training_information_end_ns.",
       "x-gie-unit": "ns"
+    },
+    "evaluation_data_origin": {
+      "anyOf": [
+        {
+          "enum": [
+            "BROKER_FEED",
+            "HISTORICAL",
+            "SYNTHETIC_FIXTURE"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Least trustworthy origin of the data the evaluation report and the shadow runs rest on; mandatory for ACTIVE.  A version evaluated on SYNTHETIC_FIXTURE data is never validated."
     },
     "evaluation_report_sha256": {
       "anyOf": [
@@ -602,7 +621,7 @@
     },
     {
       "id": "MDL-7",
-      "rule": "ACTIVE cites its evidence: evaluation report with hash, promotion criteria hash and at least one shadow run"
+      "rule": "ACTIVE cites its evidence: evaluation report with hash, promotion criteria hash, the origin of the evaluation data and at least one shadow run"
     },
     {
       "id": "MDL-8",

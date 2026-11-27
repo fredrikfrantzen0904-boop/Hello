@@ -5,180 +5,6 @@
 > `specifications/SHARED_CONTRACTS.md`; the machine-readable form is in
 > `gie/contracts/schemas/`.
 
-## OrderEvent 1.0.0
-
-One lifecycle event of one order at the simulated venue. Stream: ``order_event/<producer>``; additionally ``order_seq`` numbers the events of one ``client_order_id`` from 0. Ordering time: ``receive_time_ns``. Every event repeats the order's current parameters, so the newest event of an order is a complete description of it. ``venue`` can only be SIMULATED: a live order cannot be represented in this contract version. A replacement is asked for with ``REPLACE_REQUESTED``, which carries the wanted values in the ``requested_*`` fields while the order's parameters stay as they are; ``REPLACED`` then shows the new parameters. The hard stop of a position is its own ``PROTECTIVE_STOP`` order, created by the simulated broker from ``attached_stop_price`` the instant the entry fills, so it can be tightened by a replacement and never widened.
-
-| field | type | required | unit | meaning |
-|---|---|---|---|---|
-| `producer` | producer | yes |  | Component instance that emitted the record; together with the contract name it names the stream. |
-| `seq` | sequence number | yes |  | Position of the record in its stream: starts at 0 and increases by exactly 1. |
-| `run_id` | id<run> | yes |  | Run that produced the record (see the RunManifest of that run). |
-| `mode` | enum RunMode | yes |  | REPLAY or PAPER.  No live mode exists (routing lock). |
-| `data_origin` | enum DataOrigin | yes |  | Least trustworthy origin among the market data the record is derived from. |
-| `order_event_id` | id<oev> | yes |  | identity.order_event_id(client_order_id, order_seq). |
-| `client_order_id` | id<ord> | yes |  | Idempotency key: identity.client_order_id(run_id, origin, intent, attempt), where origin is the risk decision for an entry and the position otherwise. |
-| `attempt` | attempt | yes |  | Always 0 for an entry (one approval, one order); numbers the orders of an intent for a position. |
-| `order_seq` | sequence number | yes |  | Index of the event within its order: 0, 1, 2, ... |
-| `event_type` | enum OrderEventType | yes |  | What happened. |
-| `order_state` | enum OrderState | yes |  | State of the order after this event. |
-| `event_time_ns` | instant (ns since epoch, UTC) | yes | ns since epoch, UTC | When it happened: at GIE for *_REQUESTED events, at the simulated broker otherwise. |
-| `receive_time_ns` | instant (ns since epoch, UTC) | yes | ns since epoch, UTC | When GIE observed the event (includes modelled latency). |
-| `venue` | enum ExecutionVenue | yes |  | Always SIMULATED (routing lock). |
-| `symbol` | const XAUUSD | yes |  | Always XAUUSD: GIE trades only gold. |
-| `side` | enum Side | yes |  | Direction of the order. |
-| `order_type` | enum OrderType | yes |  | MARKET, LIMIT or STOP. |
-| `intent` | enum OrderIntent | yes |  | Why the order exists. |
-| `volume_lots` | volume > 0 | yes | lots | Total order quantity. |
-| `limit_price` | price > 0 \| null | no | USD per troy ounce | Limit price; set if and only if order_type is LIMIT. |
-| `trigger_price` | price > 0 \| null | no | USD per troy ounce | Stop trigger price; set if and only if order_type is STOP. |
-| `reference_price` | price > 0 \| null | no | USD per troy ounce | Executable price when the order was requested (ask for BUY, bid for SELL); mandatory for entries. |
-| `attached_stop_price` | price > 0 \| null | no | USD per troy ounce | Protective stop the simulated broker holds for the resulting position; mandatory for entries. |
-| `attached_take_profit_price` | price > 0 \| null | no | USD per troy ounce | Take profit held by the simulated broker, if any. |
-| `valid_until_ns` | instant (ns since epoch, UTC) \| null | no | ns since epoch, UTC | Instant at which the order expires.  Mandatory for a resting entry; always null for a protective stop. |
-| `requested_volume_lots` | volume > 0 \| null | no | lots | Volume asked for by a pending replacement. |
-| `requested_limit_price` | price > 0 \| null | no | USD per troy ounce | Limit price asked for by a pending replacement. |
-| `requested_trigger_price` | price > 0 \| null | no | USD per troy ounce | Trigger price asked for by a pending replacement. |
-| `requested_valid_until_ns` | instant (ns since epoch, UTC) \| null | no | ns since epoch, UTC | Expiry asked for by a pending replacement. |
-| `plan_id` | id<pln> \| null | no |  | Plan revision behind an entry order. |
-| `risk_decision_id` | id<rsk> \| null | no |  | Risk approval behind an entry order. |
-| `alternative_group_id` | id<grp> \| null | no |  | Alternative group of the plan behind an entry order. |
-| `position_id` | id<pos> \| null | no |  | Position a protective or exit order belongs to. |
-| `broker_order_id` | id<brk> \| null | no |  | Identifier assigned by the simulated broker once it knows the order. |
-| `cumulative_filled_lots` | volume >= 0 | yes | lots | Quantity filled so far including this event. |
-| `last_fill_lots` | volume > 0 \| null | no | lots | Quantity filled by this event; set only on fill events. |
-| `last_fill_price` | price > 0 \| null | no | USD per troy ounce | Price of this fill; set only on fill events. |
-| `average_fill_price` | price > 0 \| null | no | USD per troy ounce | Volume-weighted average price of all fills so far. |
-| `last_fill_cost_amount` | money >= 0 \| null | no | account currency | Commission and fees charged for this fill. |
-| `reason_code` | reason code \| null | no |  | Reason of a rejection, cancellation, expiry or reconciliation; on the request of an EXIT or protective order, the reason for it (e.g. RATCHET, TIME_EXIT, EMERGENCY). |
-
-Invariants (checked whenever a record is constructed or decoded):
-
-- **OEV-1** - order_event_id equals identity.order_event_id(client_order_id, order_seq)
-- **OEV-2** - order_seq is 0 if and only if event_type is SUBMIT_REQUESTED
-- **OEV-3** - order_state is a state that event_type can lead to (see ORDER_TRANSITIONS)
-- **OEV-4** - limit_price is set iff order_type is LIMIT; trigger_price is set iff order_type is STOP
-- **OEV-5** - an ENTRY order carries its plan, risk approval, alternative group, reference price and protective stop, and no position
-- **OEV-6** - a non-ENTRY order names the position it protects or closes and carries no plan, approval, alternative group or attached protection
-- **OEV-7** - client_order_id equals identity.client_order_id(run_id, origin, intent, attempt) with origin = risk_decision_id and attempt = 0 for ENTRY, origin = position_id otherwise
-- **OEV-8** - a PROTECTIVE_STOP is a STOP order and a TAKE_PROFIT is a LIMIT order
-- **OEV-9** - fill fields are consistent: last_fill_* only on fill events, 0 <= cumulative <= volume, average_fill_price iff cumulative > 0, order_state is FILLED iff cumulative = volume, PENDING_SUBMIT and WORKING have no fills, PARTIALLY_FILLED has some
-- **OEV-10** - reason_code is set on REJECTED, CANCEL_REJECTED, REPLACE_REJECTED and RECONCILED events
-- **OEV-11** - attached protection is on the correct side of the order price (limit, trigger, or the reference price of a market order) and of the average fill price: stop on the losing side, take profit on the winning side
-- **OEV-12** - event_time_ns <= receive_time_ns (the venue is simulated in-process, so there is no clock offset)
-- **OEV-13** - a LIMIT or STOP entry has valid_until_ns; a protective stop never has one; on SUBMIT_REQUESTED valid_until_ns is later than event_time_ns
-- **OEV-14** - requested_* values are present if and only if order_state is PENDING_REPLACE
-
-## Position 1.0.0
-
-State of one position, marked at the price at which it could be closed now. Stream: ``position/<producer>``; ``revision`` numbers the snapshots of one position from 0. Ordering time: ``decision_time_ns``. *Executable net P&L* is what closing now would really yield: the open volume marked at the exit-side quote (bid for BUY, ask for SELL) minus estimated exit costs, plus everything already realised net of costs. ``peak_net_pnl_amount`` is its high-water mark and drives the profit ratchet; ``trough_net_pnl_amount`` is its low-water mark (adverse excursion).
-
-| field | type | required | unit | meaning |
-|---|---|---|---|---|
-| `producer` | producer | yes |  | Component instance that emitted the record; together with the contract name it names the stream. |
-| `seq` | sequence number | yes |  | Position of the record in its stream: starts at 0 and increases by exactly 1. |
-| `run_id` | id<run> | yes |  | Run that produced the record (see the RunManifest of that run). |
-| `mode` | enum RunMode | yes |  | REPLAY or PAPER.  No live mode exists (routing lock). |
-| `data_origin` | enum DataOrigin | yes |  | Least trustworthy origin among the market data the record is derived from. |
-| `decision_time_ns` | instant (ns since epoch, UTC) | yes | ns since epoch, UTC | Clock reading at which the producer created the record. |
-| `as_of_time_ns` | instant (ns since epoch, UTC) | yes | ns since epoch, UTC | Market-data watermark: receive time of the newest market data the record depends on, directly or through its inputs. |
-| `position_id` | id<pos> | yes |  | identity.position_id(run_id, opening_client_order_id) for GIE positions; identity.external_position_id(account alias, ticket) for EXTERNAL ones. |
-| `revision` | revision | yes |  | Snapshot number of this position: 0, 1, 2, ... |
-| `owner` | enum PositionOwner | yes |  | GIE, or another system on the same account. |
-| `external_ref` | reference \| null | no |  | Broker ticket of an EXTERNAL position; null for GIE positions.  Never an account number. |
-| `symbol` | symbol | yes |  | XAUUSD for GIE positions; any instrument for EXTERNAL ones. |
-| `side` | enum Side | yes |  | BUY = long, SELL = short. |
-| `state` | enum PositionState | yes |  | OPEN or CLOSED. |
-| `volume_lots` | volume >= 0 | yes | lots | Open volume; 0 when closed. |
-| `initial_volume_lots` | volume > 0 | yes | lots | Volume at opening (for EXTERNAL positions: the largest volume observed so far). |
-| `average_entry_price` | price > 0 | yes | quote currency per unit | Volume-weighted entry price. |
-| `initial_stop_price` | price > 0 \| null | no | quote currency per unit | Hard stop at opening; mandatory for GIE positions. |
-| `stop_price` | price > 0 \| null | no | quote currency per unit | Current hard protective stop (trigger of the working PROTECTIVE_STOP order). |
-| `take_profit_price` | price > 0 \| null | no | quote currency per unit | Current broker-side take profit, if any. |
-| `mark_price` | price > 0 \| null | no | quote currency per unit | Exit-side quote used for the valuation: bid for BUY, ask for SELL. |
-| `initial_risk_amount` | money > 0 \| null | no | account currency | Amount risked at opening (1 R); mandatory for GIE positions. |
-| `realized_net_pnl_amount` | money | yes | account currency | Result already realised by partial or full closes, net of costs and swap. |
-| `unrealized_net_pnl_amount` | money | yes | account currency | Result of closing the open volume at mark_price, net of estimated exit costs; 0 when closed. |
-| `peak_net_pnl_amount` | money | yes | account currency | Highest executable net P&L (realized + unrealized) since opening. |
-| `peak_time_ns` | instant (ns since epoch, UTC) | yes | ns since epoch, UTC | Decision time of the snapshot at which the peak was reached. |
-| `trough_net_pnl_amount` | money | yes | account currency | Lowest executable net P&L (realized + unrealized) since opening. |
-| `costs_amount` | money >= 0 | yes | account currency | Commissions and fees charged so far (already inside realized). |
-| `swap_amount` | money | yes | account currency | Overnight financing charged (-) or credited (+) so far (already inside realized). |
-| `account_currency` | currency | yes |  | ISO 4217 account currency. |
-| `opened_time_ns` | instant (ns since epoch, UTC) | yes | ns since epoch, UTC | When the position was opened. |
-| `closed_time_ns` | instant (ns since epoch, UTC) \| null | no | ns since epoch, UTC | When the position was fully closed; null while open. |
-| `close_reason` | reason code \| null | no |  | Why the position closed (e.g. PROTECTIVE_STOP, TAKE_PROFIT, RATCHET, TIME_EXIT); set if and only if a GIE position is CLOSED. |
-| `plan_id` | id<pln> \| null | no |  | Plan revision that opened a GIE position. |
-| `opening_client_order_id` | id<ord> \| null | no |  | Entry order of a GIE position. |
-
-Invariants (checked whenever a record is constructed or decoded):
-
-- **CAUSAL-1** - as_of_time_ns <= decision_time_ns (a record cannot depend on data received after it was created)
-- **POS-1** - state is OPEN iff volume_lots > 0 iff closed_time_ns is null
-- **POS-2** - volume_lots <= initial_volume_lots (a GIE position is never increased: no averaging down; for EXTERNAL positions initial_volume_lots is the largest observed volume)
-- **POS-3** - a GIE position is XAUUSD, has plan, opening order, initial stop and initial risk, has position_id = identity.position_id(run_id, opening_client_order_id) and, while open, a stop and a mark price; an EXTERNAL position has external_ref and no plan or opening order
-- **POS-4** - for a GIE position the initial stop is on the losing side of the entry and the stop is never wider than the initial stop (BUY: initial < entry and stop >= initial; SELL mirrored)
-- **POS-5** - trough_net_pnl_amount <= realized + unrealized <= peak_net_pnl_amount
-- **POS-6** - a CLOSED position has unrealized_net_pnl_amount = 0
-- **POS-7** - opened_time_ns <= peak_time_ns <= decision_time_ns, and opened_time_ns <= closed_time_ns <= decision_time_ns when closed
-- **POS-8** - close_reason is null while OPEN and set for a CLOSED GIE position
-
-## RiskDecision 1.0.0
-
-Approval, reduction or rejection of a plan, with the size and risk granted. Stream: ``risk_decision/<producer>``. Ordering time: ``decision_time_ns``. * An approval is bound to exactly one plan revision - by ``plan_id`` and by ``plan_fingerprint``, the hash of the plan that was evaluated - reserves risk atomically (``reservation_id``) and expires at ``valid_until_ns``. It can be spent by exactly one entry order (the order's identity is derived from ``decision_id``). * All fractions are relative to ``reference_equity_amount``, the equity the account's daily limits are measured against (defined by the account rules, session 08). ``risk_frac`` is rounded **up**, so that ``risk_amount <= risk_frac * reference_equity_amount`` always holds and a limit checked on the fraction is never understated. * ``daily_pnl_frac`` is account-wide: it includes open positions and the positions of every other system on the account.
-
-| field | type | required | unit | meaning |
-|---|---|---|---|---|
-| `producer` | producer | yes |  | Component instance that emitted the record; together with the contract name it names the stream. |
-| `seq` | sequence number | yes |  | Position of the record in its stream: starts at 0 and increases by exactly 1. |
-| `run_id` | id<run> | yes |  | Run that produced the record (see the RunManifest of that run). |
-| `mode` | enum RunMode | yes |  | REPLAY or PAPER.  No live mode exists (routing lock). |
-| `data_origin` | enum DataOrigin | yes |  | Least trustworthy origin among the market data the record is derived from. |
-| `decision_time_ns` | instant (ns since epoch, UTC) | yes | ns since epoch, UTC | Clock reading at which the producer created the record. |
-| `as_of_time_ns` | instant (ns since epoch, UTC) | yes | ns since epoch, UTC | Market-data watermark: receive time of the newest market data the record depends on, directly or through its inputs. |
-| `decision_id` | id<rsk> | yes |  | identity.risk_decision_id(run_id, plan_id, attempt). |
-| `plan_id` | id<pln> | yes |  | Plan revision that was evaluated. |
-| `plan_fingerprint` | sha256 | yes |  | Fingerprint (gie.contracts.fingerprint) of the evaluated plan: binds the decision to its content. |
-| `alternative_group_id` | id<grp> | yes |  | Alternative group of the plan: at most one plan of a group is ever executed. |
-| `attempt` | attempt | yes |  | 0 for the first evaluation of the plan, +1 per re-evaluation. |
-| `outcome` | enum RiskOutcome | yes |  | Result of the evaluation. |
-| `reason_codes` | list[reason code] (unique, sorted ascending) | yes |  | Reasons for a reduction or rejection (rule identifiers of the risk engine). |
-| `volume_lots` | volume >= 0 | yes | lots | Granted volume; 0 when rejected. |
-| `risk_amount` | money >= 0 | yes | account currency | Worst-case loss at the hard stop for the granted volume including expected costs; 0 when rejected. |
-| `risk_frac` | fraction >= 0, <= 1 | yes | fraction | risk_amount as a fraction of reference_equity_amount, rounded up; 0 when rejected. |
-| `reference_equity_amount` | money > 0 | yes | account currency | Equity that the day's fractions refer to (per the account rules). |
-| `quality_validated` | bool | yes |  | True only when the size was adapted using quality from an owner-approved (ACTIVE) model version. |
-| `quality_model_version_id` | id<mdl> \| null | no |  | That model version; set if and only if quality_validated is true. |
-| `account_currency` | currency | yes |  | ISO 4217 account currency. |
-| `trading_day` | trading day | yes |  | Prague trading day of decision_time_ns. |
-| `daily_state` | enum DailyState | yes |  | Daily risk state at decision time. |
-| `daily_pnl_frac` | fraction | yes | fraction of reference equity | Account-wide net result of the trading day including open positions of all systems. |
-| `profit_floor_frac` | fraction \| null | no | fraction of reference equity | Protected, non-decreasing daily profit floor; set if and only if daily_state is PROFIT_PROTECTION. |
-| `reservation_id` | id<rsv> \| null | no |  | identity.reservation_id(decision_id) of the reserved risk; null when rejected. |
-| `valid_until_ns` | instant (ns since epoch, UTC) | yes | ns since epoch, UTC | Expiry instant of the approval and its reservation; not later than the plan's expiry. |
-| `equity_amount` | money \| null | no | account currency | Account equity at decision time. |
-| `open_risk_amount` | money >= 0 \| null | no | account currency | Aggregate risk of open positions before this decision. |
-| `pending_risk_amount` | money >= 0 \| null | no | account currency | Aggregate risk of pending orders and unexpired reservations before this decision. |
-| `margin_required_amount` | money >= 0 \| null | no | account currency | Margin required for the granted volume. |
-| `margin_free_amount` | money \| null | no | account currency | Free margin before this decision. |
-| `gap_stress_loss_amount` | money >= 0 \| null | no | account currency | Aggregate loss in the gap-stress scenario including this trade. |
-
-Invariants (checked whenever a record is constructed or decoded):
-
-- **CAUSAL-1** - as_of_time_ns <= decision_time_ns (a record cannot depend on data received after it was created)
-- **RSK-1** - decision_id equals identity.risk_decision_id(run_id, plan_id, attempt)
-- **RSK-2** - REJECTED grants nothing: volume_lots = 0, risk_amount = 0, risk_frac = 0, no reservation
-- **RSK-3** - an approval grants volume_lots > 0, risk_amount > 0 and risk_frac > 0 and carries reservation_id = identity.reservation_id(decision_id)
-- **RSK-4** - reason_codes is non-empty unless outcome is APPROVED
-- **RSK-5** - EMERGENCY_HALT never approves: outcome is REJECTED
-- **RSK-6** - profit_floor_frac is set if and only if daily_state is PROFIT_PROTECTION
-- **RSK-7** - at or below the profit floor no new risk is approved (G05: at exactly the floor no new risk)
-- **RSK-8** - above the profit floor an approval risks at most the surplus: risk_frac <= daily_pnl_frac - profit_floor_frac
-- **RSK-9** - risk_amount <= risk_frac * reference_equity_amount (the fraction is rounded up, never down)
-- **RSK-10** - an approval expires later than decision_time_ns
-- **RSK-11** - trading_day is the Europe/Prague calendar date of decision_time_ns
-- **RSK-12** - quality_model_version_id is set if and only if quality_validated is true
-
 ## ModelVersion 1.0.0
 
 Registry entry of one model artifact and its promotion status. Stream: ``model_version/<producer>`` (the model registry). Ordering time: ``status_time_ns``. Registry times are always readings of the system clock, never of a replay clock; a replay takes the models it uses from its run configuration, not from the registry status of the moment. The artifact is immutable: a status change is a new record with ``revision + 1`` and the same ``model_version_id``. Activation and rollback are owner decisions: the record must cite the decision-log entry and the evidence (evaluation report, shadow runs, promotion criteria) it rests on; the registry refuses a transition whose cited evidence does not exist.
@@ -214,6 +40,7 @@ Registry entry of one model artifact and its promotion status. Stream: ``model_v
 | `metrics` | list[NamedValue] (unique, sorted by name) | yes |  | Headline validation metrics (the full results are in the evaluation report). |
 | `evaluation_report_uri` | relative path \| null | no |  | Model card / shadow report this status rests on; mandatory for ACTIVE. |
 | `evaluation_report_sha256` | sha256 \| null | no |  | SHA-256 of that report; mandatory for ACTIVE. |
+| `evaluation_data_origin` | enum DataOrigin \| null | no |  | Least trustworthy origin of the data the evaluation report and the shadow runs rest on; mandatory for ACTIVE.  A version evaluated on SYNTHETIC_FIXTURE data is never validated. |
 | `promotion_criteria_sha256` | sha256 \| null | no |  | Hash of the promotion criteria the report was judged against; mandatory for ACTIVE. |
 | `shadow_run_ids` | list[id<run>] (unique, sorted ascending) | yes |  | Runs in which the version was shadow-validated; at least one for ACTIVE. |
 | `replaces_model_version_id` | id<mdl> \| null | no |  | On an ACTIVE entry: the version that was ACTIVE before it (null if none was). |
@@ -229,9 +56,255 @@ Invariants (checked whenever a record is constructed or decoded):
 - **MDL-4** - created_time_ns <= status_time_ns
 - **MDL-5** - the revision is consistent with the path to the status: RESEARCH is revision 0, SHADOW and REJECTED need revision >= 1, ACTIVE >= 2, RETIRED and ROLLED_BACK >= 3
 - **MDL-6** - status_reasons is non-empty for REJECTED, ROLLED_BACK and RETIRED
-- **MDL-7** - ACTIVE cites its evidence: evaluation report with hash, promotion criteria hash and at least one shadow run
+- **MDL-7** - ACTIVE cites its evidence: evaluation report with hash, promotion criteria hash, the origin of the evaluation data and at least one shadow run
 - **MDL-8** - replaces_model_version_id and rollback_of_model_version_id appear only on ACTIVE entries and never name the version itself
 - **MDL-9** - component_model_version_ids is non-empty if and only if kind is COMPOSITE, and never contains the version itself
+
+## Tick 1.0.0
+
+Raw bid/ask quote exactly as observed, plus ingest metadata. Stream: ``tick/<source>/<symbol>``. Ordering time: ``receive_time_ns``, which never decreases within a stream. ``seq`` is assigned once, when the tick is ingested into the tick store, in arrival order; it never restarts and replay preserves it. Ticks are never modified after ingest: problems are expressed as flags, and a backfill, re-import or re-flagging creates a new, versioned ``source``. Imported history without a recorded receive time carries ``receive_time_ns = max(receive time of the previous tick of the stream, event_time_ns + modelled feed delay)`` and the flag ``RECEIVE_TIME_MODELLED``.
+
+| field | type | required | unit | meaning |
+|---|---|---|---|---|
+| `symbol` | symbol | yes |  | Canonical GIE symbol (XAUUSD is the only tradable one). |
+| `source` | feed id | yes |  | Identifier of the feed (and dataset version) that delivered the quote. |
+| `origin` | enum DataOrigin | yes |  | Whether the quote is a real-time feed observation, imported history or a fixture. |
+| `seq` | sequence number | yes |  | Ingest sequence of the (source, symbol) stream: starts at 0 and increases by exactly 1. |
+| `event_time_ns` | instant (ns since epoch, UTC) | yes | ns since epoch, UTC | Timestamp given by the source, converted to UTC. |
+| `receive_time_ns` | instant (ns since epoch, UTC) | yes | ns since epoch, UTC | Local clock reading when GIE received the quote (the availability instant), or the modelled value for imported history. |
+| `bid` | price > 0 | yes | quote currency per unit (USD per troy ounce for XAUUSD) | Best bid. |
+| `ask` | price > 0 | yes | quote currency per unit (USD per troy ounce for XAUUSD) | Best ask. |
+| `bid_volume` | volume >= 0 \| null | no | lots | Size at the best bid; null when the feed does not provide it. |
+| `ask_volume` | volume >= 0 \| null | no | lots | Size at the best ask; null when the feed does not provide it. |
+| `flags` | list[enum TickFlag] (unique, sorted by value) | yes |  | Data-quality flags (empty when nothing is wrong). |
+
+Invariants (checked whenever a record is constructed or decoded):
+
+- **TICK-1** - the CROSSED flag is present if and only if ask < bid
+- **TICK-2** - the EVENT_AFTER_RECEIVE flag is present if and only if event_time_ns > receive_time_ns
+
+## OrderEvent 1.0.0
+
+One lifecycle event of one order at the simulated venue. Stream: ``order_event/<producer>``; additionally ``order_seq`` numbers the events of one ``client_order_id`` from 0. Ordering time: ``receive_time_ns``. Every event repeats the order's current parameters, so the newest event of an order is a complete description of it. ``venue`` can only be SIMULATED: a live order cannot be represented in this contract version. **Writers.** Order events are written by session 07 only: its execution engine issues the requests and its simulated broker the reports. The reflex engine never writes order events; it asks the execution engine through ``gie.contracts.interfaces.ProtectionPort``. **Replacement.** A replacement is asked for with ``REPLACE_REQUESTED``, which carries the wanted values in the ``requested_*`` fields while the order's parameters stay as they are; ``REPLACED`` then shows the new parameters. One replacement can be outstanding per order: a newer target waits for the outcome of the pending one (the engine keeps only the newest target), and protection that cannot wait is an ``EXIT``. **Protection.** The hard stop of a position is its own ``PROTECTIVE_STOP`` order. It is created by the simulated broker (``originator`` BROKER) from ``attached_stop_price`` at the first fill of the entry, so no position exists without a stop order; the same holds for an attached take profit. It can be tightened by a replacement and never widened, it never expires, and its volume follows the position. **Prices.** A LIMIT or STOP order is evaluated against the executable side of the quote: a SELL against the bid, a BUY against the ask. A report is never observed at the instant of the request it answers: the simulated broker delivers it at least one nanosecond later (modelled latency).
+
+| field | type | required | unit | meaning |
+|---|---|---|---|---|
+| `producer` | producer | yes |  | Component instance that emitted the record; together with the contract name it names the stream. |
+| `seq` | sequence number | yes |  | Position of the record in its stream: starts at 0 and increases by exactly 1. |
+| `run_id` | id<run> | yes |  | Run that produced the record (see the RunManifest of that run). |
+| `mode` | enum RunMode | yes |  | REPLAY or PAPER.  No live mode exists (routing lock). |
+| `data_origin` | enum DataOrigin | yes |  | Least trustworthy origin among the market data the record is derived from. |
+| `order_event_id` | id<oev> | yes |  | identity.order_event_id(client_order_id, order_seq). |
+| `client_order_id` | id<ord> | yes |  | Idempotency key: identity.client_order_id(run_id, origin, intent, attempt), where origin is the risk decision for an entry and the position otherwise. |
+| `originator` | enum OrderOriginator | yes |  | Who created the order: EXECUTION (GIE) or BROKER (attached protection, broker-side close). |
+| `attempt` | attempt | yes |  | Always 0 for an entry (one approval, one order); numbers the orders of an intent for a position. |
+| `order_seq` | sequence number | yes |  | Index of the event within its order: 0, 1, 2, ... |
+| `event_type` | enum OrderEventType | yes |  | What happened. |
+| `order_state` | enum OrderState | yes |  | State of the order after this event. |
+| `event_time_ns` | instant (ns since epoch, UTC) | yes | ns since epoch, UTC | When it happened: at GIE for *_REQUESTED events, at the simulated broker otherwise. |
+| `receive_time_ns` | instant (ns since epoch, UTC) | yes | ns since epoch, UTC | When GIE observed the event (includes modelled latency). |
+| `venue` | enum ExecutionVenue | yes |  | Always SIMULATED (routing lock). |
+| `symbol` | const XAUUSD | yes |  | Always XAUUSD: GIE trades only gold. |
+| `side` | enum Side | yes |  | Direction of the order. |
+| `order_type` | enum OrderType | yes |  | MARKET, LIMIT or STOP. |
+| `intent` | enum OrderIntent | yes |  | Why the order exists. |
+| `volume_lots` | volume > 0 | yes | lots | Total order quantity. |
+| `limit_price` | price > 0 \| null | no | USD per troy ounce | Limit price; set if and only if order_type is LIMIT. |
+| `trigger_price` | price > 0 \| null | no | USD per troy ounce | Stop trigger price; set if and only if order_type is STOP. |
+| `reference_price` | price > 0 \| null | no | USD per troy ounce | Executable price when the order was requested (ask for BUY, bid for SELL); mandatory for entries and for every MARKET order. |
+| `max_slippage` | price distance >= 0 \| null | no | USD per troy ounce | Entry only: largest adverse distance between the price asked for and a fill that the simulated broker may accept (copied from the plan); null = no limit was planned. |
+| `attached_stop_price` | price > 0 \| null | no | USD per troy ounce | Protective stop the simulated broker holds for the resulting position; mandatory for entries. |
+| `attached_take_profit_price` | price > 0 \| null | no | USD per troy ounce | Take profit held by the simulated broker, if any. |
+| `valid_until_ns` | instant (ns since epoch, UTC) \| null | no | ns since epoch, UTC | Instant at which the order expires.  Mandatory for a resting entry; always null for a protective stop. |
+| `requested_volume_lots` | volume > 0 \| null | no | lots | Volume asked for by a pending replacement. |
+| `requested_limit_price` | price > 0 \| null | no | USD per troy ounce | Limit price asked for by a pending replacement. |
+| `requested_trigger_price` | price > 0 \| null | no | USD per troy ounce | Trigger price asked for by a pending replacement. |
+| `requested_valid_until_ns` | instant (ns since epoch, UTC) \| null | no | ns since epoch, UTC | Expiry asked for by a pending replacement. |
+| `plan_id` | id<pln> \| null | no |  | Plan revision behind an entry order. |
+| `risk_decision_id` | id<rsk> \| null | no |  | Risk approval behind an entry order. |
+| `alternative_group_id` | id<grp> \| null | no |  | Alternative group of the plan behind an entry order. |
+| `position_id` | id<pos> \| null | no |  | Position a protective or exit order belongs to. |
+| `broker_order_id` | id<brk> \| null | no |  | Identifier assigned by the simulated broker once it knows the order. |
+| `cumulative_filled_lots` | volume >= 0 | yes | lots | Quantity filled so far including this event. |
+| `last_fill_lots` | volume > 0 \| null | no | lots | Quantity filled by this event; set only on fill events. |
+| `last_fill_price` | price > 0 \| null | no | USD per troy ounce | Price of this fill; set only on fill events. |
+| `average_fill_price` | price > 0 \| null | no | USD per troy ounce | Volume-weighted average price of all fills so far. |
+| `last_fill_cost_amount` | money >= 0 \| null | no | account currency | Commission and fees charged for this fill. |
+| `fill_tick_source` | feed id \| null | no |  | Feed of the quote this fill was matched against (stream tick/<symbol>/<source>). |
+| `fill_tick_seq` | sequence number \| null | no |  | Sequence number of that quote in its stream; with fill_tick_source it makes every fill traceable to the market data that produced it. |
+| `reason_code` | reason code \| null | no |  | Reason of a rejection, cancellation, expiry or reconciliation; on the request of an EXIT or protective order, the reason for it (e.g. RATCHET, TIME_EXIT, EMERGENCY). |
+
+Invariants (checked whenever a record is constructed or decoded):
+
+- **OEV-1** - order_event_id equals identity.order_event_id(client_order_id, order_seq)
+- **OEV-2** - order_seq is 0 if and only if event_type is SUBMIT_REQUESTED
+- **OEV-3** - order_state is a state that event_type can lead to (see ORDER_TRANSITIONS)
+- **OEV-4** - limit_price is set iff order_type is LIMIT; trigger_price is set iff order_type is STOP
+- **OEV-5** - an ENTRY order carries its plan, risk approval, alternative group, reference price and protective stop, and no position
+- **OEV-6** - a non-ENTRY order names the position it protects or closes and carries no plan, approval, alternative group or attached protection
+- **OEV-7** - client_order_id equals identity.client_order_id(run_id, origin, intent, attempt) with origin = risk_decision_id and attempt = 0 for ENTRY, origin = position_id otherwise
+- **OEV-8** - a PROTECTIVE_STOP is a STOP order and a TAKE_PROFIT is a LIMIT order
+- **OEV-9** - fill fields are consistent: last_fill_lots, last_fill_price and the matched quote (fill_tick_source, fill_tick_seq) are set together, always on PARTIALLY_FILLED and FILLED, optionally on RECONCILED (a fill found by reconciliation) and never otherwise; last_fill_cost_amount only with a fill; 0 <= cumulative <= volume; average_fill_price iff cumulative > 0; order_state is FILLED iff cumulative = volume; PENDING_SUBMIT and WORKING have no fills, PARTIALLY_FILLED has some
+- **OEV-10** - reason_code is set on REJECTED, CANCEL_REJECTED, REPLACE_REJECTED and RECONCILED events
+- **OEV-11** - attached protection is on the correct side of the price asked for (limit, trigger, or the reference price of a market order): stop on the losing side, take profit on the winning side; a fill price is a fact and is not judged
+- **OEV-12** - event_time_ns <= receive_time_ns (the venue is simulated in-process, so there is no clock offset)
+- **OEV-13** - a LIMIT or STOP entry has valid_until_ns; a protective stop never has one; an order is requested, and fills, strictly before valid_until_ns
+- **OEV-14** - requested_* values are carried while a replacement is outstanding: always in PENDING_REPLACE, possibly in PENDING_CANCEL (cancel requested before the replacement was answered), never in any other state
+- **OEV-15** - only GIE's execution engine creates an ENTRY (originator EXECUTION); an order created by the simulated broker states why (reason_code)
+- **OEV-16** - a MARKET order carries the reference price it was requested against; max_slippage only on an ENTRY
+- **OEV-17** - a resting entry rests beyond the market it was priced against: BUY LIMIT <= reference, SELL LIMIT >= reference, BUY STOP >= reference, SELL STOP <= reference
+- **OEV-18** - broker_order_id, when present, equals identity.broker_order_id(client_order_id)
+
+## Position 1.0.0
+
+State of one position, marked at the price at which it could be closed now. Stream: ``position/<producer>``; ``revision`` numbers the snapshots of one position from 0. Ordering time: ``decision_time_ns``. *Executable net P&L* is what closing now would really yield: the open volume marked at the exit-side quote (bid for BUY, ask for SELL) minus estimated exit costs, plus everything already realised net of costs. ``peak_net_pnl_amount`` is its high-water mark and drives the profit ratchet; ``trough_net_pnl_amount`` is its low-water mark (adverse excursion). ``peak_time_ns`` is the receive time of the quote at which the peak was reached, so the high-water mark does not depend on how often snapshots are written. **Opening.** A GIE position comes into existence with the first fill of its entry order and grows only through further fills of that same order (``initial_volume_lots`` is the volume opened so far); nothing else can add to it. Its entry price is a fact reported by the venue: after a gap it can lie at or beyond the stop, in which case the stop closes it at once. **Protection.** ``stop_price`` is the hard stop GIE requires. ``protective_client_order_id`` names the PROTECTIVE_STOP order that is working at the simulated broker; if there is none, ``unprotected_reason`` says why - an unprotected position is reported as such, never assumed safe. **Snapshots** are written at least on every change of volume, stop, protection or state and whenever a new peak or trough is reached.
+
+| field | type | required | unit | meaning |
+|---|---|---|---|---|
+| `producer` | producer | yes |  | Component instance that emitted the record; together with the contract name it names the stream. |
+| `seq` | sequence number | yes |  | Position of the record in its stream: starts at 0 and increases by exactly 1. |
+| `run_id` | id<run> | yes |  | Run that produced the record (see the RunManifest of that run). |
+| `mode` | enum RunMode | yes |  | REPLAY or PAPER.  No live mode exists (routing lock). |
+| `data_origin` | enum DataOrigin | yes |  | Least trustworthy origin among the market data the record is derived from. |
+| `decision_time_ns` | instant (ns since epoch, UTC) | yes | ns since epoch, UTC | Clock reading at which the producer created the record. |
+| `as_of_time_ns` | instant (ns since epoch, UTC) | yes | ns since epoch, UTC | Market-data watermark: receive time of the newest market data the record depends on, directly or through its inputs. |
+| `position_id` | id<pos> | yes |  | identity.position_id(run_id, opening_client_order_id) for GIE positions; identity.external_position_id(account alias, ticket) for EXTERNAL ones. |
+| `revision` | revision | yes |  | Snapshot number of this position: 0, 1, 2, ... |
+| `owner` | enum PositionOwner | yes |  | GIE, or another system on the same account. |
+| `external_ref` | reference \| null | no |  | Broker ticket of an EXTERNAL position; null for GIE positions.  Never an account number. |
+| `symbol` | symbol | yes |  | XAUUSD for GIE positions; any instrument for EXTERNAL ones. |
+| `side` | enum Side | yes |  | BUY = long, SELL = short. |
+| `state` | enum PositionState | yes |  | OPEN or CLOSED. |
+| `volume_lots` | volume >= 0 | yes | lots | Open volume; 0 when closed. |
+| `initial_volume_lots` | volume > 0 | yes | lots | Volume opened so far by the entry order of a GIE position (for EXTERNAL positions: the largest volume observed so far). |
+| `average_entry_price` | price > 0 | yes | quote currency per unit | Volume-weighted price of the entry fills. |
+| `initial_stop_price` | price > 0 \| null | no | quote currency per unit | Hard stop at opening; mandatory for GIE positions. |
+| `stop_price` | price > 0 \| null | no | quote currency per unit | Current hard protective stop that GIE requires for the position. |
+| `protective_client_order_id` | id<ord> \| null | no |  | The PROTECTIVE_STOP order working at the simulated broker for an open GIE position; null when no such order is working. |
+| `unprotected_reason` | reason code \| null | no |  | Why an open GIE position has no working protective order (e.g. STOP_REJECTED, STOP_PENDING); null when it is protected. |
+| `take_profit_price` | price > 0 \| null | no | quote currency per unit | Current broker-side take profit, if any. |
+| `mark_price` | price > 0 \| null | no | quote currency per unit | Exit-side quote used for the valuation: bid for BUY, ask for SELL. |
+| `initial_risk_amount` | money > 0 \| null | no | account currency | Amount risked by the volume opened so far, as approved (1 R); mandatory for GIE positions. |
+| `realized_net_pnl_amount` | money | yes | account currency | Result already realised by partial or full closes, net of costs and swap. |
+| `unrealized_net_pnl_amount` | money | yes | account currency | Result of closing the open volume at mark_price, net of estimated exit costs; 0 when closed. |
+| `peak_net_pnl_amount` | money | yes | account currency | Highest executable net P&L (realized + unrealized) since opening. |
+| `peak_time_ns` | instant (ns since epoch, UTC) | yes | ns since epoch, UTC | Receive time of the quote at which the peak was reached (the opening instant until then). |
+| `trough_net_pnl_amount` | money | yes | account currency | Lowest executable net P&L (realized + unrealized) since opening. |
+| `costs_amount` | money >= 0 | yes | account currency | Commissions and fees charged so far (already inside realized). |
+| `swap_amount` | money | yes | account currency | Overnight financing charged (-) or credited (+) so far (already inside realized). |
+| `account_currency` | currency | yes |  | ISO 4217 account currency. |
+| `opened_time_ns` | instant (ns since epoch, UTC) | yes | ns since epoch, UTC | When the position was opened. |
+| `closed_time_ns` | instant (ns since epoch, UTC) \| null | no | ns since epoch, UTC | When the position was fully closed; null while open. |
+| `close_reason` | reason code \| null | no |  | Why the position closed (e.g. PROTECTIVE_STOP, TAKE_PROFIT, RATCHET, TIME_EXIT); null while open, mandatory for a CLOSED GIE position, optional for a CLOSED EXTERNAL one. |
+| `plan_id` | id<pln> \| null | no |  | Plan revision that opened a GIE position. |
+| `opening_client_order_id` | id<ord> \| null | no |  | Entry order of a GIE position. |
+
+Invariants (checked whenever a record is constructed or decoded):
+
+- **CAUSAL-1** - as_of_time_ns <= decision_time_ns (a record cannot depend on data received after it was created)
+- **POS-1** - state is OPEN iff volume_lots > 0 iff closed_time_ns is null
+- **POS-2** - volume_lots <= initial_volume_lots (a GIE position holds at most what its entry order opened: no averaging down, no adding; for EXTERNAL positions initial_volume_lots is the largest observed volume)
+- **POS-3** - a GIE position is XAUUSD, has plan, opening order, initial stop and initial risk, has position_id = identity.position_id(run_id, opening_client_order_id) and, while open, a stop and a mark price; an EXTERNAL position has external_ref and no plan or opening order
+- **POS-4** - the stop of a GIE position is never wider than its initial stop (BUY: stop >= initial; SELL: stop <= initial); the entry price is a reported fact and may lie beyond the stop after a gap
+- **POS-5** - trough_net_pnl_amount <= realized + unrealized <= peak_net_pnl_amount
+- **POS-6** - a CLOSED position has unrealized_net_pnl_amount = 0
+- **POS-7** - opened_time_ns <= peak_time_ns <= decision_time_ns, and opened_time_ns <= closed_time_ns <= decision_time_ns when closed
+- **POS-8** - close_reason is null while OPEN and set for a CLOSED GIE position
+- **POS-9** - an OPEN GIE position names its working protective order or states why it has none (exactly one of protective_client_order_id, unprotected_reason); any other position has neither
+
+## RiskDecision 1.0.0
+
+Approval, reduction or rejection of a plan, with the size and risk granted. Stream: ``risk_decision/<producer>``. Ordering time: ``decision_time_ns``. * An approval is bound to exactly one plan revision - by ``plan_id`` and by ``plan_fingerprint``, the hash of the plan that was evaluated - reserves risk atomically (``reservation_id``) and expires at ``valid_until_ns``. It can be spent by exactly one entry order (the order's identity is derived from ``decision_id``). * **Amounts decide, fractions report.** The daily result, the profit floor and the granted risk are exact money amounts, and every boundary - "at exactly the floor no new risk", the surplus above the floor - is decided on them. The ``*_frac`` fields are derived from the amounts and ``reference_equity_amount`` (the equity the account's daily limits are measured against, fixed for the trading day) with a stated rounding (``gie.core.canonical.fraction_of``): the daily result is rounded down, the floor and the risk up, so a fraction never looks better than the amounts. The thresholds of the daily states are research parameters; the risk engine converts them to amounts with the same reference equity. * ``daily_pnl_amount`` is account-wide: it includes open positions and the positions of every other system on the account. * **Profit floor.** Once a floor has been established on a trading day it is carried by every later decision of that day, never decreases and never disappears; the state is then PROFIT_PROTECTION (or EMERGENCY_HALT). New risk is approved only above the floor and only up to the surplus that is left after the risk of open positions and pending orders. * **An approval states what it rests on**: equity, open and pending risk, margin and the gap-stress loss. Unknown is not approved.
+
+| field | type | required | unit | meaning |
+|---|---|---|---|---|
+| `producer` | producer | yes |  | Component instance that emitted the record; together with the contract name it names the stream. |
+| `seq` | sequence number | yes |  | Position of the record in its stream: starts at 0 and increases by exactly 1. |
+| `run_id` | id<run> | yes |  | Run that produced the record (see the RunManifest of that run). |
+| `mode` | enum RunMode | yes |  | REPLAY or PAPER.  No live mode exists (routing lock). |
+| `data_origin` | enum DataOrigin | yes |  | Least trustworthy origin among the market data the record is derived from. |
+| `decision_time_ns` | instant (ns since epoch, UTC) | yes | ns since epoch, UTC | Clock reading at which the producer created the record. |
+| `as_of_time_ns` | instant (ns since epoch, UTC) | yes | ns since epoch, UTC | Market-data watermark: receive time of the newest market data the record depends on, directly or through its inputs. |
+| `decision_id` | id<rsk> | yes |  | identity.risk_decision_id(run_id, plan_id, attempt). |
+| `plan_id` | id<pln> | yes |  | Plan revision that was evaluated. |
+| `plan_fingerprint` | sha256 | yes |  | Fingerprint (gie.contracts.fingerprint) of the evaluated plan: binds the decision to its content. |
+| `alternative_group_id` | id<grp> | yes |  | Alternative group of the plan: at most one plan of a group is ever executed. |
+| `attempt` | attempt | yes |  | 0 for the first evaluation of the plan, +1 per re-evaluation. |
+| `outcome` | enum RiskOutcome | yes |  | Result of the evaluation. |
+| `reason_codes` | list[reason code] (unique, sorted ascending) | yes |  | Reasons for a reduction or rejection (rule identifiers of the risk engine). |
+| `volume_lots` | volume >= 0 | yes | lots | Granted volume; 0 when rejected. |
+| `risk_amount` | money >= 0 | yes | account currency | Worst-case loss at the hard stop for the granted volume including expected costs; 0 when rejected. |
+| `risk_frac` | fraction >= 0, <= 1 | yes | fraction | risk_amount as a fraction of reference_equity_amount, rounded up (derived); 0 when rejected. |
+| `reference_equity_amount` | money > 0 | yes | account currency | Equity that the day's fractions and thresholds refer to (per the account rules); the same for every decision of a trading day. |
+| `quality_validated` | bool | yes |  | True only when the size was adapted using quality from an owner-approved (ACTIVE) model version. |
+| `quality_model_version_id` | id<mdl> \| null | no |  | That model version; set if and only if quality_validated is true. |
+| `account_currency` | currency | yes |  | ISO 4217 account currency. |
+| `trading_day` | trading day | yes |  | Prague trading day of decision_time_ns. |
+| `daily_state` | enum DailyState | yes |  | Daily risk state at decision time. |
+| `daily_pnl_amount` | money | yes | account currency | Account-wide net result of the trading day including open positions of all systems. |
+| `daily_pnl_frac` | fraction | yes | fraction of reference equity | daily_pnl_amount as a fraction of reference_equity_amount, rounded down (derived). |
+| `profit_floor_amount` | money > 0 \| null | no | account currency | Protected daily profit floor once established: never decreases and never disappears within the trading day; mandatory in PROFIT_PROTECTION. |
+| `profit_floor_frac` | fraction \| null | no | fraction of reference equity | profit_floor_amount as a fraction of reference_equity_amount, rounded up (derived). |
+| `reservation_id` | id<rsv> \| null | no |  | identity.reservation_id(decision_id) of the reserved risk; null when rejected. |
+| `valid_until_ns` | instant (ns since epoch, UTC) | yes | ns since epoch, UTC | Expiry instant of the approval and its reservation; not later than the plan's expiry. |
+| `equity_amount` | money \| null | no | account currency | Account equity at decision time. |
+| `open_risk_amount` | money >= 0 \| null | no | account currency | Aggregate risk of open positions before this decision. |
+| `pending_risk_amount` | money >= 0 \| null | no | account currency | Aggregate risk of pending orders and unexpired reservations before this decision. |
+| `margin_required_amount` | money >= 0 \| null | no | account currency | Margin required for the granted volume. |
+| `margin_free_amount` | money \| null | no | account currency | Free margin before this decision. |
+| `gap_stress_loss_amount` | money >= 0 \| null | no | account currency | Aggregate loss in the gap-stress scenario including this trade. |
+
+Invariants (checked whenever a record is constructed or decoded):
+
+- **CAUSAL-1** - as_of_time_ns <= decision_time_ns (a record cannot depend on data received after it was created)
+- **RSK-1** - decision_id equals identity.risk_decision_id(run_id, plan_id, attempt)
+- **RSK-2** - REJECTED grants nothing: volume_lots = 0, risk_amount = 0, risk_frac = 0, no reservation
+- **RSK-3** - an approval grants volume_lots > 0, risk_amount > 0 and risk_frac > 0 and carries reservation_id = identity.reservation_id(decision_id)
+- **RSK-4** - reason_codes is non-empty unless outcome is APPROVED
+- **RSK-5** - EMERGENCY_HALT never approves: outcome is REJECTED
+- **RSK-6** - PROFIT_PROTECTION carries a profit floor; a floor is carried only in PROFIT_PROTECTION or EMERGENCY_HALT (once established it stays for the trading day)
+- **RSK-7** - at or below the profit floor no new risk is approved, decided on exact amounts (G05: at exactly the floor no new risk)
+- **RSK-8** - above the profit floor an approval stays within the surplus after open exposure: risk_amount + open_risk_amount + pending_risk_amount <= daily_pnl_amount - profit_floor_amount (both aggregates must be stated)
+- **RSK-9** - the fractions are derived from the amounts and reference_equity_amount: daily_pnl_frac rounded down, profit_floor_frac and risk_frac rounded up, 12 fractional digits
+- **RSK-10** - an approval expires later than decision_time_ns
+- **RSK-11** - trading_day is the Europe/Prague calendar date of decision_time_ns
+- **RSK-12** - quality_model_version_id is set if and only if quality_validated is true
+- **RSK-13** - an approval states the aggregates it rests on - equity, open risk, pending risk, margin required and free, gap-stress loss - and margin_required_amount <= margin_free_amount (unknown is never approved)
+
+## RunManifest 1.0.0
+
+Identity and reproducibility record of one run; the first record of its journal. Stream: ``run_manifest/<producer>`` (one record, ``seq`` 0). Ordering time: ``data_start_ns`` for a replay, ``created_time_ns`` for a paper run. ``run_id`` is derived from the mode and the hash of **every other field of this record**, and the manifest verifies it. A run id therefore cannot be claimed for a run that differs in role, risk regime, configuration, code, data, seed, parameters or models. Two replays with identical manifests are the same run and must produce the same journal, byte for byte; for that reason a replay manifest carries no wall-clock time. A paper run also states when it started and is unique. ``config_sha256`` is the hash of the run-configuration document of the session that drives the run (session 10 for replays); the fields listed here are the part of the configuration that the shared contracts themselves rely on. A restarted process continues a run with the manifest it finds in the journal; building a new manifest starts a new run and a new journal.
+
+| field | type | required | unit | meaning |
+|---|---|---|---|---|
+| `producer` | producer | yes |  | Component instance that emitted the record; together with the contract name it names the stream. |
+| `seq` | sequence number | yes |  | Position of the record in its stream: starts at 0 and increases by exactly 1. |
+| `run_id` | id<run> | yes |  | identity.run_id(mode, hash of all other fields); see derive_run_id. |
+| `mode` | enum RunMode | yes |  | REPLAY or PAPER.  No live mode exists (routing lock). |
+| `role` | enum RunRole | yes |  | PRIMARY, SHADOW or RESEARCH. |
+| `risk_regime` | enum RiskRegime | yes |  | Whether the daily risk states of the account are enforced in this run. |
+| `label` | label | yes |  | Operator label of the run. |
+| `config_sha256` | sha256 | yes |  | SHA-256 of the complete run configuration (canonical JSON). |
+| `code_commit` | git commit | yes |  | Commit of the code that executes the run. |
+| `code_tree_dirty` | bool | yes |  | True if the working tree had uncommitted changes: the commit then does not identify the code. |
+| `contract_set_version` | semver | yes |  | Version of the contract set in use. |
+| `parameters_sha256` | sha256 | yes |  | Hash of the research-parameter set (gie.core.params). |
+| `data_origin` | enum DataOrigin | yes |  | Least trustworthy origin of the market data the run uses; no record of the run may claim a better one. |
+| `data_sources` | list[feed id] (min 1, unique, sorted ascending) | yes |  | Tick sources (versioned feed ids) the run reads; ticks of any other source are refused. |
+| `data_start_ns` | instant (ns since epoch, UTC) \| null | no | ns since epoch, UTC | Start of the replayed period; null for a paper run. |
+| `data_end_ns` | instant (ns since epoch, UTC) \| null | no | ns since epoch, UTC | End (exclusive) of the replayed period; null for a paper run. |
+| `seed` | seed \| null | no |  | Seed of the run; every pseudo-random element derives its own seed from it (gie.core.ids.derive_seed).  Null = the run uses no randomness. |
+| `models` | list[RunModel] (unique, sorted by start of validity, then id) | yes |  | Model versions the run may use, with the status pinned for the run and, optionally, the period in which each may be used (walk-forward schedule). |
+| `shadow_of_run_id` | id<run> \| null | no |  | Primary run a SHADOW run is compared with; null otherwise. |
+| `created_time_ns` | instant (ns since epoch, UTC) \| null | no | ns since epoch, UTC | When a paper run was started (system clock).  Always null for a replay, whose identity and journal must not depend on when it was executed. |
+
+Invariants (checked whenever a record is constructed or decoded):
+
+- **RUN-1** - run_id equals identity.run_id(mode, SHA-256 of the canonical form of all other fields)
+- **RUN-2** - a REPLAY run states its data period (start < end) and no creation time; a PAPER run states its creation time and no data period
+- **RUN-3** - shadow_of_run_id is set if and only if role is SHADOW, and is not the run itself
+- **RUN-4** - the manifest is the first record of its stream (seq 0)
+- **RUN-5** - only a RESEARCH run may be UNCONSTRAINED_RESEARCH; a PRIMARY run uses owner-approved (ACTIVE) models only
 
 ## TradePlan 1.0.0
 
@@ -295,6 +368,7 @@ Invariants (checked whenever a record is constructed or decoded):
 - **PLN-10** - supersedes_plan_id is null for revision 0 and otherwise equals the id of the previous revision, identity.plan_id(candidate_id, entry_style, variant, revision - 1)
 - **PLN-11** - an ARMED or SELECTED plan has expected_net_r > 0 (positive expectancy gate)
 - **PLN-12** - the plan states its uncertainty: net_r_stdev or expected_net_r_stderr
+- **PLN-13** - entry_trigger and every invalidation of a plan are prices greater than zero
 
 ## Candidate 1.0.0
 
@@ -434,61 +508,6 @@ Invariants (checked whenever a record is constructed or decoded):
 - **EVD-12** - an ACTIVE record of kind pending_limit has exactly one PENDING_LIMIT level, exactly one score greater than 0 (bullish = buy limit) and names the breakout in related_market_event_id
 - **EVD-13** - levels and invalidation of an XAUUSD observation are prices greater than 0
 
-## Tick 1.0.0
-
-Raw bid/ask quote exactly as observed, plus ingest metadata. Stream: ``tick/<source>/<symbol>``. Ordering time: ``receive_time_ns``, which never decreases within a stream. ``seq`` is assigned once, when the tick is ingested into the tick store, in arrival order; it never restarts and replay preserves it. Ticks are never modified after ingest: problems are expressed as flags, and a backfill, re-import or re-flagging creates a new, versioned ``source``. Imported history without a recorded receive time carries ``receive_time_ns = max(receive time of the previous tick of the stream, event_time_ns + modelled feed delay)`` and the flag ``RECEIVE_TIME_MODELLED``.
-
-| field | type | required | unit | meaning |
-|---|---|---|---|---|
-| `symbol` | symbol | yes |  | Canonical GIE symbol (XAUUSD is the only tradable one). |
-| `source` | feed id | yes |  | Identifier of the feed (and dataset version) that delivered the quote. |
-| `origin` | enum DataOrigin | yes |  | Whether the quote is a real-time feed observation, imported history or a fixture. |
-| `seq` | sequence number | yes |  | Ingest sequence of the (source, symbol) stream: starts at 0 and increases by exactly 1. |
-| `event_time_ns` | instant (ns since epoch, UTC) | yes | ns since epoch, UTC | Timestamp given by the source, converted to UTC. |
-| `receive_time_ns` | instant (ns since epoch, UTC) | yes | ns since epoch, UTC | Local clock reading when GIE received the quote (the availability instant), or the modelled value for imported history. |
-| `bid` | price > 0 | yes | quote currency per unit (USD per troy ounce for XAUUSD) | Best bid. |
-| `ask` | price > 0 | yes | quote currency per unit (USD per troy ounce for XAUUSD) | Best ask. |
-| `bid_volume` | volume >= 0 \| null | no | lots | Size at the best bid; null when the feed does not provide it. |
-| `ask_volume` | volume >= 0 \| null | no | lots | Size at the best ask; null when the feed does not provide it. |
-| `flags` | list[enum TickFlag] (unique, sorted by value) | yes |  | Data-quality flags (empty when nothing is wrong). |
-
-Invariants (checked whenever a record is constructed or decoded):
-
-- **TICK-1** - the CROSSED flag is present if and only if ask < bid
-- **TICK-2** - the EVENT_AFTER_RECEIVE flag is present if and only if event_time_ns > receive_time_ns
-
-## RunManifest 1.0.0
-
-Identity and reproducibility record of one run; the first record of its journal. Stream: ``run_manifest/<producer>`` (one record, ``seq`` 0). Ordering time: ``created_time_ns``. ``run_id`` is derived from the mode, the hash of the complete run configuration and the label, and the manifest verifies it, so a run id cannot be claimed for another configuration. The configuration hash covers everything listed here plus whatever else influences the run.
-
-| field | type | required | unit | meaning |
-|---|---|---|---|---|
-| `producer` | producer | yes |  | Component instance that emitted the record; together with the contract name it names the stream. |
-| `seq` | sequence number | yes |  | Position of the record in its stream: starts at 0 and increases by exactly 1. |
-| `run_id` | id<run> | yes |  | identity.run_id(mode, config_sha256, label). |
-| `mode` | enum RunMode | yes |  | REPLAY or PAPER.  No live mode exists (routing lock). |
-| `role` | enum RunRole | yes |  | PRIMARY, SHADOW or RESEARCH. |
-| `label` | label | yes |  | Operator label of the run. |
-| `config_sha256` | sha256 | yes |  | SHA-256 of the complete run configuration (canonical JSON). |
-| `code_commit` | git commit | yes |  | Commit of the code that executes the run. |
-| `contract_set_version` | semver | yes |  | Version of the contract set in use. |
-| `parameters_sha256` | sha256 | yes |  | Hash of the research-parameter set (gie.core.params). |
-| `data_origin` | enum DataOrigin | yes |  | Least trustworthy origin of the market data the run will use. |
-| `data_sources` | list[feed id] (min 1, unique, sorted ascending) | yes |  | Tick sources (versioned feed ids) the run reads. |
-| `data_start_ns` | instant (ns since epoch, UTC) \| null | no | ns since epoch, UTC | Start of the replayed period; null for a paper run. |
-| `data_end_ns` | instant (ns since epoch, UTC) \| null | no | ns since epoch, UTC | End (exclusive) of the replayed period; null for a paper run. |
-| `seed` | seed \| null | no |  | Seed of every pseudo-random element of the run. |
-| `model_version_ids` | list[id<mdl>] (unique, sorted ascending) | yes |  | Model versions the run uses (its model schedule comes from the configuration, not from the registry status of the moment). |
-| `shadow_of_run_id` | id<run> \| null | no |  | Primary run a SHADOW run is compared with; null otherwise. |
-| `created_time_ns` | instant (ns since epoch, UTC) | yes | ns since epoch, UTC | When the run was created (system clock, also for replays). |
-
-Invariants (checked whenever a record is constructed or decoded):
-
-- **RUN-1** - run_id equals identity.run_id(mode, config_sha256, label)
-- **RUN-2** - a REPLAY run states its data period (start < end); a PAPER run has none
-- **RUN-3** - shadow_of_run_id is set if and only if role is SHADOW, and is not the run itself
-- **RUN-4** - the manifest is the first record of its stream (seq 0)
-
 ## Nested value objects
 
 ### ContractRef
@@ -572,6 +591,22 @@ One point of the predictive distribution of net R.
 |---|---|---|---|---|
 | `q_frac` | probability > 0, < 1 | yes | fraction | Cumulative probability. |
 | `value_r` | R multiple | yes | R | Net R at this quantile. |
+
+### RunModel
+
+One model version a run is allowed to use, pinned for the whole run. The status and the *validated* flag are what the registry said when the run was configured. A promotion, retirement or rollback that happens later does not change a running or replayed run: it takes effect in a new run (G07-12, no untested online changes). ``valid_from_ns`` / ``valid_until_ns`` restrict the model to a period of the run, which is how a walk-forward schedule is written down: each fold's model is valid for its test period only.
+
+| field | type | required | unit | meaning |
+|---|---|---|---|---|
+| `model_version_id` | id<mdl> | yes |  | The model (or rule set) version. |
+| `status` | enum ModelStatus | yes |  | Its promotion status as pinned for this run. |
+| `validated` | bool | yes |  | ModelVersion.validated as pinned for this run (ACTIVE and not resting on fixture data). |
+| `valid_from_ns` | instant (ns since epoch, UTC) \| null | no | ns since epoch, UTC | First instant at which the run may use it; null = from the start. |
+| `valid_until_ns` | instant (ns since epoch, UTC) \| null | no | ns since epoch, UTC | End (exclusive) of its use; null = until the end of the run. |
+
+Invariants (checked whenever a record is constructed or decoded):
+
+- **RMD-1** - valid_from_ns < valid_until_ns when both are given; only an ACTIVE model can be validated
 
 ### Target
 
@@ -669,6 +704,12 @@ Why the order exists. Only ``ENTRY`` creates risk; it needs a plan and a risk ap
 
 Values: `ENTRY`, `PROTECTIVE_STOP`, `TAKE_PROFIT`, `EXIT`
 
+### OrderOriginator
+
+Who created the order. ``EXECUTION``: the execution engine of GIE (session 07), the only writer of requests. ``BROKER``: the simulated broker, which creates reduce-only orders on GIE's behalf - the protective stop and take profit that were *attached* to an entry, at the entry's first fill, and broker-side closes such as a margin stop-out. The broker never creates an entry.
+
+Values: `EXECUTION`, `BROKER`
+
 ### OrderState
 
 State of the order *after* the event has been applied.
@@ -723,6 +764,12 @@ Values: `STRATEGY_ENGINE`, `INTERMARKET`, `VOLATILITY`, `PATTERN`
 
 Values: `APPROVED`, `APPROVED_REDUCED`, `REJECTED`
 
+### RiskRegime
+
+Which risk rules a run is simulated under (brief 10: report the two separately). ``CHALLENGE_RULES``: the daily states of the account (defensive, halt, profit protection) are in force and halt trading as they would on the account. ``UNCONSTRAINED_RESEARCH``: the daily states are not enforced, to study what the strategy does without them; such a run is research only and its results are never reported as a challenge outcome.
+
+Values: `CHALLENGE_RULES`, `UNCONSTRAINED_RESEARCH`
+
 ### RunMode
 
 How a run obtains market data. There is intentionally no live-trading member.
@@ -765,14 +812,18 @@ Values: `NONE`, `TICK`, `S1`, `M1`, `M5`, `M15`, `M30`, `H1`, `H4`, `D1`
 | PARTIALLY_FILLED | EXPIRED | EXPIRED |
 | PARTIALLY_FILLED | FILLED | FILLED |
 | PARTIALLY_FILLED | PARTIALLY_FILLED | PARTIALLY_FILLED |
-| PARTIALLY_FILLED | RECONCILED | CANCELED, EXPIRED, FILLED, PARTIALLY_FILLED, REJECTED, WORKING |
+| PARTIALLY_FILLED | RECONCILED | CANCELED, EXPIRED, FILLED, PARTIALLY_FILLED, REJECTED |
 | PARTIALLY_FILLED | REPLACE_REQUESTED | PENDING_REPLACE |
+| PENDING_CANCEL | ACCEPTED | PENDING_CANCEL |
 | PENDING_CANCEL | CANCELED | CANCELED |
 | PENDING_CANCEL | CANCEL_REJECTED | PARTIALLY_FILLED, WORKING |
 | PENDING_CANCEL | EXPIRED | EXPIRED |
 | PENDING_CANCEL | FILLED | FILLED |
 | PENDING_CANCEL | PARTIALLY_FILLED | PENDING_CANCEL |
 | PENDING_CANCEL | RECONCILED | CANCELED, EXPIRED, FILLED, PARTIALLY_FILLED, REJECTED, WORKING |
+| PENDING_CANCEL | REJECTED | REJECTED |
+| PENDING_CANCEL | REPLACED | PENDING_CANCEL |
+| PENDING_CANCEL | REPLACE_REJECTED | PENDING_CANCEL |
 | PENDING_REPLACE | CANCELED | CANCELED |
 | PENDING_REPLACE | CANCEL_REQUESTED | PENDING_CANCEL |
 | PENDING_REPLACE | EXPIRED | EXPIRED |

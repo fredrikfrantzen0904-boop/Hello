@@ -15,7 +15,8 @@ in memory          on the wire                     notes
 ``str``            JSON string                     length and pattern checked
 ``int``            JSON integer                    signed 64-bit, exact
 ``Decimal``        JSON string                     plain decimal, no exponent
-``float``          JSON number                     finite only
+``float``          JSON number                     finite only; an integer literal only
+                                                   as the canonical writer renders a double
 ``bool``           JSON true/false
 ``Enum`` member    JSON string (member value)      unknown values are rejected
 ``tuple``          JSON array
@@ -29,14 +30,23 @@ from __future__ import annotations
 import dataclasses
 import math
 import re
+import sys
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from decimal import Decimal
 from enum import Enum
+from types import FrameType
 from typing import Any, ClassVar, Final, TypeVar
 
-from gie.core.canonical import DECIMAL_PATTERN, INT64_MAX, INT64_MIN, decimal_from_str, decimal_to_str
-from gie.core.errors import CanonicalEncodingError, ContractValidationError
+from gie.core.canonical import (
+    DECIMAL_PATTERN,
+    INT64_MAX,
+    INT64_MIN,
+    canonical_dumps,
+    decimal_from_str,
+    decimal_to_str,
+)
+from gie.core.errors import CanonicalEncodingError, ContractValidationError, GieError
 from gie.core.ids import ID_PREFIXES, id_pattern
 from gie.core.timeutil import MAX_TIME_NS, TRADING_DAY_PATTERN, parse_trading_day
 
@@ -321,12 +331,24 @@ class Float(FieldType):
     def decode(self, raw: Any, path: str, ctx: DecodeContext) -> float:
         if isinstance(raw, bool) or not isinstance(raw, (int, float)):
             raise _fail(path, "must be a JSON number", actual_type=type(raw).__name__)
+        if isinstance(raw, float):
+            return raw
+        # A number token does not carry its type: the canonical writer renders an integral double
+        # with the ECMAScript shortest-digits rule, so 1.0 arrives as the literal 1 and the double
+        # 1234567890123456768 as the literal 1234567890123456800.  An integer literal is therefore a
+        # double exactly when the writer could have produced it; any other integer would have to be
+        # rounded to become a double and is refused (same rule as for literals beyond 64 bits).
         try:
             number = float(raw)
         except OverflowError as exc:
             raise _fail(path, "must be a finite number") from exc
-        if isinstance(raw, int) and number != raw:
-            raise _fail(path, "integer is not exactly representable as a double", value=str(raw)[:32])
+        if canonical_dumps(number) != str(raw):
+            raise _fail(
+                path,
+                "integer literal is not the canonical rendering of a double "
+                "(it is not exactly representable as one, or is written with other digits)",
+                value=str(raw)[:32],
+            )
         return number
 
     def schema(self, defs: dict[str, Any]) -> dict[str, Any]:
@@ -599,6 +621,37 @@ def fld(
     return dataclasses.field(metadata=metadata)
 
 
+_DATACLASSES_GLOBALS: Final[dict[str, Any]] = vars(dataclasses)
+
+
+def _creating_module() -> str:
+    """``__name__`` of the module whose code creates the class that is being defined.
+
+    Called from :meth:`Record.__init_subclass__`: the caller of that hook is the frame that
+    executes the ``class`` statement (or calls ``type(...)``).  Two kinds of frame in between are
+    passed over, because they do not decide where a class is defined:
+
+    * the standard ``dataclasses`` module - ``@dataclass(slots=True)`` builds the final class a
+      second time from inside the decorator, so the module that applies the decorator counts;
+    * an ``__init_subclass__`` of a contract base class in ``gie.contracts`` that delegates here.
+    """
+    try:
+        frame: FrameType | None = sys._getframe(2)
+    except ValueError:  # no Python frame creates the class: nothing vouches for it
+        return ""
+    while frame is not None:
+        name = frame.f_globals.get("__name__")
+        delegating_hook = (
+            frame.f_code.co_name == "__init_subclass__"
+            and isinstance(name, str)
+            and name.startswith("gie.contracts.")
+        )
+        if frame.f_globals is not _DATACLASSES_GLOBALS and not delegating_hook:
+            return name if isinstance(name, str) else ""
+        frame = frame.f_back
+    return ""
+
+
 class Record:
     """Base class of every contract record (top level or nested)."""
 
@@ -615,10 +668,15 @@ class Record:
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
-        if not str(cls.__module__).startswith(RECORD_MODULE_PREFIXES):
+        # Two independent checks.  ``__module__`` is what the class claims and is freely assignable
+        # in a class body, so the module whose code really creates the class is checked as well.
+        claimed = str(cls.__module__)
+        creator = _creating_module()
+        if not claimed.startswith(RECORD_MODULE_PREFIXES) or not creator.startswith(RECORD_MODULE_PREFIXES):
+            where = claimed if not claimed.startswith(RECORD_MODULE_PREFIXES) else creator
             raise TypeError(
                 f"{cls.__qualname__}: contract records may only be defined in gie.contracts "
-                "(shared contracts are not redefined or extended by subsystems)"
+                f"(shared contracts are not redefined or extended by subsystems); found in {where!r}"
             )
 
     def __post_init__(self) -> None:
@@ -631,9 +689,15 @@ class Record:
         for rule in cls.ALL_INVARIANTS:
             try:
                 holds = bool(rule.check(self))
-            except (TypeError, ValueError, ArithmeticError) as exc:
-                # A rule that cannot even be evaluated (for example a comparison with a
-                # missing value) is treated as violated: fail closed, with a contract error.
+            except GieError:
+                # Already a contract error with its own code (an identity function that refuses a
+                # part, the routing lock): it is reported unchanged.
+                raise
+            except Exception as exc:
+                # A rule that cannot even be evaluated - a comparison with a missing value, an
+                # attribute of an absent optional value, the first item of an empty list, an
+                # unknown key - is treated as violated: fail closed, with a contract error and
+                # never with a raw Python exception.
                 raise ContractValidationError(
                     f"{cls.__name__} invariant {rule.id} could not be evaluated: {rule.text}",
                     contract=cls.__name__,
@@ -724,6 +788,15 @@ def decode_fields(
 
 
 def object_schema(record_type: type[Record], defs: dict[str, Any]) -> dict[str, Any]:
+    """JSON Schema of the fields of one record (without envelope).
+
+    Key presence: writers always write every field, optional ones as explicit ``null``, and the
+    decoder refuses a missing key.  The object is therefore published as closed *and complete*:
+    ``additionalProperties: false`` together with ``minProperties`` = number of declared
+    properties means that exactly the declared keys are present.  ``required`` lists the fields
+    that may not be ``null`` (the "required" column of the field reference); the evolution check
+    uses it to tell a new optional field (MINOR) from a new required one (MAJOR).
+    """
     properties: dict[str, Any] = {}
     required: list[str] = []
     for spec in record_type.FIELD_SPECS:
@@ -739,6 +812,7 @@ def object_schema(record_type: type[Record], defs: dict[str, Any]) -> dict[str, 
         "description": (record_type.__doc__ or "").strip().split("\n\n")[0].replace("\n", " "),
         "properties": properties,
         "required": required,
+        "minProperties": len(properties),
         "additionalProperties": False,
     }
     since = {spec.name: f"{spec.since[0]}.{spec.since[1]}" for spec in record_type.FIELD_SPECS}

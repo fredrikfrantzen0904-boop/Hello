@@ -4,6 +4,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "Approval, reduction or rejection of a plan, with the size and risk granted.",
+  "minProperties": 37,
   "properties": {
     "account_currency": {
       "description": "ISO 4217 account currency.",
@@ -36,8 +37,15 @@
       "const": "RiskDecision",
       "description": "Contract name."
     },
-    "daily_pnl_frac": {
+    "daily_pnl_amount": {
       "description": "Account-wide net result of the trading day including open positions of all systems.",
+      "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
+      "type": "string",
+      "x-gie-type": "decimal",
+      "x-gie-unit": "account currency"
+    },
+    "daily_pnl_frac": {
+      "description": "daily_pnl_amount as a fraction of reference_equity_amount, rounded down (derived).",
       "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
       "type": "string",
       "x-gie-type": "decimal",
@@ -202,6 +210,21 @@
       "pattern": "^[a-z][a-z0-9_]*(\\.[a-z0-9_]+){0,4}$",
       "type": "string"
     },
+    "profit_floor_amount": {
+      "anyOf": [
+        {
+          "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
+          "type": "string",
+          "x-gie-exclusiveMinimum": "0",
+          "x-gie-type": "decimal"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Protected daily profit floor once established: never decreases and never disappears within the trading day; mandatory in PROFIT_PROTECTION.",
+      "x-gie-unit": "account currency"
+    },
     "profit_floor_frac": {
       "anyOf": [
         {
@@ -213,7 +236,7 @@
           "type": "null"
         }
       ],
-      "description": "Protected, non-decreasing daily profit floor; set if and only if daily_state is PROFIT_PROTECTION.",
+      "description": "profit_floor_amount as a fraction of reference_equity_amount, rounded up (derived).",
       "x-gie-unit": "fraction of reference equity"
     },
     "quality_model_version_id": {
@@ -250,7 +273,7 @@
       "x-gie-unique": true
     },
     "reference_equity_amount": {
-      "description": "Equity that the day's fractions refer to (per the account rules).",
+      "description": "Equity that the day's fractions and thresholds refer to (per the account rules); the same for every decision of a trading day.",
       "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
       "type": "string",
       "x-gie-exclusiveMinimum": "0",
@@ -280,7 +303,7 @@
       "x-gie-unit": "account currency"
     },
     "risk_frac": {
-      "description": "risk_amount as a fraction of reference_equity_amount, rounded up; 0 when rejected.",
+      "description": "risk_amount as a fraction of reference_equity_amount, rounded up (derived); 0 when rejected.",
       "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
       "type": "string",
       "x-gie-maximum": "1",
@@ -354,6 +377,7 @@
     "account_currency",
     "trading_day",
     "daily_state",
+    "daily_pnl_amount",
     "daily_pnl_frac",
     "valid_until_ns"
   ],
@@ -399,19 +423,19 @@
     },
     {
       "id": "RSK-6",
-      "rule": "profit_floor_frac is set if and only if daily_state is PROFIT_PROTECTION"
+      "rule": "PROFIT_PROTECTION carries a profit floor; a floor is carried only in PROFIT_PROTECTION or EMERGENCY_HALT (once established it stays for the trading day)"
     },
     {
       "id": "RSK-7",
-      "rule": "at or below the profit floor no new risk is approved (G05: at exactly the floor no new risk)"
+      "rule": "at or below the profit floor no new risk is approved, decided on exact amounts (G05: at exactly the floor no new risk)"
     },
     {
       "id": "RSK-8",
-      "rule": "above the profit floor an approval risks at most the surplus: risk_frac <= daily_pnl_frac - profit_floor_frac"
+      "rule": "above the profit floor an approval stays within the surplus after open exposure: risk_amount + open_risk_amount + pending_risk_amount <= daily_pnl_amount - profit_floor_amount (both aggregates must be stated)"
     },
     {
       "id": "RSK-9",
-      "rule": "risk_amount <= risk_frac * reference_equity_amount (the fraction is rounded up, never down)"
+      "rule": "the fractions are derived from the amounts and reference_equity_amount: daily_pnl_frac rounded down, profit_floor_frac and risk_frac rounded up, 12 fractional digits"
     },
     {
       "id": "RSK-10",
@@ -424,6 +448,10 @@
     {
       "id": "RSK-12",
       "rule": "quality_model_version_id is set if and only if quality_validated is true"
+    },
+    {
+      "id": "RSK-13",
+      "rule": "an approval states the aggregates it rests on - equity, open risk, pending risk, margin required and free, gap-stress loss - and margin_required_amount <= margin_free_amount (unknown is never approved)"
     }
   ]
 }

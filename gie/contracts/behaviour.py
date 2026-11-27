@@ -11,6 +11,7 @@ schema and therefore needs a MAJOR version bump.
 
 from __future__ import annotations
 
+import copy
 from typing import Any
 
 from gie.contracts._spec import Record
@@ -78,7 +79,11 @@ def _transitions(table: dict[Any, frozenset[Any]]) -> list[dict[str, Any]]:
 
 
 def behaviour(record_type: type[Record]) -> dict[str, Any]:
-    """Behavioural description of one top-level contract (plain JSON data)."""
+    """Behavioural description of one top-level contract (plain JSON data).
+
+    The result is a fresh deep copy on every call: a caller that edits it (a diff tool, a test)
+    never changes the tables of this module or what is published afterwards.
+    """
     name = record_type.CONTRACT
     assert name is not None
     prefix, time_field, rank = STREAMS[record_type]
@@ -122,10 +127,14 @@ def behaviour(record_type: type[Record]) -> dict[str, Any]:
         out["transitions"] = _transitions(MODEL_STATUS_TRANSITIONS)
     elif name == "TradePlan":
         out["transitions"] = _transitions(PLAN_STATUS_TRANSITIONS)
-        out["monotonic"] = ["stop_price never moves away from the entry between revisions"]
+        out["monotonic"] = [
+            "stop_price never moves away from the entry between revisions",
+            "the risk distance |entry_price - stop_price| of a plan whose entry style is not MARKET "
+            "never increases between revisions",
+        ]
     elif name == "Candidate":
         out["transitions"] = _transitions(CANDIDATE_STATUS_TRANSITIONS)
     elif name == "Evidence":
         out["final_states"] = ["EXPIRED", "INVALIDATED"]
         out["monotonic"] = ["identity levels and market_event_id never change between revisions"]
-    return out
+    return copy.deepcopy(out)

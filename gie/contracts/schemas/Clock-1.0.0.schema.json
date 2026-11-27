@@ -4,6 +4,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "One reading of a run's clock.",
+  "minProperties": 11,
   "properties": {
     "clock_mode": {
       "description": "REPLAY (virtual time) or SYSTEM (operating-system time).",

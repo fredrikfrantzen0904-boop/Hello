@@ -4,6 +4,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "Raw bid/ask quote exactly as observed, plus ingest metadata.",
+  "minProperties": 13,
   "properties": {
     "ask": {
       "description": "Best ask.",

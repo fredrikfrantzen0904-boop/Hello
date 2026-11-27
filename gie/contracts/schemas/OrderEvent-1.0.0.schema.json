@@ -4,6 +4,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "One lifecycle event of one order at the simulated venue.",
+  "minProperties": 46,
   "properties": {
     "alternative_group_id": {
       "anyOf": [
@@ -138,6 +139,33 @@
       ],
       "type": "string"
     },
+    "fill_tick_seq": {
+      "anyOf": [
+        {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Sequence number of that quote in its stream; with fill_tick_source it makes every fill traceable to the market data that produced it."
+    },
+    "fill_tick_source": {
+      "anyOf": [
+        {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z0-9][a-z0-9_.:-]{0,63}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Feed of the quote this fill was matched against (stream tick/<symbol>/<source>)."
+    },
     "intent": {
       "description": "Why the order exists.",
       "enum": [
@@ -208,6 +236,21 @@
       "description": "Limit price; set if and only if order_type is LIMIT.",
       "x-gie-unit": "USD per troy ounce"
     },
+    "max_slippage": {
+      "anyOf": [
+        {
+          "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
+          "type": "string",
+          "x-gie-minimum": "0",
+          "x-gie-type": "decimal"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Entry only: largest adverse distance between the price asked for and a fill that the simulated broker may accept (copied from the plan); null = no limit was planned.",
+      "x-gie-unit": "USD per troy ounce"
+    },
     "mode": {
       "description": "REPLAY or PAPER.  No live mode exists (routing lock).",
       "enum": [
@@ -250,6 +293,14 @@
         "MARKET",
         "LIMIT",
         "STOP"
+      ],
+      "type": "string"
+    },
+    "originator": {
+      "description": "Who created the order: EXECUTION (GIE) or BROKER (attached protection, broker-side close).",
+      "enum": [
+        "EXECUTION",
+        "BROKER"
       ],
       "type": "string"
     },
@@ -321,7 +372,7 @@
           "type": "null"
         }
       ],
-      "description": "Executable price when the order was requested (ask for BUY, bid for SELL); mandatory for entries.",
+      "description": "Executable price when the order was requested (ask for BUY, bid for SELL); mandatory for entries and for every MARKET order.",
       "x-gie-unit": "USD per troy ounce"
     },
     "requested_limit_price": {
@@ -488,6 +539,7 @@
     "data_origin",
     "order_event_id",
     "client_order_id",
+    "originator",
     "attempt",
     "order_seq",
     "event_type",
@@ -512,6 +564,7 @@
     },
     "immutable_fields": [
       "client_order_id",
+      "originator",
       "attempt",
       "run_id",
       "mode",
@@ -521,6 +574,7 @@
       "intent",
       "order_type",
       "reference_price",
+      "max_slippage",
       "plan_id",
       "risk_decision_id",
       "alternative_group_id",
@@ -606,8 +660,7 @@
           "EXPIRED",
           "FILLED",
           "PARTIALLY_FILLED",
-          "REJECTED",
-          "WORKING"
+          "REJECTED"
         ]
       },
       {
@@ -615,6 +668,13 @@
         "from": "PARTIALLY_FILLED",
         "to": [
           "PENDING_REPLACE"
+        ]
+      },
+      {
+        "event": "ACCEPTED",
+        "from": "PENDING_CANCEL",
+        "to": [
+          "PENDING_CANCEL"
         ]
       },
       {
@@ -663,6 +723,27 @@
           "PARTIALLY_FILLED",
           "REJECTED",
           "WORKING"
+        ]
+      },
+      {
+        "event": "REJECTED",
+        "from": "PENDING_CANCEL",
+        "to": [
+          "REJECTED"
+        ]
+      },
+      {
+        "event": "REPLACED",
+        "from": "PENDING_CANCEL",
+        "to": [
+          "PENDING_CANCEL"
+        ]
+      },
+      {
+        "event": "REPLACE_REJECTED",
+        "from": "PENDING_CANCEL",
+        "to": [
+          "PENDING_CANCEL"
         ]
       },
       {
@@ -873,7 +954,7 @@
     },
     {
       "id": "OEV-9",
-      "rule": "fill fields are consistent: last_fill_* only on fill events, 0 <= cumulative <= volume, average_fill_price iff cumulative > 0, order_state is FILLED iff cumulative = volume, PENDING_SUBMIT and WORKING have no fills, PARTIALLY_FILLED has some"
+      "rule": "fill fields are consistent: last_fill_lots, last_fill_price and the matched quote (fill_tick_source, fill_tick_seq) are set together, always on PARTIALLY_FILLED and FILLED, optionally on RECONCILED (a fill found by reconciliation) and never otherwise; last_fill_cost_amount only with a fill; 0 <= cumulative <= volume; average_fill_price iff cumulative > 0; order_state is FILLED iff cumulative = volume; PENDING_SUBMIT and WORKING have no fills, PARTIALLY_FILLED has some"
     },
     {
       "id": "OEV-10",
@@ -881,7 +962,7 @@
     },
     {
       "id": "OEV-11",
-      "rule": "attached protection is on the correct side of the order price (limit, trigger, or the reference price of a market order) and of the average fill price: stop on the losing side, take profit on the winning side"
+      "rule": "attached protection is on the correct side of the price asked for (limit, trigger, or the reference price of a market order): stop on the losing side, take profit on the winning side; a fill price is a fact and is not judged"
     },
     {
       "id": "OEV-12",
@@ -889,11 +970,27 @@
     },
     {
       "id": "OEV-13",
-      "rule": "a LIMIT or STOP entry has valid_until_ns; a protective stop never has one; on SUBMIT_REQUESTED valid_until_ns is later than event_time_ns"
+      "rule": "a LIMIT or STOP entry has valid_until_ns; a protective stop never has one; an order is requested, and fills, strictly before valid_until_ns"
     },
     {
       "id": "OEV-14",
-      "rule": "requested_* values are present if and only if order_state is PENDING_REPLACE"
+      "rule": "requested_* values are carried while a replacement is outstanding: always in PENDING_REPLACE, possibly in PENDING_CANCEL (cancel requested before the replacement was answered), never in any other state"
+    },
+    {
+      "id": "OEV-15",
+      "rule": "only GIE's execution engine creates an ENTRY (originator EXECUTION); an order created by the simulated broker states why (reason_code)"
+    },
+    {
+      "id": "OEV-16",
+      "rule": "a MARKET order carries the reference price it was requested against; max_slippage only on an ENTRY"
+    },
+    {
+      "id": "OEV-17",
+      "rule": "a resting entry rests beyond the market it was priced against: BUY LIMIT <= reference, SELL LIMIT >= reference, BUY STOP >= reference, SELL STOP <= reference"
+    },
+    {
+      "id": "OEV-18",
+      "rule": "broker_order_id, when present, equals identity.broker_order_id(client_order_id)"
     }
   ]
 }

@@ -4,6 +4,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "State of one position, marked at the price at which it could be closed now.",
+  "minProperties": 39,
   "properties": {
     "account_currency": {
       "description": "ISO 4217 account currency.",
@@ -20,7 +21,7 @@
       "x-gie-unit": "ns since epoch, UTC"
     },
     "average_entry_price": {
-      "description": "Volume-weighted entry price.",
+      "description": "Volume-weighted price of the entry fills.",
       "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
       "type": "string",
       "x-gie-exclusiveMinimum": "0",
@@ -39,7 +40,7 @@
           "type": "null"
         }
       ],
-      "description": "Why the position closed (e.g. PROTECTIVE_STOP, TAKE_PROFIT, RATCHET, TIME_EXIT); set if and only if a GIE position is CLOSED."
+      "description": "Why the position closed (e.g. PROTECTIVE_STOP, TAKE_PROFIT, RATCHET, TIME_EXIT); null while open, mandatory for a CLOSED GIE position, optional for a CLOSED EXTERNAL one."
     },
     "closed_time_ns": {
       "anyOf": [
@@ -109,7 +110,7 @@
           "type": "null"
         }
       ],
-      "description": "Amount risked at opening (1 R); mandatory for GIE positions.",
+      "description": "Amount risked by the volume opened so far, as approved (1 R); mandatory for GIE positions.",
       "x-gie-unit": "account currency"
     },
     "initial_stop_price": {
@@ -128,7 +129,7 @@
       "x-gie-unit": "quote currency per unit"
     },
     "initial_volume_lots": {
-      "description": "Volume at opening (for EXTERNAL positions: the largest volume observed so far).",
+      "description": "Volume opened so far by the entry order of a GIE position (for EXTERNAL positions: the largest volume observed so far).",
       "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,12})?$",
       "type": "string",
       "x-gie-exclusiveMinimum": "0",
@@ -195,7 +196,7 @@
       "x-gie-unit": "account currency"
     },
     "peak_time_ns": {
-      "description": "Decision time of the snapshot at which the peak was reached.",
+      "description": "Receive time of the quote at which the peak was reached (the opening instant until then).",
       "maximum": 9223372036854775807,
       "minimum": 0,
       "type": "integer",
@@ -228,6 +229,20 @@
       "minLength": 1,
       "pattern": "^[a-z][a-z0-9_]*(\\.[a-z0-9_]+){0,4}$",
       "type": "string"
+    },
+    "protective_client_order_id": {
+      "anyOf": [
+        {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^ord_[0-9a-f]{32}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The PROTECTIVE_STOP order working at the simulated broker for an open GIE position; null when no such order is working."
     },
     "realized_net_pnl_amount": {
       "description": "Result already realised by partial or full closes, net of costs and swap.",
@@ -288,7 +303,7 @@
           "type": "null"
         }
       ],
-      "description": "Current hard protective stop (trigger of the working PROTECTIVE_STOP order).",
+      "description": "Current hard protective stop that GIE requires for the position.",
       "x-gie-unit": "quote currency per unit"
     },
     "swap_amount": {
@@ -326,6 +341,20 @@
       "type": "string",
       "x-gie-type": "decimal",
       "x-gie-unit": "account currency"
+    },
+    "unprotected_reason": {
+      "anyOf": [
+        {
+          "maxLength": 48,
+          "minLength": 1,
+          "pattern": "^[A-Z][A-Z0-9_]{1,47}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Why an open GIE position has no working protective order (e.g. STOP_REJECTED, STOP_PENDING); null when it is protected."
     },
     "unrealized_net_pnl_amount": {
       "description": "Result of closing the open volume at mark_price, net of estimated exit costs; 0 when closed.",
@@ -392,10 +421,7 @@
       "opening_client_order_id"
     ],
     "immutable_fields_gie_owner": [
-      "initial_volume_lots",
-      "average_entry_price",
-      "initial_stop_price",
-      "initial_risk_amount"
+      "initial_stop_price"
     ],
     "monotonic_gie_owner": [
       "volume_lots never increases",
@@ -421,7 +447,7 @@
     },
     {
       "id": "POS-2",
-      "rule": "volume_lots <= initial_volume_lots (a GIE position is never increased: no averaging down; for EXTERNAL positions initial_volume_lots is the largest observed volume)"
+      "rule": "volume_lots <= initial_volume_lots (a GIE position holds at most what its entry order opened: no averaging down, no adding; for EXTERNAL positions initial_volume_lots is the largest observed volume)"
     },
     {
       "id": "POS-3",
@@ -429,7 +455,7 @@
     },
     {
       "id": "POS-4",
-      "rule": "for a GIE position the initial stop is on the losing side of the entry and the stop is never wider than the initial stop (BUY: initial < entry and stop >= initial; SELL mirrored)"
+      "rule": "the stop of a GIE position is never wider than its initial stop (BUY: stop >= initial; SELL: stop <= initial); the entry price is a reported fact and may lie beyond the stop after a gap"
     },
     {
       "id": "POS-5",
@@ -446,6 +472,10 @@
     {
       "id": "POS-8",
       "rule": "close_reason is null while OPEN and set for a CLOSED GIE position"
+    },
+    {
+      "id": "POS-9",
+      "rule": "an OPEN GIE position names its working protective order or states why it has none (exactly one of protective_client_order_id, unprotected_reason); any other position has neither"
     }
   ]
 }

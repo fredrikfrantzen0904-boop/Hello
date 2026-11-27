@@ -4,6 +4,7 @@
     "Contribution": {
       "additionalProperties": false,
       "description": "Share of an estimate attributed to one driver (explainability).",
+      "minProperties": 3,
       "properties": {
         "evidence_id": {
           "anyOf": [
@@ -53,6 +54,7 @@
     "Destination": {
       "additionalProperties": false,
       "description": "A price the market may travel to under a named scenario.",
+      "minProperties": 5,
       "properties": {
         "horizon_ns": {
           "anyOf": [
@@ -121,6 +123,7 @@
     "QuantilePoint": {
       "additionalProperties": false,
       "description": "One point of the predictive distribution of net R.",
+      "minProperties": 2,
       "properties": {
         "q_frac": {
           "description": "Cumulative probability.",
@@ -146,6 +149,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "Opportunity built from de-duplicated evidence, with one scorer's estimates.",
+  "minProperties": 43,
   "properties": {
     "as_of_time_ns": {
       "description": "Market-data watermark: receive time of the newest market data the record depends on, directly or through its inputs.",

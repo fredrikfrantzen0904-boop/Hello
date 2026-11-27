@@ -1,4 +1,4 @@
-"""Persistent project registers: validate, render, sync test evidence, apply status updates.
+"""Persistent project registers: validate, render, sync test evidence, apply status updates, lock.
 
 The project keeps four registers for its whole multi-session life (requirements OWN-08, OWN-16,
 OWN-17, OWN-18, S00-ASG-27, S00-ASG-28):
@@ -7,6 +7,10 @@ OWN-17, OWN-18, S00-ASG-27, S00-ASG-28):
 * ``specifications/acceptance_tests.yaml``    - the acceptance test register;
 * ``docs/DECISION_LOG.md``    - decisions ``## D-001 - Title`` and open items ``## U-01 - Title``;
 * ``docs/CHANGE_REQUESTS.md`` - blockers ``## B-001 - Title`` and change requests ``## CR-001 - Title``.
+
+``specifications/requirements_lock.json`` (the requirement lock) pins the identity and the wording of
+every requirement of the matrix, so that none can disappear or be reworded unnoticed.  It is written
+by the ``lock`` command only and never edited by hand.
 
 The two Markdown logs are written by hand.  Each entry is a level-2 heading followed by bullet lines
 such as ``- Status: OPEN`` and ``- Requirements: S00-ASG-08, COM-03``.  Three Markdown files are
@@ -21,11 +25,18 @@ Usage: ``python -m tools.gie_registers <command> [--root PATH]``
 ``render [--check]``
     Write the three generated Markdown files, or with ``--check`` verify byte for byte that the
     committed files equal what would be written (exit 1 if one is missing or stale).
-``sync-evidence --evidence FILE``
+``sync-evidence --evidence FILE [--check]``
     Derive the status of every acceptance test from a pytest evidence file written by
-    ``pytest --gie-evidence=FILE`` (see ``tests/conftest.py``) and record the counts.
+    ``pytest --gie-evidence=FILE`` (see ``tests/conftest.py``) and record the counts.  With
+    ``--check`` nothing is written: exit 0 only when the register already holds exactly what this
+    evidence file gives (the file may then be outside the repository, e.g. fresh CI evidence).
 ``apply --patch FILE``
     Apply status updates to the requirements matrix from a YAML patch; all or nothing.
+``lock [--reword ID [ID ...] --reason TEXT]``
+    Add the requirements that are not locked yet to the requirement lock (the file is created when
+    it does not exist).  With ``--reword`` additionally record a deliberate correction of the named
+    requirements.  Refuses, writing nothing, while a locked requirement is missing from the matrix
+    or differs from its locked hash without being named.
 ``stats``
     Print totals as JSON.
 
@@ -33,24 +44,69 @@ Exit status: 0 success, 1 problems were reported, 2 command line error.
 
 Rules worth knowing (the complete list is the code of :func:`check_registers`):
 
-* a requirement is never deleted: the count may not drop below ``minimum_requirement_count``;
+* a requirement is never deleted and never reworded unnoticed.  The requirement lock holds, for
+  every requirement id, the SHA-256 of its ``id``, ``source``, ``section``, ``text`` and
+  ``source_clause`` (:func:`atom_hash`).  ``validate`` reports a missing lock file, a locked id that
+  is missing from the matrix, an entry whose hash differs from the locked one and an id that is not
+  locked yet.  A deliberate correction is recorded with ``lock --reword ID --reason TEXT``, which
+  appends ``{id, old, new, reason}`` to the append-only ``changes`` list of the lock; the last
+  change entry of an id must give its locked hash.  No command removes an id from the lock, and
+  ``apply`` and ``sync-evidence`` never touch it.  In addition the requirement count may not drop
+  below ``minimum_requirement_count``;
+* the ``source_clause`` of a requirement is verbatim: it must occur in the text of its ``source`` -
+  ``specifications/extracted/<name>.txt`` for a source ``<name>.pdf``, otherwise the file named by
+  the repository-relative path in ``source`` (in a Markdown file a leading ``>`` quote marker and
+  one following space are dropped from every line).  Runs of whitespace compare equal to one
+  space; `` ... `` (space, three dots, space) marks an omission between two verbatim parts, and the
+  parts must occur in the order of the source;
 * the ``text`` of a requirement holds the owner's words only: every word of it must occur in its
   ``source_clause`` (ignoring case and a plural ending) or be one of a few function words
   (:data:`TEXT_GLUE_WORDS`); explanations and interpretations belong in ``notes``;
 * the SHA-256 of every extracted specification text must equal the recorded value - a changed
   specification is noticed and the matrix must be re-verified against it;
-* ``verified`` needs a contribution with an existing evidence path; ``blocked`` needs a blocker id
-  that exists as a heading in the Markdown logs;
+* ``verified`` needs more than a path: a contribution with status ``verified`` of *every* session
+  listed in ``sessions``; every contribution with status ``verified`` lists at least one evidence
+  path and every listed path exists; a requirement whose id contains ``-ACC-`` additionally needs
+  its acceptance test register entry to be ``passing``.  ``blocked`` needs a blocker id that exists
+  as a heading in the Markdown logs;
+* a ``review_status`` other than ``unverified`` needs a ``review_reference``: the id ``D-nnn`` of a
+  decision that exists in ``docs/DECISION_LOG.md`` with ``- Status: APPROVED``;
 * an acceptance test is never ``passing`` without recorded evidence (``passed > 0``, nothing failed,
   nothing skipped), and an expected failure (``xfailed``) is not a pass;
+* the acceptance test register is bound to its evidence file: for every entry with an ``evidence``
+  mapping the named file must exist inside the repository and be usable evidence, and the status and
+  the counts recorded in the register must equal what ``sync-evidence`` derives from that file (a
+  register edited by hand, or an evidence file that changed, is reported).  Without an ``evidence``
+  mapping an entry can only be ``planned``, or ``blocked`` with blocker ids;
+* an evidence file is refused when its ``exit_status`` is not 0 or 1 (the test run did not complete)
+  or when it lists ``collection_errors`` (a test module that could not be imported is not a pass).
+  ``sync-evidence`` also reports every module listed in ``test_modules`` of an entry with marked
+  tests that contributed no executed test for that entry: a module that silently lost its tests
+  must not go unnoticed;
 * once any requirement has a status, every requirement named by an OPEN blocker must be ``blocked``
   or ``partial`` (before that the blocker is only announced in a ``NOTE:`` line).
+
+Out of scope, because it cannot be detected statically: a test that carries an acceptance marker but
+whose body can never fail (for example ``assert True``).  Such a test still counts as passed; only
+the independent review of the test code can find it.
 
 Interpretations made where the task left a choice (each is covered by a test):
 
 * ``sync-evidence`` records the ``evidence`` mapping only for entries that have marked tests in the
   evidence file and removes a stale one; an entry without tests is ``planned``, or ``blocked`` when
   it lists blockers.  A test that did not run (``not_run``) counts as skipped and is reported.
+* ``sync-evidence --check`` reports the same problems as ``sync-evidence`` would report for the
+  evidence file (unknown marker ids, tests that did not run, a listed module without a test, a
+  missing blocker id) in addition to every entry that differs; only the recorded path
+  ``evidence.file`` is not compared.
+* A missing requirement lock is a problem but not a structural one: ``render`` and ``stats`` still
+  work, ``apply`` refuses (it never writes a state that ``validate`` rejects).  A lock that cannot
+  be read or has the wrong shape is structural, like a damaged register.
+* A ``review_reference`` is checked whenever it is present, also while the review status is still
+  ``unverified``; ``review_status_values`` must contain ``unverified``.
+* A source text or an evidence file that cannot be used is reported once per file, naming the
+  entries that depend on it; an extracted text that the specification hash check already reports
+  as missing is not reported a second time.
 * "Equal session" of an acceptance entry and its requirement is exact: the requirement must list
   that one session.
 * ``apply`` validates the complete result, so it also refuses when the registers were already
@@ -58,7 +114,7 @@ Interpretations made where the task left a choice (each is covered by a test):
 * Unknown keys, an extracted specification text without a recorded hash, a log entry that names an
   unknown requirement id and a second contribution of the same session are reported as problems.
 
-Nothing here reads a clock or the network: the same registers always give the same output.
+Nothing here reads a clock, the network or git: the same files always give the same output.
 """
 
 from __future__ import annotations
@@ -82,6 +138,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 MATRIX_FILE = "specifications/requirements_matrix.yaml"
 ACCEPTANCE_FILE = "specifications/acceptance_tests.yaml"
+LOCK_FILE = "specifications/requirements_lock.json"
 EXTRACTED_DIR = "specifications/extracted"
 DECISION_LOG_FILE = "docs/DECISION_LOG.md"
 CHANGE_REQUESTS_FILE = "docs/CHANGE_REQUESTS.md"
@@ -91,6 +148,28 @@ ACCEPTANCE_MD = "docs/ACCEPTANCE_TEST_REGISTER.md"
 STATUS_MD = "docs/IMPLEMENTATION_STATUS.md"
 GENERATED_FILES = (MATRIX_MD, ACCEPTANCE_MD, STATUS_MD)
 GENERATED_NOTICE = "GENERATED - do not edit"
+
+#: The fields of a requirement that the requirement lock pins: its identity and the owner's words.
+LOCKED_FIELDS = ("id", "source", "section", "text", "source_clause")
+#: The fixed explanatory text written into a new requirement lock.
+LOCK_DESCRIPTION = (
+    "Requirement lock of specifications/requirements_matrix.yaml, written by "
+    "'python -m tools.gie_registers lock' - never edit it by hand. 'atoms' maps every requirement id to "
+    "the SHA-256 of its id, source, section, text and source_clause. 'validate' fails when a locked "
+    "requirement is missing from the matrix (requirements are never deleted), when one of these fields "
+    "differs from what was locked, and when a requirement is not locked yet. 'changes' is the append-only "
+    "history of deliberate corrections recorded by 'lock --reword ID --reason TEXT'. Ids are never removed."
+)
+_LOCK_KEYS = ("schema_version", "description", "atoms", "changes")
+_LOCK_CHANGE_KEYS = ("id", "old", "new", "reason")
+#: How a correction of locked words is recorded (quoted by the problems that ask for it).
+_LOCK_COMMAND = "python -m tools.gie_registers lock"
+
+#: Marks an omission between two verbatim parts of a ``source_clause``.
+CLAUSE_OMISSION = " ... "
+#: Number of characters of a part of a source clause shown in a problem.
+_CLAUSE_PREVIEW = 60
+_MARKDOWN_QUOTE_RE = re.compile(r"(?m)^> ?")
 
 SESSIONS = tuple(f"S{number:02d}" for number in range(13))
 REQUIREMENT_ID_RE = re.compile(r"^[A-Z][A-Z0-9]*(-[A-Z]+)?-[0-9]{2,3}$")
@@ -138,6 +217,12 @@ ACCEPTANCE_STATUSES = ("planned", "passing", "failing", "blocked", "partial")
 PASSED_OUTCOMES = frozenset({"passed"})
 FAILED_OUTCOMES = frozenset({"failed", "error", "xpassed", "xfailed"})
 SKIPPED_OUTCOMES = frozenset({"skipped", "not_run"})
+#: Outcomes of a test that was executed (or skipped on purpose): everything except ``not_run``.
+EXECUTED_OUTCOMES = (PASSED_OUTCOMES | FAILED_OUTCOMES | SKIPPED_OUTCOMES) - {"not_run"}
+#: Exit statuses of a pytest run that completed: 0 all tests passed, 1 some tests failed.
+COMPLETED_EXIT_STATUSES = (0, 1)
+#: The review status of a requirement that nobody has reviewed yet; any other needs a review reference.
+UNREVIEWED = "unverified"
 
 _MATRIX_KEYS = (
     "schema_version",
@@ -162,6 +247,7 @@ _REQUIREMENT_KEYS = (
     "contributions",
     "notes",
 )
+_REQUIREMENT_OPTIONAL_KEYS = ("blockers", "review_reference")
 _CONTRIBUTION_KEYS = ("session", "summary", "status", "evidence")
 _ACCEPTANCE_KEYS = ("schema_version", "title", "description", "status_values", "acceptance_tests")
 _ACCEPTANCE_ENTRY_KEYS = (
@@ -176,11 +262,12 @@ _ACCEPTANCE_ENTRY_KEYS = (
     "notes",
 )
 _EVIDENCE_COUNT_KEYS = ("tests", "passed", "failed", "skipped")
-_PATCH_CHANGE_KEYS = ("status", "review_status", "notes", "contribution", "blockers")
+_PATCH_CHANGE_KEYS = ("status", "review_status", "review_reference", "notes", "contribution", "blockers")
 
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _BLOCKER_ID_RE = re.compile(r"^(B|CR)-[0-9]{3,}$")
 _REFERENCE_ID_RE = re.compile(r"^(?:(B|CR|D)-[0-9]{3,}|(U)-[0-9]{2,})$")
+_DECISION_ID_RE = re.compile(r"^D-[0-9]{3,}$")
 _ACCEPTANCE_MARKER_RE = re.compile(r"acceptance\s*\(([^)]*)\)")
 _QUOTED_RE = re.compile(r"""["']([^"']+)["']""")
 
@@ -269,6 +356,35 @@ def dump_yaml(document: Any) -> str:
 def _read_text(path: Path) -> str:
     """File content as UTF-8 text without newline translation (byte-exact round trips)."""
     return path.read_bytes().decode("utf-8")
+
+
+def _unique_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    """JSON object without duplicate keys (a duplicate would silently hide a value)."""
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate key {key!r}")
+        result[key] = value
+    return result
+
+
+def parse_json(text: str, label: str) -> Any:
+    """Parse one JSON document; duplicate keys and syntax errors raise :class:`RegisterError`."""
+    try:
+        return json.loads(text, object_pairs_hook=_unique_keys)
+    except (ValueError, RecursionError) as exc:
+        raise RegisterError(f"{label}: not valid JSON: {' '.join(str(exc).split())}") from exc
+
+
+def _collapse(text: str) -> str:
+    """*text* with every run of whitespace replaced by one space (none at either end)."""
+    return " ".join(text.split())
+
+
+def _some(ids: Sequence[str], limit: int = 5) -> str:
+    """The first ids of a list, and how many more there are."""
+    shown = ", ".join(ids[:limit])
+    return shown if len(ids) <= limit else f"{shown} and {len(ids) - limit} more"
 
 
 def _write_text(path: Path, text: str) -> None:
@@ -516,6 +632,10 @@ class Registers:
     acceptance_text: str | None = None
     #: Register files that are missing or unreadable; the reason is in the report of the loader.
     unloaded: tuple[str, ...] = ()
+    #: Parsed requirement lock (None when the file is missing or unreadable).
+    lock: Any = None
+    #: True when the lock file does not exist; whether that is a problem is decided by the checks.
+    lock_missing: bool = True
 
 
 def _load_document(root: Path, file: str, report: Report) -> tuple[Any, str | None, bool]:
@@ -536,14 +656,36 @@ def _load_document(root: Path, file: str, report: Report) -> tuple[Any, str | No
         return None, text, False
 
 
+def _load_lock(root: Path, report: Report) -> tuple[Any, bool, bool]:
+    """Parsed requirement lock, whether the file is missing, and whether it could be read."""
+    path = root / LOCK_FILE
+    if not path.is_file():
+        if path.exists():
+            report.structural(f"{LOCK_FILE}: the requirement lock is not a file")
+            return None, False, False
+        return None, True, True
+    try:
+        return parse_json(_read_text(path), LOCK_FILE), False, True
+    except UnicodeDecodeError as exc:
+        report.structural(f"{LOCK_FILE}: not UTF-8 text ({exc.reason})")
+    except RegisterError as exc:
+        report.structural(str(exc))
+    return None, False, False
+
+
 def load_registers(root: Path) -> tuple[Registers, Report]:
     """Load the registers below ``root``; the report holds what could not be loaded."""
     report = Report()
     matrix, matrix_text, matrix_loaded = _load_document(root, MATRIX_FILE, report)
     acceptance, acceptance_text, acceptance_loaded = _load_document(root, ACCEPTANCE_FILE, report)
+    lock, lock_missing, lock_loaded = _load_lock(root, report)
     unloaded = [
         file
-        for file, loaded in ((MATRIX_FILE, matrix_loaded), (ACCEPTANCE_FILE, acceptance_loaded))
+        for file, loaded in (
+            (MATRIX_FILE, matrix_loaded),
+            (ACCEPTANCE_FILE, acceptance_loaded),
+            (LOCK_FILE, lock_loaded),
+        )
         if not loaded
     ]
     registers = Registers(
@@ -554,6 +696,8 @@ def load_registers(root: Path) -> tuple[Registers, Report]:
         matrix_text=matrix_text,
         acceptance_text=acceptance_text,
         unloaded=tuple(unloaded),
+        lock=lock,
+        lock_missing=lock_missing,
     )
     return registers, report
 
@@ -619,10 +763,95 @@ def _sessions_problem(value: object) -> str | None:
 
 
 # --------------------------------------------------------------------------- matrix checks
+def source_text_file(source: str) -> str:
+    """Repository-relative path of the text that the ``source_clause`` of a requirement is taken from.
+
+    A source ``<name>.pdf`` is compared with its extracted text ``specifications/extracted/<name>.txt``;
+    any other source is itself the repository-relative path of a text file.
+    """
+    if source.endswith(".pdf"):
+        return f"{EXTRACTED_DIR}/{source.removesuffix('.pdf')}.txt"
+    return source
+
+
+def source_clause_defect(source_clause: str, source_text: str) -> str | None:
+    """Why *source_clause* is not verbatim in *source_text* (whitespace collapsed), or None when it is.
+
+    The clause is split at :data:`CLAUSE_OMISSION`; every part must be non-empty and occur in the
+    source text, each one after the end of the one before.
+    """
+    position = 0
+    for part in _collapse(source_clause).split(CLAUSE_OMISSION):
+        if not part:
+            return f"it has an empty part next to an omission mark '{CLAUSE_OMISSION.strip()}'"
+        found = source_text.find(part, position)
+        if found < 0:
+            preview = repr(part[:_CLAUSE_PREVIEW])
+            if part in source_text:
+                return f"the part {preview} does not occur after the part before it (order of the source)"
+            return f"the part {preview} does not occur"
+        position = found + len(part)
+    return None
+
+
+@dataclass
+class _SourceTexts:
+    """Whitespace-collapsed text of the source documents, read once per check."""
+
+    root: Path
+    texts: dict[str, str] = field(default_factory=dict)
+    #: Files that cannot be used (repository-relative path -> reason) and the requirements naming them.
+    unusable: dict[str, str] = field(default_factory=dict)
+    users: dict[str, list[str]] = field(default_factory=dict)
+    #: Files that another check already reported as missing.
+    reported: set[str] = field(default_factory=set)
+
+    def get(self, file: str, requirement_id: str) -> str | None:
+        """Collapsed text of *file*, or None when it cannot be used (reported once by :meth:`report`)."""
+        if file not in self.texts and file not in self.unusable:
+            self._read(file)
+        if file in self.unusable:
+            self.users.setdefault(file, []).append(requirement_id)
+            return None
+        return self.texts[file]
+
+    def _read(self, file: str) -> None:
+        reason = _repo_path_problem(self.root, file)
+        path = self.root / file
+        if reason is None and not path.is_file():
+            reason = "is not a file"
+        text = ""
+        if reason is None:
+            try:
+                text = _read_text(path)
+            except UnicodeDecodeError:
+                reason = "is not UTF-8 text"
+            except OSError as exc:
+                reason = f"cannot be read ({exc.strerror or exc})"
+        if reason is not None:
+            self.unusable[file] = reason
+            return
+        if file.lower().endswith(".md"):
+            text = _MARKDOWN_QUOTE_RE.sub("", text)
+        self.texts[file] = _collapse(text)
+
+    def report(self, report: Report) -> None:
+        for file, reason in self.unusable.items():
+            if file in self.reported:
+                continue
+            users = self.users[file]
+            report.problem(
+                f"source text {file!r} {reason}: the source_clause of {len(users)} requirement(s) "
+                f"({_some(users)}) cannot be compared with it"
+            )
+
+
 @dataclass
 class _MatrixInfo:
     """What the cross-register checks need to know about the matrix."""
 
+    #: The source documents that the source clauses are compared with.
+    sources: _SourceTexts
     usable: bool = False
     status_values: tuple[str, ...] = ()
     review_values: tuple[str, ...] = ()
@@ -702,7 +931,7 @@ def _check_requirement(
         f"requirement {entry_id}" if isinstance(entry_id, str) else f"{MATRIX_FILE}: requirements[{index}]"
     )
     before = report.structural_count
-    _check_keys(entry, where, _REQUIREMENT_KEYS, ("blockers",), report)
+    _check_keys(entry, where, _REQUIREMENT_KEYS, _REQUIREMENT_OPTIONAL_KEYS, report)
     if "id" in entry:
         if not isinstance(entry_id, str):
             report.structural(f"{where}: 'id' must be a string")
@@ -735,6 +964,8 @@ def _check_requirement(
         )
     if "notes" in entry and not isinstance(entry["notes"], str):
         report.structural(f"{where}: 'notes' must be a string")
+    if "review_reference" in entry and not _is_decision_id(entry["review_reference"]):
+        report.structural(f"{where}: 'review_reference' must be the id of a decision (D-nnn)")
     blockers = entry.get("blockers", [])
     if not _is_str_list(blockers) or any(not _REFERENCE_ID_RE.fullmatch(item) for item in blockers):
         report.structural(f"{where}: 'blockers' must be a list of ids (B-nnn, CR-nnn, D-nnn, U-nn)")
@@ -761,19 +992,69 @@ def _check_requirement(
             f"{where}: text contains words that are not in its source_clause: {', '.join(added_words)} "
             "(text holds the owner's words only; explanations belong in 'notes')"
         )
+    if entry["source_clause"].strip():
+        file = source_text_file(entry["source"])
+        source_text = info.sources.get(file, entry_id)
+        defect = None if source_text is None else source_clause_defect(entry["source_clause"], source_text)
+        if defect:
+            report.problem(
+                f"{where}: source_clause is not verbatim: {defect} in {file} (runs of whitespace compare "
+                f"equal; '{CLAUSE_OMISSION}' marks an omission between two verbatim parts)"
+            )
     references = [*blockers, *(item for c in contributions for item in c.get("blockers", []))]
     for reference in references:
         _check_reference(reference, where, registers.logs, report)
-    if entry["status"] == "verified" and not any(
-        _repo_path_problem(registers.root, path) is None for c in contributions for path in c["evidence"]
-    ):
-        report.problem(
-            f"{where}: status 'verified' needs at least one contribution with an existing evidence path"
-        )
+    for number, contribution in enumerate(contributions):
+        if contribution["status"] == "verified" and not contribution["evidence"]:
+            report.problem(
+                f"{where}: contributions[{number}] ({contribution['session']}) has status 'verified' but "
+                "lists no evidence path"
+            )
+    if entry["status"] == "verified":
+        if not any(
+            _repo_path_problem(registers.root, path) is None for c in contributions for path in c["evidence"]
+        ):
+            report.problem(
+                f"{where}: status 'verified' needs at least one contribution with an existing evidence path"
+            )
+        verified_sessions = {c["session"] for c in contributions if c["status"] == "verified"}
+        lacking = [session for session in entry["sessions"] if session not in verified_sessions]
+        if lacking:
+            report.problem(
+                f"{where}: status 'verified' needs a contribution with status 'verified' of every session "
+                f"in 'sessions'; there is none of {', '.join(lacking)}"
+            )
     if entry["status"] == "blocked" and not references:
         report.problem(
             f"{where}: status 'blocked' needs a blocker id (B-nnn / CR-nnn) in a contribution "
             "or in a 'blockers' key of the requirement"
+        )
+    _check_review_reference(entry, where, registers.logs, report)
+
+
+def _is_decision_id(value: object) -> bool:
+    return isinstance(value, str) and _DECISION_ID_RE.fullmatch(value) is not None
+
+
+def _check_review_reference(entry: Mapping[str, Any], where: str, logs: Logs, report: Report) -> None:
+    """A review status other than 'unverified' rests on an APPROVED decision of the decision log."""
+    reference = entry.get("review_reference")
+    if reference is None:
+        if entry["review_status"] != UNREVIEWED:
+            report.problem(
+                f"{where}: review_status '{entry['review_status']}' needs a 'review_reference': the id "
+                f"D-nnn of the decision in {DECISION_LOG_FILE} with '- Status: APPROVED' that records "
+                "the review"
+            )
+        return
+    decision = logs.by_id().get(reference)
+    if decision is None:
+        _check_reference(reference, where, logs, report)
+    elif not (decision.status_valid and decision.status == "APPROVED"):
+        actual = f"'- Status: {decision.status}'" if decision.status else "no valid '- Status:' line"
+        report.problem(
+            f"{where}: review_reference {reference} must be a decision with '- Status: APPROVED' in "
+            f"{DECISION_LOG_FILE}; it has {actual}"
         )
 
 
@@ -791,7 +1072,7 @@ def _check_reference(reference: str, where: str, logs: Logs, report: Report) -> 
         report.problem(f"{where}: references {reference}, which is not a heading in {kind.file}")
 
 
-def _check_specification(root: Path, specification: object, report: Report) -> None:
+def _check_specification(root: Path, specification: object, info: _MatrixInfo, report: Report) -> None:
     where = f"{MATRIX_FILE}: specification"
     if not isinstance(specification, dict):
         report.structural(f"{where} must be a mapping")
@@ -824,6 +1105,7 @@ def _check_specification(root: Path, specification: object, report: Report) -> N
                 f"{EXTRACTED_DIR}/{name}: listed in specification.extracted_text_sha256 "
                 "but the file does not exist"
             )
+            info.sources.reported.add(f"{EXTRACTED_DIR}/{name}")
             continue
         actual = hashlib.sha256(path.read_bytes()).hexdigest()
         if actual != digest:
@@ -841,7 +1123,7 @@ def _check_specification(root: Path, specification: object, report: Report) -> N
 
 
 def _check_matrix(registers: Registers, report: Report) -> _MatrixInfo:
-    info = _MatrixInfo()
+    info = _MatrixInfo(sources=_SourceTexts(registers.root))
     matrix = registers.matrix
     if MATRIX_FILE in registers.unloaded:
         return info
@@ -856,7 +1138,7 @@ def _check_matrix(registers: Registers, report: Report) -> _MatrixInfo:
     for key in ("title", "description", "conventions"):
         _require_text(matrix, key, MATRIX_FILE, report)
     if "specification" in matrix:
-        _check_specification(registers.root, matrix["specification"], report)
+        _check_specification(registers.root, matrix["specification"], info, report)
 
     status_values = matrix.get("status_values")
     if (
@@ -875,6 +1157,10 @@ def _check_matrix(registers: Registers, report: Report) -> _MatrixInfo:
     review_values = matrix.get("review_status_values")
     if _is_str_list(review_values) and review_values and len(set(review_values)) == len(review_values):
         info.review_values = tuple(review_values)
+        if UNREVIEWED not in review_values:
+            report.structural(
+                f"{MATRIX_FILE}: review_status_values must contain '{UNREVIEWED}' (the register rules use it)"
+            )
     elif "review_status_values" in matrix:
         report.structural(f"{MATRIX_FILE}: review_status_values must be a non-empty list of distinct strings")
 
@@ -886,6 +1172,7 @@ def _check_matrix(registers: Registers, report: Report) -> _MatrixInfo:
     info.usable = True
     for index, entry in enumerate(requirements):
         _check_requirement(registers, entry, index, info, report)
+    info.sources.report(report)
 
     if "minimum_requirement_count" in matrix:
         minimum = matrix["minimum_requirement_count"]
@@ -933,6 +1220,221 @@ def _check_log_references(registers: Registers, info: _MatrixInfo, report: Repor
             )
 
 
+# --------------------------------------------------------------------------- requirement lock
+def atom_hash(requirement: Mapping[str, Any]) -> str:
+    """SHA-256 of the locked fields of a requirement (:data:`LOCKED_FIELDS`), as lower-case hex.
+
+    The hash is taken over the UTF-8 bytes of the compact JSON object with sorted keys and
+    unescaped Unicode, so it changes with any character of the id, source, section, text or
+    source clause and with nothing else.
+    """
+    atom = {key: requirement[key] for key in LOCKED_FIELDS}
+    encoded = json.dumps(atom, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8", errors="surrogatepass")).hexdigest()
+
+
+def _is_sha256(value: object) -> bool:
+    return isinstance(value, str) and _SHA256_RE.fullmatch(value) is not None
+
+
+def lock_shape_problems(lock: object) -> list[str]:
+    """What is wrong with the shape of a parsed requirement lock (empty when it can be used)."""
+    if not isinstance(lock, dict):
+        return [f"{LOCK_FILE}: the top level must be a JSON object"]
+    problems = [f"{LOCK_FILE}: missing key '{key}'" for key in _LOCK_KEYS if key not in lock]
+    problems += [f"{LOCK_FILE}: unknown key {key!r}" for key in lock if key not in _LOCK_KEYS]
+    if "schema_version" in lock and not (_is_int(lock["schema_version"]) and lock["schema_version"] == 1):
+        problems.append(f"{LOCK_FILE}: schema_version must be 1")
+    if "description" in lock and not _is_text(lock["description"]):
+        problems.append(f"{LOCK_FILE}: 'description' must be a non-empty string")
+    atoms = lock.get("atoms", {})
+    if not isinstance(atoms, dict):
+        problems.append(f"{LOCK_FILE}: 'atoms' must be an object of requirement id to SHA-256")
+    else:
+        problems += [
+            f"{LOCK_FILE}: the hash locked for {requirement_id} is not a lower-case SHA-256 hex digest"
+            for requirement_id, digest in atoms.items()
+            if not _is_sha256(digest)
+        ]
+    changes = lock.get("changes", [])
+    if not isinstance(changes, list):
+        problems.append(f"{LOCK_FILE}: 'changes' must be a list")
+        return problems
+    for index, change in enumerate(changes):
+        where = f"{LOCK_FILE}: changes[{index}]"
+        if not isinstance(change, dict):
+            problems.append(f"{where} must be an object with the keys {', '.join(_LOCK_CHANGE_KEYS)}")
+            continue
+        problems += [f"{where}: missing key '{key}'" for key in _LOCK_CHANGE_KEYS if key not in change]
+        problems += [f"{where}: unknown key {key!r}" for key in change if key not in _LOCK_CHANGE_KEYS]
+        for key in ("id", "reason"):
+            if key in change and not _is_text(change[key]):
+                problems.append(f"{where}: '{key}' must be a non-empty string")
+        for key in ("old", "new"):
+            if key in change and not _is_sha256(change[key]):
+                problems.append(f"{where}: '{key}' must be a lower-case SHA-256 hex digest")
+    return problems
+
+
+def lock_history_problems(lock: Mapping[str, Any]) -> list[str]:
+    """Contradictions between ``atoms`` and ``changes`` of a lock of the right shape.
+
+    Ids are never removed and ``changes`` is append-only, so every change entry names a locked id
+    and the last entry of an id gives the hash that is locked for it.
+    """
+    atoms: dict[str, str] = lock["atoms"]
+    problems: list[str] = []
+    last: dict[str, str] = {}
+    for index, change in enumerate(lock["changes"]):
+        if change["id"] not in atoms:
+            problems.append(
+                f"{LOCK_FILE}: changes[{index}] names {change['id']}, which is not a locked id - ids are "
+                "never removed from the lock (the lock was edited by hand)"
+            )
+        last[change["id"]] = change["new"]
+    for requirement_id, digest in last.items():
+        if requirement_id in atoms and atoms[requirement_id] != digest:
+            problems.append(
+                f"{LOCK_FILE}: the hash locked for {requirement_id} is not the 'new' hash of its last entry "
+                f"in 'changes' - the lock was edited by hand (a correction is recorded with: "
+                f"{_LOCK_COMMAND} --reword {requirement_id} --reason ...)"
+            )
+    return problems
+
+
+def _deleted_problem(requirement_id: str) -> str:
+    return (
+        f"requirement {requirement_id}: locked in {LOCK_FILE} but missing from the requirements matrix - "
+        "requirements are never deleted"
+    )
+
+
+def _reworded_problem(requirement_id: str) -> str:
+    return (
+        f"requirement {requirement_id}: text, source, section or source_clause changed since it was locked "
+        f"- if this is a deliberate correction run: {_LOCK_COMMAND} --reword {requirement_id} --reason ..."
+    )
+
+
+def _check_lock(registers: Registers, info: _MatrixInfo, report: Report) -> None:
+    """The requirement lock: nothing locked is missing or reworded, and everything is locked."""
+    if LOCK_FILE in registers.unloaded:
+        return
+    if registers.lock_missing:
+        if info.usable and registers.matrix["requirements"]:
+            report.problem(
+                f"{LOCK_FILE}: the requirement lock does not exist although the matrix holds "
+                f"{len(registers.matrix['requirements'])} requirement(s) - run: {_LOCK_COMMAND}"
+            )
+        return
+    shape = lock_shape_problems(registers.lock)
+    for problem in shape:
+        report.structural(problem)
+    if shape:
+        return
+    report.problems.extend(lock_history_problems(registers.lock))
+    if not info.usable:
+        return
+    atoms: dict[str, str] = registers.lock["atoms"]
+    for requirement_id in atoms:
+        if requirement_id not in info.all_ids:
+            report.problem(_deleted_problem(requirement_id))
+    for requirement_id, requirement in info.sound.items():
+        if requirement_id not in atoms:
+            report.problem(
+                f"requirement {requirement_id}: not in {LOCK_FILE} (a new requirement is locked before it "
+                f"is used) - run: {_LOCK_COMMAND}"
+            )
+        elif atoms[requirement_id] != atom_hash(requirement):
+            report.problem(_reworded_problem(requirement_id))
+
+
+def lock_requirements(
+    root: Path = REPO_ROOT, *, reword: Sequence[str] = (), reason: str | None = None
+) -> Report:
+    """Lock the requirements that are not locked yet; with ``reword`` record deliberate corrections.
+
+    Without ``reword`` the ids missing from the lock are added and nothing else changes; the lock
+    file is created with every requirement when it does not exist.  With ``reword`` the hash of
+    exactly the named ids is replaced as well, and one entry ``{id, old, new, reason}`` per id is
+    appended to ``changes``: each named id must be in the matrix, be locked and really differ, and
+    ``reason`` must say why.  Whenever a locked id is missing from the matrix, or a locked hash
+    differs without being named, nothing is written.  No id is ever removed.
+    """
+    registers, report = _load_structurally_valid(root, "lock the requirements")
+    if registers is None:
+        return report
+    if registers.lock_missing:
+        lock: dict[str, Any] = {
+            "schema_version": 1,
+            "description": LOCK_DESCRIPTION,
+            "atoms": {},
+            "changes": [],
+        }
+    else:
+        lock = copy.deepcopy(registers.lock)
+        report.problems.extend(lock_history_problems(lock))
+    atoms: dict[str, str] = lock["atoms"]
+    current = {entry["id"]: atom_hash(entry) for entry in registers.matrix["requirements"]}
+
+    named = list(reword)
+    if named and (reason is None or not reason.strip()):
+        report.problem("lock --reword needs --reason TEXT: say why the locked words are corrected")
+    if not named and reason is not None:
+        report.problem("lock --reason is only used together with --reword ID [ID ...]")
+    for requirement_id in dict.fromkeys(named):
+        if named.count(requirement_id) > 1:
+            report.problem(f"lock --reword: {requirement_id} is named more than once")
+        if requirement_id not in current:
+            report.problem(f"lock --reword: {requirement_id!r} is not in the requirements matrix")
+        elif requirement_id not in atoms:
+            report.problem(
+                f"lock --reword: {requirement_id} is not locked yet (a new requirement is locked without "
+                "--reword)"
+            )
+        elif atoms[requirement_id] == current[requirement_id]:
+            report.problem(
+                f"lock --reword: {requirement_id} has not changed since it was locked; there is nothing to "
+                "reword"
+            )
+    report.problems.extend(_deleted_problem(item) for item in atoms if item not in current)
+    report.problems.extend(
+        _reworded_problem(item)
+        for item, digest in current.items()
+        if item in atoms and atoms[item] != digest and item not in named
+    )
+    if report.problems:
+        report.problems.insert(0, f"{LOCK_FILE}: refused, nothing was written")
+        return report
+
+    added = [requirement_id for requirement_id in current if requirement_id not in atoms]
+    for requirement_id in added:
+        atoms[requirement_id] = current[requirement_id]
+    for requirement_id in named:
+        lock["changes"].append(
+            {
+                "id": requirement_id,
+                "old": atoms[requirement_id],
+                "new": current[requirement_id],
+                "reason": _collapse(reason or ""),
+            }
+        )
+        atoms[requirement_id] = current[requirement_id]
+    if not added and not named:
+        report.messages.append(f"{LOCK_FILE}: unchanged ({len(atoms)} requirement(s) locked)")
+        return report
+    _write_text(root / LOCK_FILE, json.dumps(lock, indent=2, sort_keys=True) + "\n")
+    state = "created" if registers.lock_missing else "written"
+    report.messages.append(
+        f"{LOCK_FILE}: {state} - {len(added)} requirement(s) added, {len(named)} reworded, "
+        f"{len(atoms)} locked"
+    )
+    report.messages.extend(
+        f"reworded {requirement_id}: {_collapse(reason or '')}" for requirement_id in named
+    )
+    return report
+
+
 # --------------------------------------------------------------------------- acceptance checks
 def _check_evidence_record(evidence: object, where: str, report: Report) -> bool:
     if not isinstance(evidence, dict):
@@ -960,6 +1462,8 @@ class _AcceptanceState:
     status_values: tuple[str, ...] = ()
     ids: set[str] = field(default_factory=set)
     requirements: set[str] = field(default_factory=set)
+    #: Entries without a schema or type error, in file order.
+    sound: list[dict[str, Any]] = field(default_factory=list)
 
 
 def _check_acceptance_entry(
@@ -998,6 +1502,7 @@ def _check_acceptance_entry(
         return
 
     # From here on the entry has the right shape; the remaining rules are about its content.
+    state.sound.append(entry)
     requirement_id: str = entry["requirement"]
     if entry["id"] in state.ids:
         report.problem(f"{where}: duplicate acceptance test id")
@@ -1026,16 +1531,20 @@ def _check_acceptance_entry(
     status: str = entry["status"]
     if status in ("blocked", "partial") and not entry["blockers"]:
         report.problem(f"{where}: status '{status}' needs at least one id in 'blockers'")
-    if status == "passing":
-        evidence = entry.get("evidence")
-        if evidence is None:
-            report.problem(f"{where}: status 'passing' without recorded evidence (run sync-evidence)")
-        elif evidence["passed"] <= 0 or evidence["failed"] != 0 or evidence["skipped"] != 0:
-            report.problem(
-                f"{where}: status 'passing' contradicts the recorded evidence "
-                f"({evidence['passed']} passed, {evidence['failed']} failed, {evidence['skipped']} skipped); "
-                "passing needs passed > 0 and nothing failed or skipped"
-            )
+    evidence = entry.get("evidence")
+    if evidence is None and status not in ("planned", "blocked"):
+        # Without evidence an entry is 'planned', or 'blocked' by its blocker ids alone.
+        report.problem(f"{where}: status '{status}' without recorded evidence (run sync-evidence)")
+    if (
+        status == "passing"
+        and evidence is not None
+        and (evidence["passed"] <= 0 or evidence["failed"] != 0 or evidence["skipped"] != 0)
+    ):
+        report.problem(
+            f"{where}: status 'passing' contradicts the recorded evidence "
+            f"({evidence['passed']} passed, {evidence['failed']} failed, {evidence['skipped']} skipped); "
+            "passing needs passed > 0 and nothing failed or skipped"
+        )
     if status == "planned":
         return
     if status in ("passing", "failing", "partial") and not entry["test_modules"]:
@@ -1060,13 +1569,74 @@ def _check_acceptance_entry(
                 )
 
 
-def _check_acceptance(registers: Registers, info: _MatrixInfo, report: Report) -> None:
+def _check_recorded_evidence(
+    registers: Registers, entries: Sequence[Mapping[str, Any]], report: Report
+) -> None:
+    """The status and the counts recorded with an evidence file equal what that file gives.
+
+    The evidence file named by an entry is read again and the entry is derived from it exactly as
+    ``sync-evidence`` does (:func:`derive_entry`), so a status or a count typed by hand, and an
+    evidence file that was replaced after the sync, are both noticed.  A file that cannot be used
+    is reported once, with the entries that record it.
+    """
+    hint = "the register was edited by hand or the evidence file changed"
+    users: dict[str, list[str]] = {}
+    for entry in entries:
+        if "evidence" in entry:
+            users.setdefault(entry["evidence"]["file"], []).append(entry["id"])
+    loaded: dict[str, Evidence] = {}
+    for file, entry_ids in users.items():
+        reason = _repo_path_problem(registers.root, file)
+        if reason is None and not (registers.root / file).is_file():
+            reason = "is not a file"
+        if reason is None:
+            try:
+                evidence = load_evidence(registers.root / file, label=file)
+            except RegisterError as exc:
+                reason = f"cannot be used ({str(exc).removeprefix(file + ': ')})"
+            else:
+                refusal = evidence.refusal()
+                if refusal is None:
+                    loaded[file] = evidence
+                else:
+                    reason = f"is not usable evidence ({refusal})"
+        if reason is not None:
+            report.problem(
+                f"evidence file {file!r} {reason}: it is recorded as the evidence of {_some(entry_ids)} "
+                f"- {hint}"
+            )
+    for entry in entries:
+        recorded = entry.get("evidence")
+        if recorded is None or recorded["file"] not in loaded:
+            continue
+        file = recorded["file"]
+        derived = derive_entry(entry, loaded[file].tests)
+        where = f"acceptance test {entry['id']}"
+        if derived.tests == 0:
+            report.problem(
+                f"{where}: records evidence from {file}, but that file holds no test marked "
+                f'acceptance("{entry["requirement"]}") - {hint} (run sync-evidence)'
+            )
+        elif entry["status"] != derived.status or any(
+            recorded[key] != getattr(derived, key) for key in _EVIDENCE_COUNT_KEYS
+        ):
+            report.problem(
+                f"{where}: the register records status '{entry['status']}' with {recorded['tests']} test(s) "
+                f"({recorded['passed']} passed, {recorded['failed']} failed, {recorded['skipped']} skipped), "
+                f"but {file} gives status '{derived.status}' with {derived.tests} test(s) "
+                f"({derived.passed} passed, {derived.failed} failed, {derived.skipped} skipped) - {hint} "
+                "(run sync-evidence)"
+            )
+
+
+def _check_acceptance(registers: Registers, info: _MatrixInfo, report: Report) -> dict[str, str]:
+    """Check the acceptance test register; returns the status of every sound entry by requirement id."""
     document = registers.acceptance
     if ACCEPTANCE_FILE in registers.unloaded:
-        return
+        return {}
     if not isinstance(document, dict):
         report.structural(f"{ACCEPTANCE_FILE}: the top level must be a mapping")
-        return
+        return {}
     _check_keys(document, ACCEPTANCE_FILE, _ACCEPTANCE_KEYS, (), report)
     if "schema_version" in document and not (
         _is_int(document["schema_version"]) and document["schema_version"] == 1
@@ -1089,9 +1659,10 @@ def _check_acceptance(registers: Registers, info: _MatrixInfo, report: Report) -
     if not isinstance(entries, list):
         if "acceptance_tests" in document:
             report.structural(f"{ACCEPTANCE_FILE}: acceptance_tests must be a list")
-        return
+        return {}
     for index, entry in enumerate(entries):
         _check_acceptance_entry(registers, entry, index, state, report)
+    _check_recorded_evidence(registers, state.sound, report)
     if info.usable:
         for requirement_id, requirement in info.sound.items():
             if requirement["kind"] == "acceptance" and requirement_id not in state.requirements:
@@ -1099,6 +1670,29 @@ def _check_acceptance(registers: Registers, info: _MatrixInfo, report: Report) -
                     f"requirement {requirement_id}: kind 'acceptance' but {ACCEPTANCE_FILE} has no entry "
                     f"AT-{requirement_id}"
                 )
+    statuses: dict[str, str] = {}
+    for entry in state.sound:
+        statuses.setdefault(entry["requirement"], entry["status"])
+    return statuses
+
+
+def _check_verified_acceptance(info: _MatrixInfo, statuses: Mapping[str, str], report: Report) -> None:
+    """An acceptance requirement is 'verified' only while its acceptance test is 'passing'."""
+    for requirement_id, requirement in info.sound.items():
+        if "-ACC-" not in requirement_id or requirement["status"] != "verified":
+            continue
+        actual = statuses.get(requirement_id)
+        if actual == "passing":
+            continue
+        state = (
+            f"its status is '{actual}'"
+            if actual is not None
+            else f"{ACCEPTANCE_FILE} has no usable entry for it"
+        )
+        report.problem(
+            f"requirement {requirement_id}: status 'verified' needs the acceptance test AT-{requirement_id} "
+            f"with status 'passing' ({state})"
+        )
 
 
 def check_registers(registers: Registers, loaded: Report | None = None) -> Report:
@@ -1110,7 +1704,9 @@ def check_registers(registers: Registers, loaded: Report | None = None) -> Repor
         report.structural_count = loaded.structural_count
     report.problems.extend(registers.logs.problems)
     info = _check_matrix(registers, report)
-    _check_acceptance(registers, info, report)
+    _check_lock(registers, info, report)
+    acceptance_statuses = _check_acceptance(registers, info, report)
+    _check_verified_acceptance(info, acceptance_statuses, report)
     _check_log_references(registers, info, report)
     return report
 
@@ -1219,6 +1815,12 @@ def _contribution_text(contribution: Mapping[str, Any]) -> str:
     return f"{text} ({'; '.join(extras)})" if extras else text
 
 
+def _review_text(requirement: Mapping[str, Any]) -> str:
+    """Review status of a requirement, followed by its review reference when it has one."""
+    reference = requirement.get("review_reference")
+    return f"{requirement['review_status']} ({reference})" if reference else str(requirement["review_status"])
+
+
 def _requirement_details(requirement: Mapping[str, Any]) -> list[str]:
     """Contributions, blockers and notes of a requirement, one item per line."""
     details = [_contribution_text(contribution) for contribution in requirement["contributions"]]
@@ -1263,7 +1865,7 @@ def render_matrix_md(matrix: Mapping[str, Any]) -> str:
             lines.append(
                 f"| {requirement['id']} | {_cell(requirement['text'])} "
                 f"| {_sessions_text(requirement['sessions'])} | {requirement['status']} "
-                f"| {requirement['review_status']} | {details} |"
+                f"| {_review_text(requirement)} | {details} |"
             )
         lines.append("")
     return "\n".join(lines).rstrip("\n") + "\n"
@@ -1392,7 +1994,7 @@ def render_status_md(registers: Registers) -> str:
         for requirement in members_req:
             lines.append(
                 f"- **{requirement['id']}** ({_sessions_text(requirement['sessions'])}; review: "
-                f"{requirement['review_status']}) - {_inline(requirement['text'])}"
+                f"{_review_text(requirement)}) - {_inline(requirement['text'])}"
             )
             lines += [f"  - {_inline(item)}" for item in _requirement_details(requirement)]
         lines.append("")
@@ -1471,14 +2073,46 @@ def derive_acceptance_status(passed: int, failed: int, skipped: int, has_blocker
     return "partial" if passed > 0 else "blocked"
 
 
-def load_evidence(path: Path) -> list[dict[str, Any]]:
-    """Tests of a pytest evidence file written by ``tests/conftest.py`` (schema version 1)."""
-    label = str(path)
+@dataclass(frozen=True)
+class Evidence:
+    """Content of a pytest evidence file written by ``tests/conftest.py`` (schema version 1)."""
+
+    #: One mapping per collected test: nodeid, requirements, acceptance, outcome.
+    tests: Sequence[Mapping[str, Any]]
+    #: Exit status of the pytest run (None when the file does not record it).
+    exit_status: int | None = None
+    #: Node ids of the modules that could not be imported or collected.
+    collection_errors: tuple[str, ...] = ()
+    #: Commit the tests ran on and whether the working tree had uncommitted changes (None: unknown).
+    commit: str | None = None
+    tree_dirty: bool | None = None
+
+    def refusal(self) -> str | None:
+        """Why the run behind this file is no evidence, or None when the file can be used."""
+        if self.exit_status not in COMPLETED_EXIT_STATUSES:
+            found = "is missing" if self.exit_status is None else f"is {self.exit_status}"
+            return f"'exit_status' {found}, not 0 or 1: the test run did not complete"
+        if self.collection_errors:
+            return (
+                f"{len(self.collection_errors)} module(s) could not be collected; a test that could not "
+                f"be imported is not a pass: {', '.join(self.collection_errors)}"
+            )
+        return None
+
+
+def load_evidence(path: Path, label: str | None = None) -> Evidence:
+    """Read a pytest evidence file; a file of another shape raises :class:`RegisterError`.
+
+    ``exit_status`` and the keys ``collection_errors``, ``commit`` and ``tree_dirty`` are optional
+    (older files do not have them) but must have the right type when present.  Whether the run
+    can serve as evidence at all is a separate question, answered by :meth:`Evidence.refusal`.
+    """
+    label = str(path) if label is None else label
     try:
         payload = json.loads(path.read_bytes().decode("utf-8"))
     except OSError as exc:
         raise RegisterError(f"{label}: cannot read the evidence file ({exc.strerror or exc})") from exc
-    except ValueError as exc:
+    except (ValueError, RecursionError) as exc:
         raise RegisterError(f"{label}: not a JSON evidence file ({exc})") from exc
     if (
         not isinstance(payload, dict)
@@ -1503,7 +2137,60 @@ def load_evidence(path: Path) -> list[dict[str, Any]]:
                 raise RegisterError(f"{where}: '{key}' must be a list of ids")
         if test.get("outcome") not in outcomes:
             raise RegisterError(f"{where}: unknown outcome {test.get('outcome')!r}")
-    return tests
+    exit_status = payload.get("exit_status")
+    if exit_status is not None and not _is_int(exit_status):
+        raise RegisterError(f"{label}: 'exit_status' must be an integer")
+    collection_errors = payload.get("collection_errors", [])
+    if not _is_str_list(collection_errors):
+        raise RegisterError(f"{label}: 'collection_errors' must be a list of node ids")
+    commit = payload.get("commit")
+    if commit is not None and not isinstance(commit, str):
+        raise RegisterError(f"{label}: 'commit' must be a string or null")
+    tree_dirty = payload.get("tree_dirty")
+    if tree_dirty is not None and not isinstance(tree_dirty, bool):
+        raise RegisterError(f"{label}: 'tree_dirty' must be true, false or null")
+    return Evidence(
+        tests=tests,
+        exit_status=exit_status,
+        collection_errors=tuple(collection_errors),
+        commit=commit,
+        tree_dirty=tree_dirty,
+    )
+
+
+@dataclass(frozen=True)
+class DerivedEntry:
+    """What an evidence file says about one acceptance test."""
+
+    #: Tests whose ``acceptance`` marker names the requirement of the entry.
+    marked: tuple[Mapping[str, Any], ...]
+    tests: int
+    passed: int
+    failed: int
+    skipped: int
+    #: Marked tests that were collected but did not run (they are part of ``skipped``).
+    not_run: int
+    status: str
+
+    def counts(self) -> dict[str, int]:
+        return {key: getattr(self, key) for key in _EVIDENCE_COUNT_KEYS}
+
+
+def derive_entry(entry: Mapping[str, Any], tests: Sequence[Mapping[str, Any]]) -> DerivedEntry:
+    """Counts and status of an acceptance test entry according to the tests of an evidence file."""
+    marked = tuple(test for test in tests if entry["requirement"] in test["acceptance"])
+    passed = sum(1 for test in marked if test["outcome"] in PASSED_OUTCOMES)
+    failed = sum(1 for test in marked if test["outcome"] in FAILED_OUTCOMES)
+    skipped = sum(1 for test in marked if test["outcome"] in SKIPPED_OUTCOMES)
+    return DerivedEntry(
+        marked=marked,
+        tests=len(marked),
+        passed=passed,
+        failed=failed,
+        skipped=skipped,
+        not_run=sum(1 for test in marked if test["outcome"] == "not_run"),
+        status=derive_acceptance_status(passed, failed, skipped, bool(entry["blockers"])),
+    )
 
 
 def _insert_key(mapping: dict[str, Any], key: str, value: Any, *, after: str = "", before: str = "") -> None:
@@ -1552,76 +2239,124 @@ def _unknown_marker_ids(tests: Sequence[Mapping[str, Any]], registers: Registers
             )
 
 
-def sync_evidence(root: Path, evidence: Path) -> Report:
+def _evidence_text(status: str, counts: Mapping[str, int] | None) -> str:
+    if counts is None:
+        return f"status '{status}' without recorded evidence"
+    return (
+        f"status '{status}' with {counts['tests']} test(s) ({counts['passed']} passed, "
+        f"{counts['failed']} failed, {counts['skipped']} skipped)"
+    )
+
+
+def sync_evidence(root: Path, evidence: Path, *, check: bool = False) -> Report:
     """Update the acceptance test register from a pytest evidence file.
 
     For every entry the tests whose ``acceptance`` marker names its requirement are counted and
     the status is derived with :func:`derive_acceptance_status`.  Entries with marked tests get an
     ``evidence`` mapping ``{file, tests, passed, failed, skipped}``; entries without marked tests
     carry none (a stale one is removed, so 'passing' can never survive without evidence).
-    Unknown marker ids, tests that did not run and a 'partial'/'blocked' result without a blocker
-    id are reported as problems; the register is still updated, because the counts are facts.
-    A malformed or misplaced evidence file changes nothing.
+    Unknown marker ids, tests that did not run, a 'partial'/'blocked' result without a blocker id
+    and a listed test module that contributed no executed test are reported as problems; the
+    register is still updated, because the counts are facts.
+
+    Nothing is written for a malformed or misplaced evidence file, for a run that did not complete
+    (``exit_status`` other than 0 or 1) and for a run with collection errors.
+
+    With ``check`` nothing is ever written and the evidence file may be outside the repository:
+    every entry whose status or counts differ from what would be written is reported, in addition
+    to the problems above.  Only the recorded path ``evidence.file`` is not compared.
     """
-    registers, report = _load_structurally_valid(root, "sync evidence")
+    registers, report = _load_structurally_valid(root, "check the evidence" if check else "sync evidence")
     if registers is None:
         return report
+    relative = ""
     try:
         relative = evidence.resolve().relative_to(root.resolve()).as_posix()
     except ValueError:
-        report.problem(
-            f"{evidence}: the evidence file must be inside the repository ({root}) because the register "
-            "records its repository-relative path (nothing was written)"
-        )
-        return report
+        if not check:
+            report.problem(
+                f"{evidence}: the evidence file must be inside the repository ({root}) because the register "
+                "records its repository-relative path (nothing was written)"
+            )
+            return report
     try:
-        tests = load_evidence(evidence)
+        loaded = load_evidence(evidence)
     except RegisterError as exc:
         report.problem(f"{exc} (nothing was written)")
         return report
+    refusal = loaded.refusal()
+    if refusal is not None:
+        report.problem(f"{evidence}: {refusal} (nothing was written)")
+        return report
+    tests = loaded.tests
     _unknown_marker_ids(tests, registers, report)
 
     document = copy.deepcopy(registers.acceptance)
+    differing = 0
     for entry in document["acceptance_tests"]:
-        marked = [test for test in tests if entry["requirement"] in test["acceptance"]]
-        passed = sum(1 for test in marked if test["outcome"] in PASSED_OUTCOMES)
-        failed = sum(1 for test in marked if test["outcome"] in FAILED_OUTCOMES)
-        skipped = sum(1 for test in marked if test["outcome"] in SKIPPED_OUTCOMES)
-        not_run = sum(1 for test in marked if test["outcome"] == "not_run")
-        status = derive_acceptance_status(passed, failed, skipped, bool(entry["blockers"]))
-        if marked:
-            counts = {
-                "file": relative,
-                "tests": len(marked),
-                "passed": passed,
-                "failed": failed,
-                "skipped": skipped,
-            }
-            _insert_key(entry, "evidence", counts, after="status")
+        derived = derive_entry(entry, tests)
+        status = derived.status
+        recorded = entry.get("evidence")
+        recorded_counts = None if recorded is None else {key: recorded[key] for key in _EVIDENCE_COUNT_KEYS}
+        derived_counts = derived.counts() if derived.marked else None
+        if check and (entry["status"], recorded_counts) != (status, derived_counts):
+            differing += 1
+            report.problem(
+                f"{entry['id']}: the register records {_evidence_text(entry['status'], recorded_counts)}, "
+                f"but {evidence} gives {_evidence_text(status, derived_counts)}"
+            )
+        if derived.marked:
+            _insert_key(entry, "evidence", {"file": relative, **derived.counts()}, after="status")
         else:
             entry.pop("evidence", None)
         if status != entry["status"]:
-            report.messages.append(
-                f"{entry['id']}: {entry['status']} -> {status} "
-                f"({passed} passed, {failed} failed, {skipped} skipped)"
-            )
+            if not check:
+                report.messages.append(
+                    f"{entry['id']}: {entry['status']} -> {status} "
+                    f"({derived.passed} passed, {derived.failed} failed, {derived.skipped} skipped)"
+                )
             entry["status"] = status
-        if not_run:
+        if derived.not_run:
             report.problem(
-                f"{entry['id']}: {not_run} marked test(s) did not run; the evidence is incomplete "
+                f"{entry['id']}: {derived.not_run} marked test(s) did not run; the evidence is incomplete "
                 "(they are counted as skipped, never as passed)"
             )
-        if marked and status in ("partial", "blocked") and not entry["blockers"]:
+        if derived.marked and status in ("partial", "blocked") and not entry["blockers"]:
             report.problem(
-                f"{entry['id']}: status '{status}' ({passed} passed, {skipped} skipped) needs a blocker id - "
-                f"record why the tests are skipped in {CHANGE_REQUESTS_FILE} and add the id to 'blockers'"
+                f"{entry['id']}: status '{status}' ({derived.passed} passed, {derived.skipped} skipped) "
+                f"needs a blocker id - record why the tests are skipped in {CHANGE_REQUESTS_FILE} and add "
+                "the id to 'blockers'"
             )
-        modules = sorted({test["nodeid"].split("::")[0] for test in marked} - set(entry["test_modules"]))
+        found_in = {test["nodeid"].split("::")[0] for test in derived.marked}
+        if derived.marked:
+            executed_in = {
+                test["nodeid"].split("::")[0]
+                for test in derived.marked
+                if test["outcome"] in EXECUTED_OUTCOMES
+            }
+            for module in entry["test_modules"]:
+                if module not in executed_in:
+                    report.problem(
+                        f"{entry['id']}: listed test module contributed no test: {module} (no test marked "
+                        f'acceptance("{entry["requirement"]}") from it was executed; a module that lost '
+                        "its tests must not go unnoticed)"
+                    )
+        modules = sorted(found_in - set(entry["test_modules"]))
         if modules:
             report.note(
                 f"{entry['id']}: marked tests found in {', '.join(modules)}, not listed in 'test_modules'"
             )
 
+    if check:
+        if differing:
+            report.problems.insert(
+                0,
+                f"{ACCEPTANCE_FILE}: {differing} entr{'y differs' if differing == 1 else 'ies differ'} from "
+                f"what sync-evidence would write for {evidence} (nothing was written)",
+            )
+        else:
+            report.messages.append(f"{ACCEPTANCE_FILE}: equals what sync-evidence would write for {evidence}")
+        return report
     if document == registers.acceptance:
         report.messages.append(f"{ACCEPTANCE_FILE}: unchanged")
         return report
@@ -1656,6 +2391,8 @@ def _check_update(
             f"{where}: review_status {update['review_status']!r} is not one of "
             f"{', '.join(info.review_values)}"
         )
+    if "review_reference" in update and not _is_decision_id(update["review_reference"]):
+        report.problem(f"{where}: 'review_reference' must be the id of a decision (D-nnn)")
     if "notes" in update and not isinstance(update["notes"], str):
         report.problem(f"{where}: 'notes' must be a string")
     if "blockers" in update and (
@@ -1692,6 +2429,8 @@ def _apply_update(requirement: dict[str, Any], update: Mapping[str, Any]) -> Non
     for key in ("status", "review_status", "notes"):
         if key in update:
             requirement[key] = update[key]
+    if "review_reference" in update:
+        _insert_key(requirement, "review_reference", update["review_reference"], after="review_status")
     if "blockers" in update:
         _insert_key(requirement, "blockers", list(update["blockers"]), before="notes")
     if "contribution" in update:
@@ -1716,7 +2455,8 @@ def apply_patch(root: Path, patch: Path) -> Report:
         updates:
           - ids: [S00-ASG-27, 'S00-DEL-*']      # ids or shell-style globs
             status: verified                     # optional
-            review_status: unverified            # optional
+            review_status: approved              # optional; other than 'unverified' needs a reference
+            review_reference: D-031              # optional, the APPROVED decision recording the review
             notes: text                          # optional, replaces the notes
             blockers: [B-001]                    # optional, requirement-level blocker ids
             contribution:                        # optional, replaces the contribution of that session
@@ -1728,7 +2468,9 @@ def apply_patch(root: Path, patch: Path) -> Report:
 
     Updates are applied in order, so a later update overrides an earlier one.  An unknown id, a
     pattern that matches nothing, a malformed update, or a result that :func:`check_registers`
-    would reject is an error and nothing is written.  Requirements are never added or deleted.
+    would reject is an error and nothing is written.  Requirements are never added or deleted,
+    the locked fields (id, source, section, text, source_clause) cannot be patched, and the
+    requirement lock is never touched.
     """
     registers, report = _load_structurally_valid(root, "apply the patch")
     if registers is None:
@@ -1844,7 +2586,8 @@ Patch file (YAML). Updates are applied in order; any error means nothing is writ
   updates:
     - ids: [S00-ASG-27, 'S00-DEL-*']    # requirement ids or shell-style globs
       status: verified                   # optional
-      review_status: unverified          # optional
+      review_status: approved            # optional; other than 'unverified' needs a review_reference
+      review_reference: D-031            # optional, id of the APPROVED decision that records the review
       notes: replaces the notes          # optional
       blockers: [B-001]                  # optional, requirement-level blocker ids
       contribution:                      # optional, replaces the contribution of the same session
@@ -1853,6 +2596,25 @@ Patch file (YAML). Updates are applied in order; any error means nothing is writ
         status: verified
         evidence: [docs/DECISION_LOG.md]
         blockers: [B-001]                # optional
+
+A requirement is 'verified' only with a 'verified' contribution of every session in its 'sessions',
+each listing at least one existing evidence path; an acceptance requirement (-ACC-) additionally needs
+its acceptance test to be 'passing'. The requirement lock is never changed by a patch.
+"""
+
+_LOCK_HELP = f"""\
+Maintain the requirement lock ({LOCK_FILE}): for every requirement id the SHA-256 of its id,
+source, section, text and source_clause. 'validate' fails when a locked requirement is missing from
+the matrix or when one of these fields changed.
+
+  lock                                  add the requirements that are not locked yet (creates the file)
+  lock --reword ID [ID ...] --reason TEXT
+                                        additionally record a deliberate correction of the named ids:
+                                        their hash is replaced and one entry per id is appended to 'changes'
+
+Nothing is written while a locked id is missing from the matrix or a locked hash differs without being
+named by --reword. Each named id must be in the matrix, be locked and really differ. Ids are never
+removed and 'changes' is append-only.
 """
 
 
@@ -1878,7 +2640,7 @@ def _emit(report: Report) -> int:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m tools.gie_registers",
-        description="Validate, render and update the persistent GIE project registers.",
+        description="Validate, render, update and lock the persistent GIE project registers.",
     )
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument(
@@ -1891,10 +2653,21 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--check", action="store_true", help="write nothing; exit 1 if a generated file is missing or stale"
     )
     sync_parser = commands.add_parser(
-        "sync-evidence", parents=[common], help="update the acceptance test register from pytest evidence"
+        "sync-evidence",
+        parents=[common],
+        help="update the acceptance test register from pytest evidence",
+        description="Derive the status of every acceptance test from a pytest evidence file. The file is "
+        "refused when its exit_status is not 0 or 1 (the run did not complete) or when it lists "
+        "collection_errors; a listed test module that contributed no executed test is reported.",
     )
     sync_parser.add_argument(
         "--evidence", type=Path, required=True, help="file written by pytest --gie-evidence"
+    )
+    sync_parser.add_argument(
+        "--check",
+        action="store_true",
+        help="write nothing; exit 1 unless the register already holds exactly what this evidence file "
+        "gives (the file may be outside the repository, e.g. fresh CI evidence)",
     )
     apply_parser = commands.add_parser(
         "apply",
@@ -1904,6 +2677,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     apply_parser.add_argument("--patch", type=Path, required=True, help="YAML patch file")
+    lock_parser = commands.add_parser(
+        "lock",
+        parents=[common],
+        help="lock new requirements; record a deliberate rewording with --reword",
+        description=_LOCK_HELP,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    lock_parser.add_argument(
+        "--reword",
+        nargs="+",
+        metavar="ID",
+        help="requirement ids whose locked words were corrected on purpose (needs --reason)",
+    )
+    lock_parser.add_argument("--reason", metavar="TEXT", help="why the named requirements were corrected")
     commands.add_parser("stats", parents=[common], help="print totals as JSON")
     arguments = parser.parse_args(argv)
     _make_output_robust()
@@ -1914,9 +2701,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     if arguments.command == "render":
         return _emit(render(root, check=arguments.check))
     if arguments.command == "sync-evidence":
-        return _emit(sync_evidence(root, arguments.evidence))
+        return _emit(sync_evidence(root, arguments.evidence, check=arguments.check))
     if arguments.command == "apply":
         return _emit(apply_patch(root, arguments.patch))
+    if arguments.command == "lock":
+        if arguments.reword is not None and not (arguments.reason or "").strip():
+            lock_parser.error("--reword needs --reason TEXT (why the locked words are corrected)")
+        if arguments.reword is None and arguments.reason is not None:
+            lock_parser.error("--reason is only used together with --reword ID [ID ...]")
+        return _emit(lock_requirements(root, reword=arguments.reword or (), reason=arguments.reason))
     try:
         print(json.dumps(stats(root), indent=2))
     except RegisterError as exc:

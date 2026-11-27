@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from gie.contracts._spec import Record
 from gie.contracts.common import DataOrigin, Produced, origin_not_better_than
+from gie.contracts.order_event import OrderEvent
 from gie.contracts.ordering import ordering_time_ns
 from gie.contracts.tick import Tick
 from gie.core.errors import ContractValidationError
@@ -29,20 +30,45 @@ def _origin(record: Record) -> DataOrigin | None:
     return origin
 
 
-def check_derivation(child: Produced, *inputs: Record) -> None:
+def _creation_and_watermark(child: object) -> tuple[int, int | None]:
+    """``(creation instant, market-data watermark or None)`` of a record that can be derived.
+
+    * a produced record (evidence, candidate, plan, risk decision, position) is created at its
+      ``decision_time_ns`` and carries the watermark ``as_of_time_ns``;
+    * an order event is created at its ``event_time_ns`` (for a request: the instant GIE decided
+      to send it) and carries no watermark of its own;
+    * anything else has no creation instant and cannot be checked as a derived record.
+    """
+    if isinstance(child, Produced):
+        return child.decision_time_ns, child.as_of_time_ns
+    if isinstance(child, OrderEvent):
+        return child.event_time_ns, None
+    rule = "only a produced record or an order event can be checked as a derived record"
+    raise ContractValidationError(
+        f"derivation rule violated: {rule}", contract=type(child).__name__, rule=rule
+    )
+
+
+def check_derivation(child: Produced | OrderEvent, *inputs: Record) -> None:
     """Raise :class:`ContractValidationError` unless *child* may have been derived from *inputs*.
 
     Rules (section 3 of the contract specification):
 
     * same run and mode as every run-scoped input;
     * created no earlier than any input became available
-      (``decision_time_ns >= ordering time of the input``);
+      (``decision_time_ns >= ordering time of the input``; for an order event its
+      ``event_time_ns`` is the creation instant);
     * its market-data watermark covers the inputs
-      (``as_of_time_ns >= watermark of every input``);
+      (``as_of_time_ns >= watermark of every input``; not applicable to an order event, which
+      has no watermark);
     * it does not outlive its inputs
-      (``valid_until_ns <= valid_until_ns of every input that has one``);
+      (``valid_until_ns <= valid_until_ns of every input that has one``) - this is what keeps the
+      chain *entry order <= risk approval <= plan <= candidate <= evidence* ordered;
     * its data origin is not more trustworthy than the least trustworthy input.
+
+    A *child* that is neither a produced record nor an order event is refused.
     """
+    created_ns, watermark_ns = _creation_and_watermark(child)
     if not inputs:
         raise ContractValidationError("a derived record needs at least one input")
 
@@ -66,9 +92,9 @@ def check_derivation(child: Produced, *inputs: Record) -> None:
             run_id != child.run_id or getattr(item, "mode", child.mode) is not child.mode
         ):
             raise fail("inputs belong to the same run and mode", input=name)
-        if child.decision_time_ns < ordering_time_ns(item):
+        if created_ns < ordering_time_ns(item):
             raise fail("a record is not created before its inputs are available", input=name)
-        if child.as_of_time_ns < _watermark(item):
+        if watermark_ns is not None and watermark_ns < _watermark(item):
             raise fail("as_of_time_ns covers the market-data watermark of every input", input=name)
         expiry: int | None = getattr(item, "valid_until_ns", None)
         if child_expiry is not None and expiry is not None and child_expiry > expiry:

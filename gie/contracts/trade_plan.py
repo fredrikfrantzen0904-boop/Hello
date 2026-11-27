@@ -181,6 +181,12 @@ def _targets_on_winning_side(plan: TradePlan) -> bool:
     return all(target.price < entry for target in plan.targets)
 
 
+def _condition_prices_positive(plan: TradePlan) -> bool:
+    """A plan is always XAUUSD, so the level of each of its price conditions is a gold price."""
+    trigger = () if plan.entry_trigger is None else (plan.entry_trigger,)
+    return all(condition.price > 0 for condition in (*trigger, *plan.invalidations))
+
+
 @final
 @contract("TradePlan", "1.0.0")
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -378,6 +384,11 @@ class TradePlan(Produced):
             "the plan states its uncertainty: net_r_stdev or expected_net_r_stderr",
             lambda r: r.net_r_stdev is not None or r.expected_net_r_stderr is not None,
         ),
+        inv(
+            "PLN-13",
+            "entry_trigger and every invalidation of a plan are prices greater than zero",
+            _condition_prices_positive,
+        ),
     )
 
     @property
@@ -409,8 +420,16 @@ _PLAN_IMMUTABLE: Final[tuple[str, ...]] = (
 def validate_plan_transition(previous: TradePlan | None, revision: TradePlan) -> None:
     """Check that *revision* may follow *previous* in the chain of one plan.
 
-    The stop may only move towards the entry (never be widened, G04-11); a
-    final status ends the chain.
+    The risk of a plan is never widened along its chain (G04-11):
+
+    * the stop may only move towards the entry, never away from it;
+    * for every entry style except MARKET the risk distance ``|entry_price - stop_price|``
+      (1 R) may not increase either, so an intended entry level that moves away from an
+      unchanged stop is refused as well;
+    * a MARKET plan has no intended entry level: it is re-issued with a fresh
+      ``reference_price`` before risk evaluates it, and only its stop is held.
+
+    A final status ends the chain.
     """
 
     def fail(rule: str) -> IllegalTransitionError:
@@ -443,6 +462,12 @@ def validate_plan_transition(previous: TradePlan | None, revision: TradePlan) ->
     )
     if widened:
         raise fail("the stop may not be moved away from the entry (no widening)")
+    # entry_style is immutable along the chain, so both revisions state an entry level or neither.
+    if revision.entry_style is not EntryStyle.MARKET and revision.risk_per_unit > previous.risk_per_unit:
+        raise fail(
+            "the risk distance between entry_price and stop_price may not increase between revisions "
+            "(an entry that moves away from the stop widens 1 R)"
+        )
     for name in ("decision_time_ns", "as_of_time_ns", "seq"):
         if getattr(revision, name) < getattr(previous, name):
             raise fail(f"{name} may not decrease")

@@ -463,6 +463,19 @@ def test_a_context_needs_a_genuine_manifest(not_a_manifest: object) -> None:
         RunContext(not_a_manifest, clock, clock, load_research_parameters(), MemoryJournal())  # type: ignore[arg-type]
 
 
+@pytest.mark.requirement("S00-ASG-19", "M-AUTH-07")
+def test_a_context_without_a_clock_or_without_parameters_is_a_configuration_error() -> None:
+    # Fail closed with the documented error: a missing or foreign object in place of the clock or
+    # of the parameters is a configuration error (GIE.CONFIG.INVALID), like a clock of the wrong kind.
+    clock, parameters = ReplayClock(T0), load_research_parameters()
+    for not_a_clock in (None, object(), "REPLAY"):
+        with pytest.raises(ConfigError):
+            RunContext(_replay(), not_a_clock, clock, parameters, MemoryJournal())  # type: ignore[arg-type]
+    for not_parameters in (None, parameters.parameters_sha256, {}):
+        with pytest.raises(ConfigError):
+            RunContext(_replay(), clock, clock, not_parameters, MemoryJournal())  # type: ignore[arg-type]
+
+
 @pytest.mark.requirement("S00-ASG-19")
 def test_a_context_cannot_be_rewired_after_construction() -> None:
     clock = ReplayClock(T0)
