@@ -458,7 +458,52 @@ def contract_section(story: list[Any]) -> None:
         story.append(Spacer(1, 5))
 
 
-def build(evidence_dir: Path, out: Path, reviewed_commit: str) -> None:
+class EvidenceMismatch(SystemExit):
+    """The evidence does not belong to the commit the review is written for."""
+
+
+def production_tree(matrix: dict[str, Any]) -> str:
+    """Name of the production tree, taken from the owner's requirement text (never typed here)."""
+    for requirement in matrix["requirements"]:
+        if requirement["id"] == "S00-ASG-01":
+            found = re.search(r"existing (\S+) without", requirement["text"])
+            if found:
+                return found[1]
+    return "the production tree"
+
+
+def gate_status(ci: dict[str, Any] | None, fragment: str) -> str:
+    """Result of the CI step whose name contains *fragment*, as recorded in ci_results.json."""
+    for step in (ci or {}).get("steps", []):
+        if fragment in step["name"]:
+            return str(step["status"])
+    return "not run"
+
+
+def check_evidence(
+    reviewed_commit: str, ci: dict[str, Any] | None, tests: dict[str, Any] | None, allow_dirty: bool
+) -> None:
+    """Refuse to build a review whose evidence was produced on another commit or on a dirty tree."""
+    problems: list[str] = []
+    if ci is None or tests is None:
+        problems.append("ci_results.json and test_results.json are both required")
+    else:
+        if ci.get("commit") != reviewed_commit:
+            problems.append(f"ci_results.json was produced on commit {ci.get('commit')}")
+        if tests.get("commit") != reviewed_commit:
+            problems.append(f"test_results.json was produced on commit {tests.get('commit')}")
+        if not allow_dirty and (
+            ci.get("working_tree_clean") is not True or tests.get("tree_dirty") is not False
+        ):
+            problems.append("the evidence was produced on a working tree with uncommitted changes")
+    if problems:
+        raise EvidenceMismatch(
+            "review not built - the evidence does not match the reviewed commit "
+            f"{reviewed_commit}:\n  " + "\n  ".join(problems)
+        )
+
+
+def build(evidence_dir: Path, out: Path, reviewed_commit: str, allow_dirty: bool = False) -> None:
     matrix = load_yaml("specifications/requirements_matrix.yaml")
     acceptance = load_yaml("specifications/acceptance_tests.yaml")
     graph = load_yaml("specifications/dependency_graph.yaml")
@@ -470,6 +515,8 @@ def build(evidence_dir: Path, out: Path, reviewed_commit: str) -> None:
     bench = load_json(evidence_dir / "benchmark.json")
     manifest = load_json(evidence_dir / "file_manifest.json")
     independent = load_json(evidence_dir / "independent_review.json")
+    check_evidence(reviewed_commit, ci, tests, allow_dirty)
+    tree = production_tree(matrix)
     requirements = session_requirements(matrix)
     counts: dict[str, int] = {}
     for requirement in requirements:
@@ -800,13 +847,15 @@ def build(evidence_dir: Path, out: Path, reviewed_commit: str) -> None:
     story.append(p(esc(first_paragraph(verdict[1] if verdict else "", 1200))))
     story.append(
         p(
-            "Full report: <font face='Courier'>docs/BASELINE_AUDIT.md</font>. What was examined: only the Git repository attached to the session, which contained a single 203-byte file (<font face='Courier'>Start</font>, generic git bootstrap commands, no trading code) at commit 35e32cff. That file is a protected path and is verified byte-identical on every CI run; branch <font face='Courier'>main</font> was not modified."
+            "Full report: <font face='Courier'>docs/BASELINE_AUDIT.md</font>. What was examined: only the Git repository attached to the session, which contained a single 203-byte file (<font face='Courier'>Start</font>, generic git bootstrap commands, no trading code) at commit 35e32cff. That file is a protected path; the CI step that verifies it is byte-identical and that branch <font face='Courier'>main</font> was not advanced reported: <b>"
+            + esc(gate_status(ci, "protected paths"))
+            + "</b>."
         )
     )
     audit_rows = [
         ["inventory item (brief 00)", "state", "what exists instead"],
         [
-            "languages, processes, data, tests, hardware, broker interfaces of D:\\ftmo_eurusd",
+            f"languages, processes, data, tests, hardware, broker interfaces of {esc(tree)}",
             status_text("blocked"),
             "read-only audit tool for the owner to run: tools/audit/gie_baseline_audit.py (standard library only, no network, no file contents, no credentials; tested to leave the audited tree byte-identical)",
         ],
@@ -1069,7 +1118,7 @@ def build(evidence_dir: Path, out: Path, reviewed_commit: str) -> None:
         story.append(p(esc(line), MONO))
     story.append(
         p(
-            "The production tree <font face='Courier'>D:\\ftmo_eurusd</font> is not a worktree of this repository and is never written to by anything in this project."
+            f"The production tree <font face='Courier'>{esc(tree)}</font> is not a worktree of this repository and is never written to by anything in this project."
         )
     )
 
@@ -1147,8 +1196,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--evidence-dir", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--commit", required=True, help="commit hash the evidence was produced on")
+    parser.add_argument(
+        "--allow-dirty",
+        action="store_true",
+        help="draft only: accept evidence that was produced on a tree with uncommitted changes",
+    )
     args = parser.parse_args(argv)
-    build(args.evidence_dir, args.out, args.commit)
+    build(args.evidence_dir, args.out, args.commit, args.allow_dirty)
     print(f"wrote {args.out}")
     return 0
 

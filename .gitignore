@@ -15,3 +15,5 @@ dist/
 *.pem
 *.key
 .ci-evidence/
+ci-evidence/
+out/

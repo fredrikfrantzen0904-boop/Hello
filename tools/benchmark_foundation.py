@@ -26,6 +26,7 @@ import sys
 import tempfile
 import time
 from collections.abc import Callable
+from decimal import Decimal
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -34,8 +35,13 @@ from gie.contracts import (
     FileJournal,
     LifecycleLedger,
     MemoryJournal,
+    OrderEventType,
+    OrderIntent,
+    OrderState,
+    RunRole,
     fingerprint,
     from_json,
+    identity,
     ordering_key,
     to_json,
     to_wire,
@@ -52,11 +58,13 @@ from gie.core.latency import LatencyRecorder
 from gie.core.ordering import SequenceTracker
 from gie.core.params import load_research_parameters
 from gie.core.routing_lock import RoutingGuard, RunMode
-from gie.core.timeutil import NS_PER_MS
+from gie.core.timeutil import NS_PER_MS, NS_PER_SECOND
 from tests.gie import benchmark_adapter, samples
 
 #: fsync is slow and its cost depends on the storage device; fewer samples are enough.
 FSYNC_ITERATIONS = 300
+#: Number of complete steps (tick, position snapshot, stop tightening) timed per journal kind.
+STEP_ITERATIONS = 1500
 
 
 def _time(name: str, operation: Callable[[int], Any], iterations: int, warmup: int) -> dict[str, Any]:
@@ -97,6 +105,118 @@ def _journal_publish(journal: MemoryJournal, name: str, iterations: int, warmup:
     return _time(name, lambda index: journal.publish(ticks[index]), iterations, warmup)
 
 
+def _ratchet_steps(count: int) -> tuple[list[Any], list[list[Any]]]:
+    """A run prefix with one open position, then *count* steps that each tighten its stop.
+
+    One step is what a tick costs in the journal while a position is open and
+    its stop is ratcheted: the tick, a position snapshot with a new peak, the
+    replace request of the protective stop and the broker's confirmation.
+    """
+    story = samples.run_story()
+    prefix: list[Any] = list(story[:19])  # up to the valued position; the stop is working
+    stop: Any = next(
+        record
+        for record in reversed(prefix)
+        if getattr(record, "intent", None) is OrderIntent.PROTECTIVE_STOP
+    )
+    held: Any = prefix[-1]
+    steps: list[list[Any]] = []
+    for index in range(count):
+        t = samples.T0 + 5 * NS_PER_SECOND + (index + 1) * 10 * NS_PER_MS
+        cents = Decimal(index + 1) / 100
+        trigger = Decimal("2647.80") + cents
+        quote = samples.tick(
+            seq=4 + index,
+            event_time_ns=t - NS_PER_MS,
+            receive_time_ns=t,
+            bid=Decimal("2650.60") + cents,
+            ask=Decimal("2650.85") + cents,
+        )
+        snapshot = dataclasses.replace(
+            held,
+            revision=held.revision + 1 + index,
+            seq=held.seq + 1 + index,
+            decision_time_ns=t,
+            as_of_time_ns=t,
+            stop_price=trigger,
+            mark_price=quote.bid,
+            unrealized_net_pnl_amount=Decimal("38.00") + Decimal(index + 1),
+            peak_net_pnl_amount=Decimal("36.00") + Decimal(index + 1),
+            peak_time_ns=t,
+        )
+        order_seq = stop.order_seq + 1 + 2 * index
+        common = {
+            "seq": stop.seq + 1 + 2 * index,
+            "order_seq": order_seq,
+            "order_event_id": identity.order_event_id(stop.client_order_id, order_seq),
+            "reason_code": "RATCHET",
+            "trigger_price": trigger - Decimal("0.01"),
+        }
+        request = dataclasses.replace(
+            stop,
+            **common,
+            event_type=OrderEventType.REPLACE_REQUESTED,
+            order_state=OrderState.PENDING_REPLACE,
+            requested_trigger_price=trigger,
+            event_time_ns=t,
+            receive_time_ns=t,
+        )
+        confirmed = dataclasses.replace(
+            stop,
+            **{
+                **common,
+                "seq": common["seq"] + 1,
+                "order_seq": order_seq + 1,
+                "order_event_id": identity.order_event_id(stop.client_order_id, order_seq + 1),
+                "trigger_price": trigger,
+            },
+            event_type=OrderEventType.REPLACED,
+            order_state=OrderState.WORKING,
+            event_time_ns=t,
+            receive_time_ns=t + 1,
+        )
+        steps.append([quote, snapshot, request, confirmed])
+    return prefix, steps
+
+
+def _time_steps(name: str, journal: MemoryJournal, iterations: int, warmup: int) -> dict[str, Any]:
+    prefix, steps = _ratchet_steps(iterations + warmup)
+    for record in prefix:
+        journal.publish(record)
+
+    def one_step(index: int) -> None:
+        for record in steps[index]:
+            journal.publish(record)
+        journal.commit()
+
+    return _time(name, one_step, iterations, warmup)
+
+
+def _step_cases() -> list[dict[str, Any]]:
+    """Cost of one whole step (4 records) in each journal kind; one synchronisation per step."""
+    results = [
+        _time_steps(
+            "step: tick + position + stop tightening (4 records), MemoryJournal",
+            MemoryJournal(),
+            STEP_ITERATIONS,
+            50,
+        )
+    ]
+    with (
+        tempfile.TemporaryDirectory(prefix="gie-bench-") as folder,
+        FileJournal(Path(folder) / "step.jsonl", fsync=False) as journal,
+    ):
+        results.append(
+            _time_steps(
+                "step: same 4 records, FileJournal, one fsync per step (commit)",
+                journal,
+                FSYNC_ITERATIONS,
+                20,
+            )
+        )
+    return results
+
+
 def _enforcement_path(iterations: int, warmup: int) -> list[dict[str, Any]]:
     """Cost of the checks every published record and every order passes."""
     results: list[dict[str, Any]] = []
@@ -121,18 +241,20 @@ def _enforcement_path(iterations: int, warmup: int) -> list[dict[str, Any]]:
     results.append(
         _time(
             "gateway: validate_entry_authorization",
-            lambda _i: validate_entry_authorization(plan, decision, entry, now_ns=now_ns),
+            lambda _i: validate_entry_authorization(
+                plan, decision, entry, now_ns=now_ns, role=RunRole.RESEARCH
+            ),
             iterations,
             warmup,
         )
     )
 
     held = samples.position()
-    stop_submit, stop_working, stop_request, _stop_replaced = samples.protective_stop_lifecycle()
+    _stop_submit, stop_working, stop_request, _stop_replaced = samples.protective_stop_lifecycle()
     results.append(
         _time(
             "gateway: validate_reducing_order (protective stop)",
-            lambda _i: validate_reducing_order(held, stop_submit),
+            lambda _i: validate_reducing_order(held, stop_request),
             iterations,
             warmup,
         )
@@ -145,13 +267,15 @@ def _enforcement_path(iterations: int, warmup: int) -> list[dict[str, Any]]:
             warmup,
         )
     )
+    story_prefix, story_steps = _ratchet_steps(1)
     ledger = LifecycleLedger()
-    ledger.admit(stop_submit)
-    ledger.admit(stop_working)
+    for record in story_prefix:
+        ledger.admit(record)
+    next_request = story_steps[0][2]
     results.append(
         _time(
-            "gateway: LifecycleLedger.check (next event of an order)",
-            lambda _i: ledger.check(stop_request),
+            "gateway: LifecycleLedger.check (next event of an order, referential run ledger)",
+            lambda _i: ledger.check(next_request),
             iterations,
             warmup,
         )
@@ -234,6 +358,7 @@ def run(iterations: int) -> dict[str, Any]:
     )
 
     results.extend(_enforcement_path(iterations, warmup))
+    results.extend(_step_cases())
 
     parameters = load_research_parameters()
     targets = {

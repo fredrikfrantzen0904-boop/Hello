@@ -116,6 +116,19 @@ def build_steps(evidence_dir: Path) -> list[Step]:
             ("S00-ACC-01", "S00-ACC-02", "S00-ACC-03", "S00-ACC-04", "S00-ACC-05", "S00-ACC-06"),
         ),
         Step(
+            "acceptance register equals what this test run shows",
+            (
+                py,
+                "-m",
+                "tools.gie_registers",
+                "sync-evidence",
+                "--evidence",
+                str(evidence_dir / "test_results.json"),
+                "--check",
+            ),
+            ("OWN-18", "M-AUTH-26", "S12-ASG-07"),
+        ),
+        Step(
             "every independent review finding has a disposition",
             (py, "-m", "tools.summarize_reviews", "--check"),
             ("OWN-09", "COM-10"),
@@ -179,6 +192,25 @@ def _git(*args: str) -> str:
     return completed.stdout.strip() if completed.returncode == 0 else ""
 
 
+def _tree_clean(evidence_dir: Path) -> bool:
+    """True when the working tree equals the commit, not counting files in the evidence directory."""
+    try:
+        ignored = evidence_dir.resolve().relative_to(REPO_ROOT).as_posix() + "/"
+    except ValueError:
+        ignored = None
+    completed = subprocess.run(
+        ("git", "status", "--porcelain", "--untracked-files=all"),
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        return False  # unknown is not clean
+    paths = [line[3:].strip('"') for line in completed.stdout.splitlines() if line.strip()]
+    return not [path for path in paths if not (ignored and path.startswith(ignored))]
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run the GIE integration CI.")
     parser.add_argument(
@@ -192,6 +224,9 @@ def main(argv: list[str] | None = None) -> int:
         args.evidence_dir if args.evidence_dir.is_absolute() else REPO_ROOT / args.evidence_dir
     )
     evidence_dir.mkdir(parents=True, exist_ok=True)
+    # Recorded before anything runs: the evidence directory itself must not make the tree "dirty".
+    commit_at_start = _git("rev-parse", "HEAD")
+    clean_at_start = _tree_clean(evidence_dir)
 
     results: list[StepResult] = []
     for step in build_steps(evidence_dir):
@@ -213,9 +248,10 @@ def main(argv: list[str] | None = None) -> int:
         "generated_by": "tools/ci.py",
         "overall": overall,
         "counts": counts,
-        "commit": _git("rev-parse", "HEAD"),
+        "commit": commit_at_start,
         "branch": _git("rev-parse", "--abbrev-ref", "HEAD"),
-        "working_tree_clean": _git("status", "--porcelain") == "",
+        "working_tree_clean": clean_at_start,
+        "working_tree_clean_after": _tree_clean(evidence_dir),
         "python": sys.version.split()[0],
         "platform": platform.platform(),
         "steps": [asdict(result) for result in results],

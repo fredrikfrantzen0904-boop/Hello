@@ -13,12 +13,18 @@ When ``--gie-evidence=<path>`` is given, a JSON file is written with the outcome
 of every test together with its requirement and acceptance ids.  The registers
 (`tools/gie_registers.py`) and the review package are built from that file, so
 no test result is ever typed by hand.
+
+The file also binds the results to what was tested: the git commit, whether the
+working tree had uncommitted changes when the run started (the evidence file
+itself is ignored), and every module that could not be collected - a test that
+could not even be imported is reported, never silently absent.
 """
 
 from __future__ import annotations
 
 import json
 import platform
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -28,7 +34,53 @@ import pytest
 import yaml
 
 _RESULTS: dict[str, dict[str, Any]] = {}
+_COLLECTION_ERRORS: list[str] = []
 _STARTED = time.time()
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _git(*args: str) -> str | None:
+    try:
+        completed = subprocess.run(
+            ("git", *args), cwd=_REPO_ROOT, capture_output=True, text=True, check=False, timeout=30
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return completed.stdout if completed.returncode == 0 else None
+
+
+def _tree_state(evidence_file: Path | None) -> tuple[str | None, bool | None]:
+    """Commit of the tested code and whether the tree differed from it (ignoring the evidence file)."""
+    commit = _git("rev-parse", "HEAD")
+    status = _git("status", "--porcelain", "--untracked-files=all")
+    if status is None:
+        return (commit.strip() if commit else None), None
+    ignored = None
+    if evidence_file is not None:
+        try:
+            ignored = evidence_file.resolve().parent.relative_to(_REPO_ROOT).as_posix() + "/"
+        except ValueError:
+            ignored = None
+    dirty = any(
+        line[3:].strip('"') and not (ignored and line[3:].strip('"').startswith(ignored))
+        for line in status.splitlines()
+    )
+    return (commit.strip() if commit else None), dirty
+
+
+_TREE_AT_START: tuple[str | None, bool | None] = (None, None)
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    global _TREE_AT_START  # noqa: PLW0603 - recorded once, before any test can touch the tree
+    target = config.getoption("--gie-evidence", default=None)
+    if target:
+        _TREE_AT_START = _tree_state(Path(target))
+
+
+def pytest_collectreport(report: pytest.CollectReport) -> None:
+    if report.failed:
+        _COLLECTION_ERRORS.append(report.nodeid or "<unknown module>")
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -128,9 +180,13 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     counts: dict[str, int] = {}
     for entry in tests:
         counts[entry["outcome"]] = counts.get(entry["outcome"], 0) + 1
+    commit, dirty = _TREE_AT_START
     payload = {
         "schema_version": 1,
         "generated_by": "tests/conftest.py",
+        "commit": commit,
+        "tree_dirty": dirty,
+        "collection_errors": sorted(set(_COLLECTION_ERRORS)),
         "exit_status": int(exitstatus),
         "started_unix_s": round(_STARTED, 3),
         "duration_s": round(time.time() - _STARTED, 3),
