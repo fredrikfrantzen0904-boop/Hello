@@ -145,10 +145,10 @@ def check(root: Path = GOLDEN_DIR) -> list[str]:
     expected = expected_files(root)
     for path, text in sorted(expected.items()):
         if not path.exists():
-            problems.append(f"{path.relative_to(root)}: golden file is missing (run --write)")
+            problems.append(f"{path.relative_to(root).as_posix()}: golden file is missing (run --write)")
         elif _read(path) != text:
             problems.append(
-                f"{path.relative_to(root)}: sample no longer encodes to the golden bytes "
+                f"{path.relative_to(root).as_posix()}: sample no longer encodes to the golden bytes "
                 "(contract or sample changed)"
             )
     current_dirs = {path.parent for path in expected}
@@ -160,15 +160,15 @@ def check(root: Path = GOLDEN_DIR) -> list[str]:
         try:
             record: Record = from_json(text)
         except Exception as exc:
-            problems.append(f"{path.relative_to(root)}: no longer decodes: {exc}")
+            problems.append(f"{path.relative_to(root).as_posix()}: no longer decodes: {exc}")
             continue
         mismatch = envelope_problem(path.parent.name, text)
         if mismatch is not None:
-            problems.append(f"{path.relative_to(root)}: {mismatch}")
+            problems.append(f"{path.relative_to(root).as_posix()}: {mismatch}")
         if path.parent in current_dirs and to_json(record) + "\n" != text:
-            problems.append(f"{path.relative_to(root)}: does not re-encode byte for byte")
+            problems.append(f"{path.relative_to(root).as_posix()}: does not re-encode byte for byte")
         if path.parent in current_dirs and path not in expected:
-            problems.append(f"{path.relative_to(root)}: golden file has no sample variant")
+            problems.append(f"{path.relative_to(root).as_posix()}: golden file has no sample variant")
     problems.extend(trace_problems(root))
     return problems
 
@@ -189,7 +189,7 @@ def write(force: bool, root: Path = GOLDEN_DIR) -> list[str]:
                     "bump the contract version instead"
                 )
         _write(path, text)
-        written.append(str(path.relative_to(root)))
+        written.append(path.relative_to(root).as_posix())
     return written
 
 

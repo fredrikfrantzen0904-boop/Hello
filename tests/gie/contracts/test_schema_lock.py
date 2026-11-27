@@ -787,8 +787,15 @@ def test_missing_schema_file_is_reported(schema_copy: Path, name: str) -> None:
     ["Extra.json", "Tick-0.9.0.schema.json", "Tick-1.0.1.schema.json", "Tock-1.0.0.schema.json", "lock.json"],
 )
 def test_unexpected_json_file_is_reported(schema_copy: Path, extra: str) -> None:
+    replaces_the_lock = (schema_copy / extra).exists()  # "lock.json" on a file system that ignores case
     (schema_copy / extra).write_text("{}\n", encoding="utf-8", newline="\n")
-    assert check(schema_copy) == [f"{extra}: unexpected file in the schema directory"]
+    problems = check(schema_copy)
+    if replaces_the_lock:
+        # There the name is the lock itself: the write destroyed the lock, and that is reported.
+        assert problems
+        assert all(problem.startswith("LOCK.json: ") for problem in problems)
+    else:
+        assert problems == [f"{extra}: unexpected file in the schema directory"]
 
 
 @pytest.mark.requirement("G08-03", "G08-10")

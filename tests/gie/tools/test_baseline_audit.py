@@ -351,6 +351,12 @@ BIG_MODULE = (
 NON_UTF8_NAME = b"caf\xe9_notes.csv"
 NON_UTF8_DISPLAY = "caf\\xe9_notes.csv"
 NON_UTF8_CONTENT = b"time,bid\n1,2\n"
+#: A file whose name is not valid UTF-8 can exist on POSIX file systems only: Windows file names
+#: are UTF-16, so the fixture cannot contain such a file there and nothing about it can be asserted.
+HAS_BYTE_NAMES = os.name != "nt"
+#: display name -> content of the fixture files that exist only where byte names exist.
+NON_UTF8_FILES: dict[str, bytes] = {NON_UTF8_DISPLAY: NON_UTF8_CONTENT} if HAS_BYTE_NAMES else {}
+NON_UTF8_BYTES = sum(len(data) for data in NON_UTF8_FILES.values())
 
 #: relative path -> content of every regular file that the audit must list (SYNTHETIC FIXTURE).
 VISIBLE: dict[str, bytes] = {
@@ -452,7 +458,7 @@ SENSITIVE_PATHS = {
     "secrets/prod.csv",
     "keys/api_token.txt",
 }
-EXPECTED_PATHS = sorted([*VISIBLE, NON_UTF8_DISPLAY])
+EXPECTED_PATHS = sorted([*VISIBLE, *NON_UTF8_FILES])
 FORBIDDEN_OUTPUT_STRINGS = (MARKER, FAKE_ACCOUNT, FAKE_ROW_VALUE, FAKE_HOSTNAME, "conda-forge", "fakeuser")
 
 
@@ -462,14 +468,22 @@ def build_tree(root: Path) -> None:
         target = root / rel
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(data)
-    with open(os.fsencode(root) + b"/" + NON_UTF8_NAME, "wb") as handle:
-        handle.write(NON_UTF8_CONTENT)
+    if HAS_BYTE_NAMES:
+        with open(os.fsencode(root) + b"/" + NON_UTF8_NAME, "wb") as handle:
+            handle.write(NON_UTF8_CONTENT)
     os.symlink("config.py", root / "link_to_config.py")
     os.symlink("data", root / "link_to_data", target_is_directory=True)
     os.symlink("missing/target", root / "dangling_link")
+    # Where the platform cannot set the times of a link itself (Windows), links keep their own
+    # times and only files and directories get the fixed modification time.
+    link_times = os.utime in os.supports_follow_symlinks
     for current, directories, files in os.walk(root, topdown=False):
         for name in [*directories, *files]:
-            os.utime(os.path.join(current, name), ns=(FIXED_MTIME_NS, FIXED_MTIME_NS), follow_symlinks=False)
+            entry = os.path.join(current, name)
+            if link_times:
+                os.utime(entry, ns=(FIXED_MTIME_NS, FIXED_MTIME_NS), follow_symlinks=False)
+            elif not os.path.islink(entry):
+                os.utime(entry, ns=(FIXED_MTIME_NS, FIXED_MTIME_NS))
     os.utime(root, ns=(FIXED_MTIME_NS, FIXED_MTIME_NS))
 
 
@@ -665,7 +679,7 @@ def test_host_block_reports_hardware_and_only_a_hash_of_the_host_name(audited: A
 def test_root_summary_and_languages(audited: Audited) -> None:
     summary = audited.inventory["root_summary"]
     assert summary["files"] == len(EXPECTED_PATHS)
-    assert summary["total_bytes"] == sum(len(data) for data in VISIBLE.values()) + len(NON_UTF8_CONTENT)
+    assert summary["total_bytes"] == sum(len(data) for data in VISIBLE.values()) + NON_UTF8_BYTES
     python_files = {rel: data for rel, data in VISIBLE.items() if rel.endswith(".py")}
     assert summary["by_extension"][".py"] == {
         "files": len(python_files),
@@ -796,7 +810,8 @@ def test_data_inventory_reports_column_names_only(audited: Audited) -> None:
     assert files["data/semicolon.csv"]["row_count"] == 2  # the last line has no trailing newline
     assert files["data/utf16_export.csv"]["columns"] == ["Time", "Bid", "Ask"]
     assert files["data/utf16_export.csv"]["row_count"] == 3
-    assert files[NON_UTF8_DISPLAY]["columns"] == ["time", "bid"]
+    for name in NON_UTF8_FILES:  # only where a name that is not UTF-8 can exist
+        assert files[name]["columns"] == ["time", "bid"]
     # a first line that is data is never emitted
     headerless = files["data/headerless.csv"]
     assert "columns" not in headerless
@@ -1238,8 +1253,8 @@ def test_symlinks_are_recorded_and_never_followed(audited: Audited) -> None:
 
 @requirement
 def test_non_utf8_names_and_contents_do_not_break_the_audit(audited: Audited) -> None:
-    record = audited.manifest[NON_UTF8_DISPLAY]
-    assert record["sha256"] == hashlib.sha256(NON_UTF8_CONTENT).hexdigest()
+    for display, content in NON_UTF8_FILES.items():  # only where a name that is not UTF-8 can exist
+        assert audited.manifest[display]["sha256"] == hashlib.sha256(content).hexdigest()
     for name in ("inventory.json", "manifest.jsonl", "audit_log.txt", "processes.json"):
         (audited.out / name).read_bytes().decode("utf-8")  # strict: every output is valid UTF-8
     assert (
@@ -1248,7 +1263,11 @@ def test_non_utf8_names_and_contents_do_not_break_the_audit(audited: Audited) ->
     )
     assert audit._display_name("plain.txt") == "plain.txt"
     assert audit._display_name("back\\slash") == "back\\\\slash"
-    assert audit._display_name(os.fsdecode(NON_UTF8_NAME)) == NON_UTF8_DISPLAY
+    if HAS_BYTE_NAMES:
+        assert audit._display_name(os.fsdecode(NON_UTF8_NAME)) == NON_UTF8_DISPLAY
+    else:
+        # the same undecodable byte as the operating system would hand it over (a lone surrogate)
+        assert audit._display_name("caf\udce9_notes.csv") == NON_UTF8_DISPLAY
 
 
 @requirement
@@ -1331,7 +1350,7 @@ def test_audit_log_ends_with_the_read_only_check(audited: Audited) -> None:
     assert lines[-1] == "READ-ONLY CHECK: no file under root was opened for writing"
     assert lines[-1] == audit.READ_ONLY_OK_LINE
     text = "\n".join(lines)
-    total_bytes = sum(len(data) for data in VISIBLE.values()) + len(NON_UTF8_CONTENT)
+    total_bytes = sum(len(data) for data in VISIBLE.values()) + NON_UTF8_BYTES
     assert f"files listed in manifest.jsonl: {len(EXPECTED_PATHS)} ({total_bytes} bytes)" in text
     hashed = len(EXPECTED_PATHS) - len(SENSITIVE_PATHS)
     assert f"files hashed (SHA-256): {hashed}; not hashed: {len(SENSITIVE_PATHS)}" in text
@@ -2213,7 +2232,7 @@ def test_exclude_options(tree: Path, tmp_path: Path) -> None:
     code, _stdout, _stderr = run_audit(tree, everything, "--no-default-excludes", "--include-venvs")
     assert code == 0
     manifest = load_manifest(everything / "manifest.jsonl")
-    assert sorted(manifest) == sorted([*VISIBLE, *EXCLUDED, NON_UTF8_DISPLAY])
+    assert sorted(manifest) == sorted([*VISIBLE, *EXCLUDED, *NON_UTF8_FILES])
     inventory = load_inventory(everything)
     assert inventory["exclusions_and_caps"]["excluded_directories"] == []
     assert inventory["version_control"]["branch"] == "main"
