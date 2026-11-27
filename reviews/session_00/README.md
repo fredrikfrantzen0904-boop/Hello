@@ -47,6 +47,25 @@ python -m tools.gie_registers apply --patch reviews/session_00/status_patch.yaml
 python -m tools.gie_registers render
 ```
 
+## Hosted CI of the reviewed commit
+
+The evidence in this folder is from the local run (Linux, Python 3.13). The same entry point ran on
+the reviewed commit `8ee7f37` on GitHub-hosted runners (workflow `gie-ci`, run number 40): the four
+jobs - ubuntu-latest and windows-latest, each with Python 3.11 and 3.13 - all passed, with the
+baseline step reported as blocked (B-001) as it is locally. The evidence of the hosted jobs is
+attached to that workflow run as artifacts.
+
+For the record: when the test suites were first complete, the Windows jobs failed while Linux
+passed (249 tests on the first full run). The causes were found from the hosted logs and corrected
+before this package was built: one tool printed paths with the separator of the operating system;
+tests and tools wrote text files with translated line ends; the fixture of the audit tool's tests
+used things a Windows file system does not have (a file name that is not valid UTF-8, times of
+links, modification times finer than 100 ns) and compared paths without the extended-length prefix
+the tool uses on Windows. None of these was a defect of the contracts; the audit tool itself was
+not changed. What this does and does not show about the audit tool: its test suite now passes on a
+hosted Windows runner; the tool has still never run on the owner's machine or against the real
+production tree.
+
 The JUnit file of the test run is written by the CI as well but is not committed: it repeats the
 fake fixtures of the secret scanner's own tests in forms that the secret scan rightly reports. It
 is kept as a workflow artifact of the hosted CI.
