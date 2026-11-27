@@ -1,0 +1,1005 @@
+{
+ "description": "Verification of the coordinator's dispositions of review round 1.  Six verifiers who did not write the code checked, finding by finding, whether what the disposition claims was really done (verdicts: done, partial, not_done, cannot_verify), with the evidence they found.  Kept verbatim, except that local paths of the build machine are shortened.  State verified: the repository after the first rework, before the second.  Everything reported here as partial or not done was taken into the second rework (reviews/session_00/rework_2_change_notice.md, decision-log amendments of 2026-11-27) or recorded as an extension or change request; whether that follow-up is complete is the subject of the final verification file, where one exists, and otherwise has not been independently re-checked.",
+ "groups": [
+  {
+   "group": "RM",
+   "scope": "requirements matrix against the master specification",
+   "summary": "RM group (22 findings, all dispositioned 'fix'): 17 done, 5 partial, 0 not_done, 0 cannot_verify. Checked read-only against HEAD 0e52f3f; the repository was being committed to while I worked, so RM-21 reflects the state at my last check. No RM disposition depends on the tools still being built.\n\nProblems, most serious first:\n\n1. RM-21 (partial): the matrix carries no status information. `python -m tools.gie_registers stats` gives 584/584 `not_started`, 0 `not_applicable`, 0 contributions. Informational clauses (M-AUTH-01, G01-11, G03-13) have notes but are not marked `not_applicable`; delivered artefacts (S00-ASG-26/27/28, G08-03) have no status or evidence. The tool and the three rendered registers do exist: they were committed in 3a07b53 during this verification, and `render --check` now exits 0 (it exited 1 with three files missing at f0e8f7b).\n\n2. RM-22 (partial): the claim \"lock tests are marked with all sibling ids\" is false. All 58 markers in `tests/gie/core/test_routing_lock.py` are (\"G08-03\",\"G08-10\",\"M-AUTH-13\",\"M-AUTH-14\",\"OWN-14\"). No test anywhere carries M-DIR-07 or COM-11, and M-AUTH-19 appears only at `tests/gie/contracts/test_order_event.py:1492`. Since the RM-03 split, M-AUTH-14 means \"Build execution interfaces.\", so the main lock suite credits the wrong id and the universal prohibition M-AUTH-19 gets no evidence from it. D-011 (`docs/DECISION_LOG.md:176`) and the lock step in `tools/ci.py:78` have the same gap. Sibling notes are one-way for two of the five families (M-DIR-01 and G01-01 have empty notes).\n\n3. RM-19 (partial): the glosses are out of `text` and the convention is documented, but the claimed \"generator verifies words against the verbatim source clause\" is not in the repository. `tools/gie_registers.py:656-662` only checks that `source_clause` is non-empty. In memory I changed G04-05 back to \"Aggregate margin (into risk).\" and G05-05 back to \"Thresholds configurable and subject to validation.\"; `check_registers` reported 0 problems. Coordinator wording remains in M-DOC-01 (\"every page is labelled\"), G04-15/16 (\"is\"), and OWN-22 (\"the owner\" for \"me\").\n\n4. RM-17 (partial): the matrix split is correct, but it was not carried into the registers that reference it. `specifications/baselines/claims.yaml:28,36,44` still key the +0.462R, 18% coverage and 4.9% drawdown claims to G09-02, which is now \"134 trades\" only. U-05 (`docs/DECISION_LOG.md:440`) lists G09-02 and none of G09-11..13, although its three questions are exactly those figures.\n\n5. RM-02 (partial): OWN-15 exists, but `specifications/source/OWNER_DIRECTIVE_2026-11-27.md:5` still says \"OWN-01 .. OWN-14\" (the matrix now has OWN-01..OWN-27), and no reason is recorded for leaving it.\n\nSmaller observations that did not change a verdict:\n- Other pre-split ids are still cited as umbrellas: `docs/DECISION_LOG.md:3` (OWN-08 for the decision log, now OWN-17), `docs/CHANGE_REQUESTS.md:5` (M-GATE-07 for change requests, now M-GATE-11), U-09 and `specifications/SHARED_CONTRACTS.md:108` (G06-06 for all observed sources), `SHARED_CONTRACTS.md:483` and `gie/contracts/position.py:305` (G04-13 for the monotonic peak, now G04-15).\n- RM-01: the G05-05 note says \"under M-DIR-08 every numerical setting is a research parameter\", while M-DIR-08 says \"Proposed numerical settings\". `CLAUDE.md` rule 8 is unchanged and does not mention U-14.\n- RM-20: the M-DOC-01 `source_clause` joins header and footer with \"...\", so it is not a verbatim paragraph.\n\nRegression cover is thin for the whole group. The only checks are `minimum_requirement_count: 584` (stops deletion of an added atom) and the extracted-text hash check; nothing checks the wording or session list of any entry.",
+   "verdicts": [
+    {
+     "covered_by": "",
+     "evidence": "specifications/requirements_matrix.yaml:1276 G05-05 text 'Recovery and emergency halt: configurable and subject to validation.'; G05-03 (l.1246) 'Proposed recovery at -1.75%.' and G05-04 (l.1261) 'Emergency halt at -3%.' no longer carry the clause. docs/DECISION_LOG.md:511 U-14 is OPEN and asks the owner whether -2 % and +5 % are fixed. specifications/research_parameters.toml:5-7 cites G05-05 only for recovery/halt and points to U-14. CLAUDE.md rule 8 (l.31-33) is unchanged; it never cited G05-05.",
+     "id": "RM-01",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "tools/ci.py step 'registers are valid' (minimum_requirement_count 584 catches deletion of OWN-15 only)",
+     "evidence": "specifications/requirements_matrix.yaml:3169 OWN-15 holds the verbatim first sentence, sessions [S00], note points to the SHA-256 list; specifications/source/SHA256SUMS lists the 13 briefs plus MASTER. But specifications/source/OWNER_DIRECTIVE_2026-11-27.md:5 still reads \"requirements `OWN-01` .. `OWN-14`\" while the matrix has OWN-01..OWN-27.",
+     "id": "RM-02",
+     "remaining": "The directive header line the finding asked to update is stale. Either update it, or record why the file is treated as immutable (CLAUDE.md says specifications/source/ is never edited).",
+     "verdict": "partial"
+    },
+    {
+     "covered_by": "tools/ci.py step 'registers are valid' (minimum_requirement_count 584 catches deletion of M-AUTH-19 only)",
+     "evidence": "specifications/requirements_matrix.yaml:280 M-AUTH-14 'Build execution interfaces.' sessions [S00, S07]; l.370 M-AUTH-19 'Keep real order routing disabled.' with all 13 sessions and a sibling note. The lock tests still cite M-AUTH-14 for the prohibition; that is reported under RM-22.",
+     "id": "RM-03",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "tests/gie/tools/test_gie_registers.py (markers OWN-08/16/17/18); tools/ci.py steps 'registers are valid' and 'generated registers are current'",
+     "evidence": "specifications/requirements_matrix.yaml:3008 OWN-08 (requirements matrix), l.3194 OWN-16 (docs/IMPLEMENTATION_STATUS.md), l.3217 OWN-17 (docs/DECISION_LOG.md), l.3240 OWN-18 (specifications/acceptance_tests.yaml); each note names its artefact and all four files exist at HEAD 0e52f3f.",
+     "id": "RM-04",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "tools/ci.py step 'registers are valid' (minimum_requirement_count 584 catches deletion of the added atoms only)",
+     "evidence": "specifications/requirements_matrix.yaml:3031 OWN-09 'Do not silently simplify functionality.'; l.3263 OWN-19 'Do not substitute placeholders.'; l.3286 OWN-20 'Do not omit requirements.'; l.3309 OWN-21 'Do not declare incomplete components finished.'; l.2915 OWN-04 and l.3332 OWN-22 'Treat the owner as the project owner with final authority.' All have 13 sessions.",
+     "id": "RM-05",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "tools/ci.py step 'registers are valid' (minimum_requirement_count 584 catches deletion of the added atoms only)",
+     "evidence": "specifications/requirements_matrix.yaml:3077 OWN-11 'Complete Session 00.'; l.3355-3424 OWN-23 'Submit the foundation review PDF.', OWN-24 'Submit the shared contracts.', OWN-25 'Submit the source files.', OWN-26 'Submit the test evidence.'; each [S00].",
+     "id": "RM-06",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "tools/ci.py step 'registers are valid' (minimum_requirement_count 584 catches deletion of OWN-27 only)",
+     "evidence": "specifications/requirements_matrix.yaml:2845 OWN-01 'You will coordinate the entire project within this session.' [S00]; l.3447 OWN-27 'You will implement the entire project within this session.' with all 13 sessions and note 'stays open until the last session is approved'.",
+     "id": "RM-07",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "tools/ci.py step 'registers are valid' (minimum_requirement_count 584 catches deletion of G07-13 only)",
+     "evidence": "specifications/requirements_matrix.yaml:1681 G07-01 'Historical replay.' sessions [S01, S10, S09]; l.1849 G07-13 'Market memory.' sessions [S04, S09].",
+     "id": "RM-08",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "tools/ci.py step 'registers are valid' (minimum_requirement_count 584 catches deletion of M-DIR-09 only)",
+     "evidence": "specifications/requirements_matrix.yaml:2465 M-DIR-05 'Wave 4: 09, 10, 11, 12.' [S00]; l.2521 M-DIR-09 'Research and QA start scaffolding earlier.' [S00, S10, S12]; l.2479 M-DIR-06 has all 13 sessions. specifications/dependency_graph.yaml:20 lists M-DIR-09.",
+     "id": "RM-09",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "tools/ci.py step 'registers are valid' (minimum_requirement_count 584 catches deletion of the added atoms only)",
+     "evidence": "specifications/requirements_matrix.yaml:316 M-AUTH-16 'Record exact commit.'; l.388-478 M-AUTH-20..25 'Record files.' / 'tests.' / 'commands.' / 'results.' / 'limitations.' / 'requirement IDs.'; l.334 M-AUTH-17 'Submit a PDF review.'; l.496 M-AUTH-26 'Submit machine-readable evidence.'",
+     "id": "RM-10",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "tools/ci.py step 'registers are valid' (minimum_requirement_count 584 catches deletion of the added atoms only)",
+     "evidence": "specifications/requirements_matrix.yaml:2639 M-GATE-09 'Owner authorizes merge.' (all sessions); l.2652 M-GATE-10 'Owner authorizes model promotion.' [S00, S04, S09]; l.2613 M-GATE-07 'Every session delivers blockers.'; l.2665 M-GATE-11 'Every session delivers change requests.'",
+     "id": "RM-11",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "tools/ci.py step 'registers are valid' (minimum_requirement_count 584 catches deletion of the added atoms only)",
+     "evidence": "specifications/requirements_matrix.yaml:1499 G06-06 'Observe XAGUSD where licensed and available.' with note 'First of nine observed sources; the others are G06-10 .. G06-17'; l.1555-1653 G06-10..17 cover DXY, GC futures, Treasury yields, real yields, S&P 500, VIX, USDJPY and timestamped news, each with the condition and sessions [S01, S03].",
+     "id": "RM-12",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "",
+     "evidence": "specifications/requirements_matrix.yaml:880 G03-06 'No training in critical path.' has sessions S00..S12, identical to G03-05.",
+     "id": "RM-13",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "",
+     "evidence": "specifications/requirements_matrix.yaml:964 G03-12 'Reject stale signals.' sessions [S00, S01, S03, S05, S06, S07, S08].",
+     "id": "RM-14",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "",
+     "evidence": "specifications/requirements_matrix.yaml:1308 G05-07 text 'Above +5%: exceptional setups only with surplus risk budget after costs and open exposure.'",
+     "id": "RM-15",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "",
+     "evidence": "specifications/requirements_matrix.yaml:725 G02-04 'Build setup-specific uncertainty.', l.740 G02-05 'Build setup-specific price destinations.', l.754 G02-06 'Build setup-specific flexible trade plans.'; the G02-04 note states both readings and G02-05/06 refer to it.",
+     "id": "RM-16",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "tools/ci.py step 'registers are valid' (minimum_requirement_count 584 catches deletion of G09-11..13 only; nothing checks claims.yaml ids)",
+     "evidence": "Matrix is correct: specifications/requirements_matrix.yaml:2007 G09-02 'Round 2: GCE-B 134 trades.'; l.2021 G09-03 'Round 2: no corrected statistical significance.'; l.2133-2161 G09-11/12/13 hold +0.462R / 18% day coverage / 4.9% drawdown at 0.5% risk; l.1993 G09-01 'Round 2: 23,481 setups.' without 'to be reconciled'. But specifications/baselines/claims.yaml:28,36,44 still say `requirement: G09-02` for BL-GCEB-R, BL-GCEB-COVERAGE and BL-GCEB-DRAWDOWN, and docs/DECISION_LOG.md:440 U-05 lists 'G09-02, G09-07, G09-08' only.",
+     "id": "RM-17",
+     "remaining": "Re-key the three claims in claims.yaml to G09-11, G09-12, G09-13. Add G09-11..13 to the Requirements line of U-05, whose three questions are exactly those figures. G09-02 has no note pointing to its split-off siblings.",
+     "verdict": "partial"
+    },
+    {
+     "covered_by": "tools/ci.py step 'registers are valid' (minimum_requirement_count 584 catches deletion of the added atoms only)",
+     "evidence": "specifications/requirements_matrix.yaml: G05-02/G05-13/G05-14 (l.1231/1399/1414) 'Defensive at -2%.' [S08], 'Defensive: reduced risk.' [S08], 'Defensive: stricter quality.' [S05, S08]; G01-10/G01-12 (l.640/668); G04-13/15/16 (l.1160/1188/1202); G06-01/G06-18 (l.1429/1667); G10-16/G10-18 (l.2370/2396). Entries kept bundled carry sub-item notes: G03-01 (l.810), G03-04 (l.852), M-AUTH-12 (l.243), each 'status is the minimum over ...'.",
+     "id": "RM-18",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "",
+     "evidence": "Glosses are gone: the only parenthesis left in any `text` is the owner's '(GIE)' in M-AUTH-01; G04-04..07 read 'Aggregate pending orders.' / 'margin.' / 'costs.' / 'gap stress.' with the context in notes; the convention is stated at specifications/requirements_matrix.yaml:6-9. The claimed generator check is not in the repository: tools/gie_registers.py:656-662 only requires a non-empty source_clause. In-memory experiment: setting G04-05 text to 'Aggregate margin (into risk).' and G05-05 to the old broad wording gives 0 problems from check_registers.",
+     "id": "RM-19",
+     "remaining": "No tool or test compares `text` with `source_clause`, so a gloss can return unnoticed; add the check to `gie_registers validate` (or commit the generator) with a test. Coordinator wording still in text: M-DOC-01 'every page is labelled' (l.2678), G04-15/16 'Profit ratchet is monotonic/fast' (l.1188/1202), OWN-22 'the owner' in place of 'me' (l.3332).",
+     "verdict": "partial"
+    },
+    {
+     "covered_by": "tests/gie/tools/test_gie_registers.py::test_changed_specification_text_is_noticed; tools/ci.py step 'registers are valid' (hash check in tools/gie_registers.py _check_specification)",
+     "evidence": "specifications/requirements_matrix.yaml:2678 M-DOC-01; l.10-29 `specification:` holds version 'V1.0 (27 Nov 2026)', a note mapping MASTER_1.pdf to MASTER_owner_upload.pdf, and extracted_text_sha256 for 15 files. I recomputed all 15 and they match (MASTER.txt and MASTER_owner_upload.txt both 8b6cc8fb...). All 27 OWN entries have source specifications/source/OWNER_DIRECTIVE_2026-11-27.md. PDF hashes are in specifications/source/SHA256SUMS.",
+     "id": "RM-20",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "tools/ci.py steps 'registers are valid' and 'generated registers are current'; tests/gie/tools/test_gie_registers.py",
+     "evidence": "Delivered: tools/gie_registers.py; specifications/REQUIREMENTS_MATRIX.md, docs/IMPLEMENTATION_STATUS.md and docs/ACCEPTANCE_TEST_REGISTER.md (committed in 3a07b53 during this verification); `python -m tools.gie_registers render --check` exits 0 at HEAD 0e52f3f (exit 1 with three files missing at f0e8f7b). Not delivered: `python -m tools.gie_registers stats` gives not_started 584, not_applicable 0, and no entry has a contribution. M-AUTH-01, G01-11, G03-13 have 'Informational' notes but status not_started; S00-ASG-26/27/28 and G08-03 are not_started with no evidence.",
+     "id": "RM-21",
+     "remaining": "Set statuses and contributions with evidence paths. Mark the informational clauses not_applicable (M-AUTH-01, G01-11, G03-13; also OWN-15 and M-DOC-01). Once any status is set, the 12 requirements named by OPEN blocker B-001 must be blocked or partial (the validate NOTE says so), then re-render.",
+     "verdict": "partial"
+    },
+    {
+     "covered_by": "",
+     "evidence": "Notes: the live-lock family is cross-referenced on all five ids (M-AUTH-19, G08-10, M-DIR-07, OWN-14, COM-11); M-AUTH-12/OWN-13 and G03-12/G06-04 both ways. Markers: tests/gie/core/test_routing_lock.py has 58 markers, all (\"G08-03\",\"G08-10\",\"M-AUTH-13\",\"M-AUTH-14\",\"OWN-14\"). grep for \"M-DIR-07\" or \"COM-11\" in tests/ gives 0 hits; \"M-AUTH-19\" occurs only at tests/gie/contracts/test_order_event.py:1492.",
+     "id": "RM-22",
+     "remaining": "Mark the lock tests with M-AUTH-19, M-DIR-07 and COM-11. M-AUTH-14 is now 'Build execution interfaces.', so the docstring at test_routing_lock.py:3-5 and the 58 markers credit the wrong id. Same gap in D-011 (docs/DECISION_LOG.md:176) and the lock step ids at tools/ci.py:78. Add back-reference notes on M-DIR-01 (matrix l.2409) and G01-01 (l.514), which are empty. Nothing checks that sibling ids share markers, status or session lists.",
+     "verdict": "partial"
+    }
+   ]
+  },
+  {
+   "group": "RB",
+   "scope": "requirements matrix against the briefs",
+   "summary": "RB group, 17 findings, all dispositioned 'fix' (no 'record' or 'decline'). Result: 11 done, 4 partial, 1 cannot_verify, 0 not_done... precisely: done = RB-01, 04, 05, 07, 08, 11, 12, 13, 14, 15, 16, 17 (12); partial = RB-02, 03, 09, 10 (4); cannot_verify = RB-06 (1).\n\nThe repository moved while I verified (HEAD f0e8f7b -> 3a07b53 -> 0e52f3f, last checks 11:47 UTC at 0e52f3f); the governance files I judged were unchanged between those commits except the generated registers and the .gitattributes owner entry. I changed nothing in the repository; experiments ran on copies in <scratchpad>.\n\nMost serious first:\n\n1. RB-02 (major) - partial. The core defect still reproduces: `python -m tools.gie_registers stats` gives not_started 584/584 and 0 contributions; S00-ASG-01..07, S00-DEL-04, S00-ACC-05/06 are not_started with empty notes while B-001 is OPEN, and the generated docs/IMPLEMENTATION_STATUS.md says \"blocked (0) None\". The file reviews/session_00/status_patch.yaml that reviews/session_00/README.md says is applied does not exist. The validation rule exists and works once any status is set (12 problems on a scratch copy), but it is deliberately dormant while every status is not_started, so the matrix can reach the gate unchanged with CI green - the exact case the reviewer warned about. Notes for CR-001/CR-002/D-002/U-03 and the rendered REQUIREMENTS_MATRIX.md are in place.\n\n2. RB-03 (major) - partial. Both gates are defined and \"(already in 00)\" is gone, but the documents again state different start rules: the graph's start gate has a third condition (contract_extensions integrated) that docs/WORKTREES.md omits, and WORKTREES adds \"Sessions of the same wave start together\". Taken literally the graph serialises wave 2 (S01 -> S02, S07 -> S08: CX-03 from S01 gates S07, CX-04 from S07 gates S08), which is the symptom the finding reported, and contradicts \"contract_only dependencies never delay a start\" in the same paragraph. CX-06 and CX-09 list S03 / S09 both as proposer and as the gated session. CR-003 says both \"must exist before the listed sessions start\" and \"until a type exists a session works on labelled fixtures\".\n\n3. RB-10 - partial. The six named clauses are split, but \"notes on the rest\" covers 5 of 10: S12-ASG-02, -03, -04, -07 and S02-ASG-08 still have empty notes.\n\n4. RB-06 - cannot_verify: tools/check_architecture.py does not exist, so the claimed ownership-coverage check cannot be checked. What I could verify is fine (0 unowned, 0 doubly owned of 196 files). Separate gap: docs/WORKTREES.md rule 2 still does not list the shared test files the finding named.\n\n5. RB-09 - partial, minor: three of four notes are as claimed; S06-ACC-06 says only \"both must be reported\". The rule is prose only: sync-evidence derives one status from any test carrying the marker.\n\nOther observations: none of tools/check_live_lock.py, check_architecture.py, check_docs_paths.py, check_no_secrets.py, check_protected_paths.py, baseline_freeze.py exists yet, so graph-level fixes (RB-03, 05, 06, 15) have no regression check; matrix wording fixes (RB-01, 07, 08, 11, 12) are protected only against deletion (minimum_requirement_count), not against re-wording. Register-tool rules are well covered by tests/gie/tools/test_gie_registers.py. The rendered REQUIREMENTS_MATRIX.md does not show source_clause (only the YAML does).",
+   "verdicts": [
+    {
+     "covered_by": "python -m tools.gie_registers validate (CI step 'registers are valid') checks only that the ids named by U-15 exist; the note wording is not checked",
+     "evidence": "specifications/requirements_matrix.yaml:7125 ff. - S10-ASG-04..07 notes quote the parent sentence and say \"Whether 'ablations' applies to all six items is open item U-15; the broader reading (an ablation study of this item too) is not to be lost.\" source_clause on all six holds the verbatim paragraph. docs/DECISION_LOG.md:522-529 U-15 OPEN, Requirements S10-ASG-04..09.",
+     "id": "RB-01",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "tests/gie/tools/test_gie_registers.py (test_open_blocker_fails_once_any_status_is_set, test_requirement_of_an_open_blocker_must_be_blocked_or_partial, test_apply_refuses_to_leave_requirements_of_an_open_blocker_unblocked); CI step 'registers are valid'",
+     "evidence": "`python3 -B -m tools.gie_registers stats` at 0e52f3f: not_started 584/584; my count of non-empty contributions: 0. requirements_matrix.yaml:3496 S00-ASG-01 status not_started, notes '' (same for S00-ASG-02..07, S00-ACC-05/06, S00-DEL-04, G02-09). docs/IMPLEMENTATION_STATUS.md: 'blocked (0) None' while B-001 is OPEN. validate exits 0 with NOTE '(no requirement has a status yet, so this does not fail)' - tools/gie_registers.py:839, 860-866. Scratch-copy experiment: setting S00-ASG-11 to in_progress gives 12 problems 'named by the OPEN blocker B-001 but its status is not_started'. Done parts: notes on COM-01 (D-001/CR-001), S12-DEP-02 (D-002/CR-002), all 13 S<NN>-DEP-02 (D-002), S08-ACC-02 (U-03); specifications/REQUIREMENTS_MATRIX.md rendered in 3a07b53.",
+     "id": "RB-02",
+     "remaining": "Statuses and contributions are not set: the 12 requirements of B-001 are not blocked/partial and carry no B-001 note; no Session 00 contribution is recorded. reviews/session_00/status_patch.yaml (named in reviews/session_00/README.md) does not exist. The OPEN-blocker rule does not fire while every status is not_started, so the matrix can reach the gate unchanged with CI passing.",
+     "verdict": "partial"
+    },
+    {
+     "covered_by": "",
+     "evidence": "Fixed: specifications/dependency_graph.yaml:10-27 defines start_gate and integration_gate; :32-33 contract_only now reads '(see contract_extensions for the ones that do not exist yet)'; docs/WORKTREES.md:16-23 names both gates. Still inconsistent: graph:14-16 start condition (3) 'every entry of contract_extensions whose required_before_start_of lists the session has been integrated' is absent from WORKTREES.md:17-21, which adds 'Sessions of the same wave start together'. Script over contract_extensions: CX-03 (proposed_by S01) gates start of S02 and S07, CX-02 (S01) and CX-04 (S07) gate S08 - wave 2 becomes S01 -> S02,S07 -> S08; S08's contract_only is [S01, S07], contradicting graph:18-19 'contract_only dependencies never delay a start'. CX-06 (graph:102-104) lists S03 and CX-09 (:109-110) lists S09 as both proposer and gated session. docs/CHANGE_REQUESTS.md:97 'must exist before the listed sessions start' versus :112-113 'Until a type exists, a session that needs it works on explicitly labelled test fixtures'.",
+     "id": "RB-03",
+     "remaining": "One start rule in all three places (graph, WORKTREES.md rule 1, CR-003): either contract extensions gate the start (then wave 2 is sequential, 'start together' and 'contract_only never delay a start' must go, and CX-06/CX-09 need a proposer that is not the gated session) or sessions start on labelled fixtures. As written, S07 again cannot start beside S01 under the literal graph rule.",
+     "verdict": "partial"
+    },
+    {
+     "covered_by": "python -m tools.gie_registers validate (ids named by D-002 / CR-002 must exist in the matrix) and render --check; the note text itself is not checked",
+     "evidence": "requirements_matrix.yaml:7781 S12-DEP-02 notes: 'The repository layout proposes tests/gie/qa/ for session 12 ...: decision D-002, change request CR-002 (open).' docs/DECISION_LOG.md:34 '- Requirements: COM-03, S00-ASG-08, S00-DEP-02, S12-DEP-02'. All 13 S<NN>-DEP-02 carry 'Actual repository paths: decision D-002 and path_mapping ...'. CR-002 (docs/CHANGE_REQUESTS.md:72-80, OPEN, 'Needs owner approval') is listed in the open-items table of the generated docs/IMPLEMENTATION_STATUS.md.",
+     "id": "RB-04",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "",
+     "evidence": "specifications/dependency_graph.yaml:36-39 defines integrates_later and ongoing; :69 'integrates_later: [S01, S02, S03, S04, S05, S06, S07, S08]' on S10; :76 'ongoing: true' on S12. docs/ARCHITECTURE.md:107-108 '10 Backtesting (00; harness early, modules integrated later)' and '12 QA (00; scaffolding early, ongoing)'. Matrix notes on S10-DEP-01 (yaml:7059) and S12-DEP-01 (:7768). Remark: the integration_gate text (graph:21-26) does not mention integrates_later; only the field comment says the session 'cannot claim integration with a subsystem before that'.",
+     "id": "RB-05",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "",
+     "evidence": "Verified part: specifications/dependency_graph.yaml:44-48 S00 owns now includes gie/__init__.py, gie/app/, tests/__init__.py, tests/conftest.py, tests/gie/__init__.py, tests/gie/samples.py, .gitignore, .gitattributes. Re-run of the reviewer's comparison at 0e52f3f (git ls-files --cached --others --exclude-standard against every owns prefix, Start excluded as protected): 196 files, 0 unowned, 0 owned by two sessions. `ls tools/check_architecture.py`: missing.",
+     "id": "RB-06",
+     "remaining": "tools/check_architecture.py does not exist yet: the claimed ownership-coverage check (and rules AR001-AR007 named in the graph header) cannot be verified. Independent of the tool: docs/WORKTREES.md:24-27 rule 2 still lists only gie/core, gie/contracts, specifications/, docs/, CLAUDE.md, pyproject.toml, tools/ as coordinator-only shared files; the finding asked to add tests/conftest.py, tests/gie/samples.py and the other shared paths there.",
+     "verdict": "cannot_verify"
+    },
+    {
+     "covered_by": "",
+     "evidence": "requirements_matrix.yaml:4112 S01-ASG-02 text: 'Implement timestamped raw bid/ask tick storage.' (rendered at specifications/REQUIREMENTS_MATRIX.md:409); source_clause holds the full sentence of brief 01.",
+     "id": "RB-07",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "python -m tools.gie_registers validate: minimum_requirement_count 584 fails if an atom is deleted (tests/gie/tools/test_gie_registers.py::test_deleting_a_requirement_is_noticed); wording is not checked",
+     "evidence": "requirements_matrix.yaml:4727 S03-ASG-01 'Synchronize XAGUSD when available.' with note 'First of nine sources; the others are S03-ASG-10 .. S03-ASG-17. It is undecided whether 'when available' qualifies only news or all sources; the broader reading is used.' :4845-4936 S03-ASG-10..17 = DXY, GC, yields, real yields, S&P, VIX, USDJPY, news. S03-ASG-01 was narrowed to the first source rather than kept as a parent; the id is kept and all nine sources are present. No open item was raised for the 'when available' scope (the finding asked only for a note).",
+     "id": "RB-08",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "",
+     "evidence": "requirements_matrix.yaml:5861 S06-ACC-02, :7676 S11-ACC-02, :7924 S12-ACC-02 notes: 'each needs its own marked test; the status is the worse of the two' (same text in acceptance_tests.yaml notes of AT-S06-ACC-02, AT-S11-ACC-02, AT-S12-ACC-02). :5909 S06-ACC-06 note is only 'Two measures (p99; max): both must be reported.' tools/gie_registers.py:1391-1404 derives one status from all tests carrying the entry's marker.",
+     "id": "RB-09",
+     "remaining": "Minor. S06-ACC-06 does not carry the own-marked-test / worse-of-the-two rule the disposition claims for all four entries (align the note or correct the disposition text). The rule is prose only: a single test for one half is enough for 'passing'.",
+     "verdict": "partial"
+    },
+    {
+     "covered_by": "",
+     "evidence": "Splits present: S07-ASG-10 'Design live adapter interface.' + S07-ASG-16 'No enabled real routing.' (yaml:6212); S07-ASG-02 'Market orders.' + S07-ASG-17/18 limit/stop (:6226); S05-ASG-05 + S05-ASG-13 'Plans with uncertainty.' (:5579); S11-ASG-15 + S11-ASG-17/18 (:7638); S08-ASG-11 + S08-ASG-13 (:6586); COM-10 + COM-12 (:2833). 'Minimum over the parts' notes present on S07-ASG-04, S05-ASG-01, S09-ASG-01, S09-ASG-02, S10-ASG-02. Notes empty on S12-ASG-02 (:7808), S12-ASG-03 (:7821), S12-ASG-04 (:7834), S12-ASG-07 (:7873), S02-ASG-08 (:4547).",
+     "id": "RB-10",
+     "remaining": "'Notes on the rest' is half done: S12-ASG-02 'Inspect code and tests.', S12-ASG-03 'Run mutation/failure injection.', S12-ASG-04 'Stress concurrency and latency.', S12-ASG-07 'Verify reports against raw exports and commits.' and S02-ASG-08 'Evidence with missing/contra states.' are still merged with no note that the status is the minimum over the parts.",
+     "verdict": "partial"
+    },
+    {
+     "covered_by": "tests/gie/tools/test_gie_registers.py::test_empty_source_clause_is_a_problem and the schema tests (missing key); CI step 'registers are valid'. Nothing checks that a clause is verbatim or that 'text' is a fragment of it (an altered text passed my experiment)",
+     "evidence": "584 of 584 atoms have a non-empty source_clause; for every brief-derived atom (S00..S12) it is a whitespace-normalised substring of specifications/extracted/*.txt (my script: only the 27 OWN-, COM-01..03 with a bracketed editorial insertion and M-DOC-01 with an ellipsis are not, none of them in this finding). Notes: yaml:7586 S11-ASG-13 'may also be read as learning results'; :6905 S09-ASG-11 'rollback is required, and owner-approved may apply to it as well; the stricter reading is used'; :6624 S08-ACC-03 'The -3% level is proposed and configurable (G05-05); tests read it from specifications/research_parameters.toml' (key daily_emergency_halt_threshold_frac exists there). Scratch-copy experiment: removing a source_clause gives 'missing key source_clause', emptying it gives 'source_clause is empty'.",
+     "id": "RB-11",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "",
+     "evidence": "requirements_matrix.yaml:370 M-AUTH-19 'Keep real order routing disabled.' sessions S00..S12 (all 13); :280 M-AUTH-14 'Build execution interfaces.' sessions [S00, S07] with note 'Split from ...; see M-AUTH-19'; :880 G03-06 'No training in critical path.' sessions S00..S12. COM-04 note now refers to M-AUTH-01 .. M-AUTH-26.",
+     "id": "RB-12",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "tests/gie/tools/test_gie_registers.py (test_listed_test_module_must_exist_unless_planned, test_listed_test_module_must_contain_the_acceptance_marker, test_blocked_or_partial_acceptance_needs_blockers); CI step 'registers are valid'",
+     "evidence": "specifications/acceptance_tests.yaml:69 and :80 'blockers: [B-001]' on AT-S00-ACC-05 / AT-S00-ACC-06. tools/gie_registers.py:972-993: for every status other than planned each listed module must exist and contain acceptance(\"<requirement id>\"). Scratch-copy experiments: AT-S00-ACC-01 set to failing gives 3 problems 'test module ... does not exist'; AT-S00-ACC-03 failing with an unmarked module gives 'does not contain the marker acceptance(\"S00-ACC-03\")'. Current state: all 91 entries planned; several listed S00 modules are still missing (tests/gie/tools/test_check_live_lock.py, test_protected_paths.py, tests/gie/baseline/test_baseline_regression.py, tests/gie/contracts/test_guarded_adapter.py, test_golden.py, test_schema_lock.py, test_roundtrip_property.py), which the rule allows only while the status is planned.",
+     "id": "RB-13",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "tests/conftest.py itself runs in the CI step 'tests with requirement evidence' (no test of the abort exists); second line of defence tools/gie_registers.py:1462-1485 covered by tests/gie/tools/test_gie_registers.py::test_sync_reports_marker_ids_that_are_not_in_the_registers",
+     "evidence": "pyproject.toml:42 'acceptance(id): requirement id of the acceptance test, e.g. S00-ACC-01 (register entry AT-S00-ACC-01)'; CLAUDE.md:94-95 and the register's verification lines use the same id. tests/conftest.py:56-71 raises pytest.UsageError. Reproducer (scratch test loaded with -p tests.conftest): @acceptance('AT-S00-ACC-01') gives exit 4 '... is not in the requirements matrix'; @acceptance('S00-ASG-22') gives exit 4 '... is not an acceptance requirement'; @acceptance('S00-ACC-01') passes.",
+     "id": "RB-14",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "",
+     "evidence": "specifications/dependency_graph.yaml:155 'dashboard.gie: {session: S11, may_import: [gie.core, gie.contracts], read_only: true}'; :139-140 defines read_only: 'the package only consumes records (RecordSource); it must not import or call anything that submits, cancels or replaces orders (S11-ASG-16)'. The flag is on the package entry, not on session S11. Encoded as the disposition says; whether anything enforces it cannot be checked because tools/check_architecture.py does not exist yet.",
+     "id": "RB-15",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "python -m tools.gie_registers render --check (generated register must match the YAML); the wording itself is not checked",
+     "evidence": "specifications/acceptance_tests.yaml:3-8 description: \"For acceptance tests that are evaluations (a comparison or a measurement), 'passing' means the evaluation ran reproducibly and its result was recorded as evidence - never that the result was favourable.\" Notes on AT-S03-ACC-05, AT-S06-ACC-07, AT-S06-ACC-08 ('An evaluation: passing means the comparison ran reproducibly and was recorded, not that the result was favourable') and AT-S05-ACC-06, mirrored in the matrix notes of the four requirements and in the generated docs/ACCEPTANCE_TEST_REGISTER.md:7.",
+     "id": "RB-16",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "tests/gie/tools/test_gie_registers.py (test_changed_specification_text_is_noticed, test_single_changed_byte_of_the_specification_is_noticed, test_specification_text_without_recorded_hash_is_a_problem); CI step 'registers are valid'",
+     "evidence": "requirements_matrix.yaml:10-29 'specification: version: V1.0 (27 Nov 2026)' and extracted_text_sha256 for all 15 extracted files; tools/gie_registers.py:727-773 compares them with the files and reports unlisted files. Scratch-copy experiment: changing one word in 10_Research_and_Backtesting.txt gives 'the specification text changed - recorded sha256 b2a97556..., actual 751ca331...'. source_clause on all 584 atoms (see RB-11). Not adopted and not claimed: source_line. The rendered specifications/REQUIREMENTS_MATRIX.md does not show source_clause, so e.g. 'S10-ACC-04 | Costs.' is readable in context only in the YAML.",
+     "id": "RB-17",
+     "remaining": "",
+     "verdict": "done"
+    }
+   ]
+  },
+  {
+   "group": "DI",
+   "scope": "data and intelligence lens (sessions 01-03)",
+   "summary": "DI group (25 findings): 15 done, 10 partial, 0 not_done, 0 cannot_verify. No DI disposition depends on the tools that are still being built. All paths are relative to <repository>. Reproducers were re-run against the current tree with python3 -B; nothing in the repository was written.\n\nProblems, most serious first:\n1. DI-02 (blocker): the gate contradiction the reviewer cited is only half removed. specifications/dependency_graph.yaml now has start-gate condition (3) and CX-01/CX-02, but docs/WORKTREES.md:17-21 still says a session starts once the contracts are approved and its wave is open, \"Sessions of the same wave start together\", \"contract_only dependencies never delay a start\". Read that way, S02 still starts with S01 without Candle or the calendar.\n2. DI-05: market_event_id is now verified and fixed across revisions, but the per-kind identity table is still undefined. It is deferred to \"the feature dictionary of session 02\" with no change request, gate, location or format. Two engines that flag identity levels differently silently get different ids (reproduced). The disposition cites EVD-11; the invariant is EVD-2.\n3. DI-06: the slot identity exists, but the slot rule the disposition claims for section 4 does not. Nothing says when a producer must emit INACTIVE/MISSING or that a consumer reads \"no current record\" as MISSING.\n4. DI-10: CX-07 gates only S05. The disposition says \"(S03 -> S05, S08) required before wave 3\", but S08 (risk, wave 2) is neither a recorded consumer nor gated, and no 03->05/08 edge exists.\n5. DI-15: EVD-12 and related_market_event_id exist, but anchor, order lifetime and the stage/state mapping of a pending limit are still unspecified; an ACTIVE pending_limit with stage NONE is accepted.\n6. DI-01 (blocker): CX-06 records single-valued series with vintages and news, but not futures data (contract month, roll). The claimed gate \"before S01 implements S01-ASG-12\" is not in the record.\n7. DI-04: the fix is present, but the new helper feed_silence_ns does not validate now_ns. float(receive_time - 30) returns 0.0 instead of FutureDataError, and 4 tests in tests/gie/contracts/test_tick.py fail.\n8. DI-03: the fix is present, but PollingScheduler.call_after clamps to MAX_TIME_NS where ReplayClock raises, so paper and replay differ at that edge; one test in tests/gie/core/test_clock.py fails.\n9. DI-21: CANDLE_CLOSE still names no price series, and a stage may go backwards (TRIGGERED -> ANTICIPATED accepted) with no stated rule.\n10. DI-25: CR-003, which the disposition cites, contains neither the third-party allow-list (that is in dependency_graph.yaml:158-161) nor the feature-dictionary format, which is recorded nowhere.\n\nNits on findings judged done:\n- DI-13: gie/core/ordering.py:75, the EventKey docstring, still says \"total order of a run\".\n- DI-14: the CX-03 gate lists S02/S06/S07 but not S08 (named in CR-005 itself) or S03.\n- DI-16: the sentence that direction-level disagreement is ACTIVE with the opposite score is not written.\n- DI-19: the rule is in section 4, not 6.3 as the disposition says.\n- DI-23: the text of U-08 does not mention clock resolution.\n\nChecks run: schema_gen --check, render_contract_docs --check, make_golden --check (49 files) and summarize_reviews --check all pass. The DI-area test modules (test_evidence, test_run, test_tick, test_clock, test_ordering, test_freshness) give 1575 passed, 11 failed. Five failures are the DI-03/DI-04 items above. The other six are outside this group: one SystemClock regression counter, four freshness edge cases (an oversized instant, and clocks whose mode is not the enum) and one SequenceTracker.restore case. These tests are still being edited by other engineers, so the counts may move.",
+   "verdicts": [
+    {
+     "covered_by": "",
+     "evidence": "docs/CHANGE_REQUESTS.md:107 CX-06 'Single-valued observations with release vintage; news and calendar events | 01 and 03 | 03'; specifications/dependency_graph.yaml:102-104 (proposed_by [S01,S03], required_before_start_of [S03]); SHARED_CONTRACTS.md:50-59 lists these as missing shared types. Tick(bid=-0.35) still raises GIE.CONTRACT.INVALID, as intended.",
+     "id": "DI-01",
+     "remaining": "CX-06 does not name futures data (last/volume, contract month, expiry/roll; finding part c): grep for 'futures|roll' in CHANGE_REQUESTS.md, dependency_graph.yaml and SHARED_CONTRACTS.md finds nothing. The gate 'before S01 implements S01-ASG-12' claimed by the disposition is not recorded; only required_before_start_of [S03], with S01-ASG-12 listed under requirements.",
+     "verdict": "partial"
+    },
+    {
+     "covered_by": "",
+     "evidence": "docs/CHANGE_REQUESTS.md:103-104 CX-01 Candle (01; before 02, 03, 04) and CX-02 calendar (01; before 02, 06, 08); specifications/dependency_graph.yaml:13-19 start gate condition (3), :32-33 comment corrected, :88-92. But docs/WORKTREES.md:17-21 still reads: 'once the owner has approved the Session 00 contracts and has opened the session's wave. Sessions of the same wave start together ... contract_only dependencies never delay a start.'",
+     "id": "DI-02",
+     "remaining": "WORKTREES.md rule 1 (named in the finding) was not corrected: it has no contract-extension condition and still says same-wave sessions start together, so S02 appears startable without Candle and calendar. CX-01/CX-02 record only the type names, not the finding's content list (price basis, open/close instants, completion instant, late-tick revision, CandleSink, calendar queries).",
+     "verdict": "partial"
+    },
+    {
+     "covered_by": "tests/gie/core/test_clock.py (test_replay_clock_and_polling_scheduler_satisfy_the_scheduler_protocol and the call_after tests)",
+     "evidence": "gie/core/clock.py:79-104 Scheduler Protocol (call_at, call_after, cancel). isinstance(ReplayClock(..), Scheduler) and isinstance(PollingScheduler(..), Scheduler) are True. Timer rule at SHARED_CONTRACTS.md:170-171; RunContext injects the scheduler (gie/contracts/run.py:149). Re-run: a replay timer due at t fires on advance_to(t); paper run_due(limit) does not fire a timer whose instant is not yet reached. The reviewer's defect (no timer interface) is gone.",
+     "id": "DI-03",
+     "remaining": "Edge divergence between paper and replay: PollingScheduler.call_after clamps now+delay to MAX_TIME_NS (gie/core/clock.py:372) while ReplayClock.call_after raises ContractValidationError. This contradicts 'same behaviour in replay and paper' (SHARED_CONTRACTS.md:153). tests/gie/core/test_clock.py::test_call_after_beyond_the_largest_instant_behaves_the_same_in_replay_and_paper currently fails.",
+     "verdict": "partial"
+    },
+    {
+     "covered_by": "tests/gie/contracts/test_tick.py (test_feed_silence_reference_is_the_receive_time_not_the_source_event_time)",
+     "evidence": "SHARED_CONTRACTS.md:193-200 reference-instant table ('A source event time is never the freshness reference'); TickFlag.DELAYED at gie/contracts/tick.py:39-41, no STALE member; feed_silence_ns at tick.py:140-155, exported from gie.contracts. Re-run of the reviewer's case: for an EVENT_AFTER_RECEIVE tick, feed_silence_ns(tick, receive_time) returns 0 with no FutureDataError; a tick delayed 15 minutes is judged by receive time. Limits are deferred, not invented (SHARED_CONTRACTS.md:206-207, D-010).",
+     "id": "DI-04",
+     "remaining": "feed_silence_ns does not validate now_ns: float, bool and 2**63 are accepted, and feed_silence_ns(tick, float(receive_time-30)) returns 0.0 instead of raising FutureDataError. Four tests fail: tests/gie/contracts/test_tick.py::test_feed_silence_refuses_a_now_that_is_not_an_instant[float|bool|one_past_int64] and ::test_feed_silence_cannot_be_fooled_into_accepting_future_data_by_a_float_now.",
+     "verdict": "partial"
+    },
+    {
+     "covered_by": "tests/gie/contracts/test_evidence.py (EVD-2 reject cases; test_identity_levels_are_immutable_even_when_the_event_id_stays_the_same)",
+     "evidence": "PriceLevel.identity at gie/contracts/evidence.py:111; EVD-2 at evidence.py:287-293 (the disposition says EVD-11, which is the observable-time rule). Re-run: Evidence carrying the id of ('zzz','EURUSD','D1',1,[]) is refused with EVD-2; an extra non-identity PENDING_LIMIT level keeps the id; a revision with a changed identity level is refused (validate_evidence_transition, enforced by the journal via gie/contracts/ledger.py:122-124). SHARED_CONTRACTS.md:242-248.",
+     "id": "DI-05",
+     "remaining": "The per-kind identity table (which level roles are identity levels for liquidity_sweep / fair_value_gap / breakout, and the anchor per kind) is still not defined. It is deferred to 'the feature dictionary of session 02' (SHARED_CONTRACTS.md:245-247, :540-541) with no change request, gate, location or format; the anchor is only a default. The contract cannot detect disagreement: engine B flagging SWEPT_LEVEL identity=False gets a different market_event_id than engine A (reproduced), and 03/04/09 cannot import S02's dictionary.",
+     "verdict": "partial"
+    },
+    {
+     "covered_by": "tests/gie/contracts/test_evidence.py (test_inactive_and_missing_carry_engine_scoped_slot_ids_that_never_coincide, test_inactive_and_missing_records_never_merge, test_named_value_null_means_unknown_and_is_never_turned_into_zero)",
+     "evidence": "identity.evaluation_slot_id at gie/contracts/identity.py:105; EVD-2/EVD-10 at evidence.py:287-293, :346-358. Re-run of the reviewer's case: engine A INACTIVE and engine B MISSING for the same kind/symbol/M5/anchor now get different ids, and group_by_market_event returns 2 groups. NamedValue(value=None) is accepted (gie/contracts/common.py:215); 'absent or null is unknown, never 0' at SHARED_CONTRACTS.md:92.",
+     "id": "DI-06",
+     "remaining": "Finding part (a) is not addressed. No text says when, or for which declared slots, a producer must emit INACTIVE/MISSING (one current record per slot after each evaluation), nor that a consumer treats 'no unexpired current record' as MISSING. The only 'slot' text in SHARED_CONTRACTS.md is the identity sentence at :249-251, so the disposition's 'slot rule in section 4' is the identity rule only.",
+     "verdict": "partial"
+    },
+    {
+     "covered_by": "tests/gie/contracts/test_evidence.py::test_observable_time_watermark_and_decision_time_are_ordered",
+     "evidence": "Evidence.observable_time_ns at gie/contracts/evidence.py:213-218; EVD-11 at evidence.py:359-364 (observable > as_of is refused, reproduced). SHARED_CONTRACTS.md:120-123 and :130-134 define the notification delay and its replay form (same processing step). as_of is defined through inputs at gie/contracts/common.py:329-334. Note: no paper-mode bound parameter exists; it is deferred under D-018.",
+     "id": "DI-07",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "tests/gie/contracts/test_evidence.py (test_group_by_market_event_does_not_depend_on_the_input_order, test_an_event_counts_once_and_member_scores_are_never_combined)",
+     "evidence": "group_by_market_event at gie/contracts/evidence.py:442-469, exported from gie.contracts; rule at SHARED_CONTRACTS.md:252-254. Re-run: three engines' records of one event, in all 6 input orders, give one identical group with the same representative; two records of one engine are refused. Scores are not combined.",
+     "id": "DI-08",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "tests/gie/contracts/test_evidence.py::test_active_evidence_with_zero_scores_is_present_without_direction_and_differs_from_inactive; tests/gie/golden/Evidence-1.0.0/active_non_directional.json (python -m tools.make_golden --check)",
+     "evidence": "The old rule 'ACTIVE needs a score > 0' is gone (gie/contracts/evidence.py:281-376; EVD-4 is now the missing_reason rule). Re-run of the reviewer's cases: an orb_vwap opening_range with stage FORMING and scores 0/0 is accepted as ACTIVE; a VOLATILITY scheduled_news record with 0/0 is accepted. Meaning documented at evidence.py:69-71.",
+     "id": "DI-09",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "",
+     "evidence": "docs/CHANGE_REQUESTS.md:108 CX-07 'Market condition / trading restriction record | 03 | 05'; specifications/dependency_graph.yaml:105-106 (proposed_by [S03], required_before_start_of [S05], requirements [S08-ASG-10]).",
+     "id": "DI-10",
+     "remaining": "The disposition says '(S03 -> S05, S08) required before wave 3'; the record gates only S05. S08 (risk, wave 2, co-assigned G06-05) is not a recorded consumer and has no gate, and no 03->05/08 edge was added (dependency_graph.yaml:55-62). The fail-closed content (a MISSING state when the calendar is unavailable) and who owns the account rule versus the calendar are not recorded.",
+     "verdict": "partial"
+    },
+    {
+     "covered_by": "tests/gie/contracts/test_tick.py (flag vocabulary); tests/gie/core/test_ordering.py (decreasing ordering time refused)",
+     "evidence": "Max rule at SHARED_CONTRACTS.md:369-372 and gie/contracts/tick.py:64-66; TickFlag.RECEIVE_TIME_MODELLED at tick.py:46-48. Re-run: source times 100,103,101,102,104 under the rule give receive offsets 102,105,105,105,106 and merge_ordered accepts them; the old event+delay rule is refused with GIE.SEQ.OUT_OF_ORDER. Nit: the flag is not carried into derived records; the rule 'never evidence about latency' is prose only.",
+     "id": "DI-11",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "",
+     "evidence": "TickSource.ticks(streams, start_ns, end_ns) at gie/contracts/interfaces.py:54-63. SHARED_CONTRACTS.md:523-532 names the loop owners (replay S10, ordered input S01, paper the composition root), the dispatch order protective -> tactical -> strategic, isolation of a failed sink, and the bounded queue in paper. Candle queries are deferred to the Candle contract (interfaces.py:60).",
+     "id": "DI-12",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "tests/gie/core/test_ordering.py::test_stream_rank_has_exactly_the_documented_members_in_data_flow_order (no journal-order test yet)",
+     "evidence": "SHARED_CONTRACTS.md:332-353 (input order versus journal order; the byte-for-byte requirement refers to the journal); StreamRank in data-flow order at gie/core/ordering.py:59-70; D-020 supersedes D-009. Re-run: MemoryJournal numbers manifest, tick#100, evidence, tick#101 as journal_seq 0..3, so evidence from tick#100 precedes tick#101 of the same instant. Nit: the EventKey docstring at gie/core/ordering.py:75 still says 'Position of one event in the total order of a run'.",
+     "id": "DI-13",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "tests/gie/core/test_ordering.py (allow_gaps cases)",
+     "evidence": "docs/CHANGE_REQUESTS.md:126-140 CR-005 (S01 proposes the per-flag, per-purpose table; the coordinator adds one function; no consumer implements its own reading). specifications/dependency_graph.yaml:93-95 CX-03 required_before_start_of [S02,S06,S07]. SHARED_CONTRACTS.md:329-330 and :372-374. Re-run: SequenceTracker(allow_gaps=True) on 0,1,3,4,5 gives ACCEPTED_AFTER_GAP(missing=1) and then ACCEPTED; the journal counts tick_gaps. Nit: the gate list omits S08 (named as a user in CR-005) and S03.",
+     "id": "DI-14",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "tests/gie/contracts/test_evidence.py (EVD-12 cases); tests/gie/golden/Evidence-1.0.0/cavemen_pending_limit.json",
+     "evidence": "EVD-12 at gie/contracts/evidence.py:146-151 and :365-370; related_market_event_id at evidence.py:191-194. Re-run: an ACTIVE pending_limit without a PENDING_LIMIT level, without the related id, or with both scores > 0 is refused with EVD-12.",
+     "id": "DI-15",
+     "remaining": "There is no normative paragraph (no 'pending' text in SHARED_CONTRACTS.md). The anchor (close of the breakout candle), the order lifetime, and the mapping of resting/reached/filled/cancelled to stage and state are still unspecified. An ACTIVE pending_limit with stage NONE is accepted (reproduced), and EVD-12 binds only ACTIVE records.",
+     "verdict": "partial"
+    },
+    {
+     "covered_by": "tests/gie/contracts/test_evidence.py (EVD-6 cases); tests/gie/golden/Evidence-1.0.0/contra.json",
+     "evidence": "CONTRA is defined at gie/contracts/evidence.py:74-76; contradicts_market_event_ids is a list of market-event ids at evidence.py:255-264; EVD-6 at :313-321. Re-run: CONTRA with two targets is accepted, with none is refused; no contradicts_evidence_id field remains. Nit: the sentence that direction-level disagreement is ACTIVE with the opposite score is not written.",
+     "id": "DI-16",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "tests/gie/golden/Evidence-1.0.0/intermarket_real_yield.json (python -m tools.make_golden --check); tests/gie/contracts/test_evidence.py",
+     "evidence": "SHARED_CONTRACTS.md:102-105: scores, levels and invalidation 'always describe the instrument named in its symbol ... never pre-translated into a gold direction'. Same statement at gie/contracts/evidence.py:170-173 and in D-014 (docs/DECISION_LOG.md:246-248). This is the opposite convention to the reviewer's proposal, but it is now stated. INTERMARKET sample at tests/gie/samples.py:910-923.",
+     "id": "DI-17",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "tests/gie/contracts/test_tick.py (flag vocabulary only; detection is session 01's)",
+     "evidence": "gie/contracts/tick.py:31-36: OUT_OF_ORDER is 'lower than the highest source timestamp of any earlier tick of the stream (high-water mark)'; DUPLICATE is 'All source fields (event time, bid, ask, sizes) equal those of a tick already ingested within the look-back window'. Same wording at SHARED_CONTRACTS.md:366-369.",
+     "id": "DI-18",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "",
+     "evidence": "SHARED_CONTRACTS.md:274-276 (section 4, not 6.3 as the disposition says): 'Tick.seq is assigned once ... never restarts, and is preserved by replay; a backfill, re-import or re-flagging creates a new versioned source'. Same at gie/contracts/tick.py:57-62. RunManifest.data_sources (gie/contracts/run.py:69-79) records the versioned feed ids. Nit: no source registry is specified.",
+     "id": "DI-19",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "tests/gie/contracts/test_evidence.py::test_published_vocabularies; python -m gie.contracts.schema_gen --check",
+     "evidence": "Timeframe.NONE at gie/contracts/common.py:128-131; 'Timeframe values' listed as provisional at SHARED_CONTRACTS.md:542. Evidence with Timeframe.NONE constructs (reproduced).",
+     "id": "DI-20",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "tests/gie/contracts/test_evidence.py (levels, COND-1 and transition tests)",
+     "evidence": "(a) unit 'quote currency per unit' at gie/contracts/evidence.py:110, EVD-13; a level of -0.35 on US10Y_REAL is accepted. (b) unique and canonical sort at evidence.py:231-238; reversed level order gives identical bytes; a duplicate is refused. (c) BELOW/ABOVE at gie/contracts/common.py:174-180. (e) the producer evaluates invalidation, evidence.py:243-244. (f) validate_evidence_transition at evidence.py:394-430; INVALIDATED -> ACTIVE is refused.",
+     "id": "DI-21",
+     "remaining": "(d) CANDLE_CLOSE still does not say which price series the candle uses, and this is not recorded as a requirement on CX-01 Candle. (f) Stage regression is unanswered: TRIGGERED -> ANTICIPATED in the next revision is accepted (reproduced), and no text says whether that is intended.",
+     "verdict": "partial"
+    },
+    {
+     "covered_by": "",
+     "evidence": "docs/DECISION_LOG.md:299-304, D-018 amendment: 'A session that needs a further parameter (for example a freshness limit) requests it through the coordinator with the requirement it serves; sessions never hard-code numbers and Session 00 invented none'. Also D-010 at :169-170. research_parameters.toml still holds 9 parameters, none for freshness, as stated. The loader accepts further parameters in the same file. Nit: no explicit gate, and the parameters the finding names are not listed.",
+     "id": "DI-22",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "",
+     "evidence": "gie/core/clock.py:281-284 (about 15.6 ms on Windows before Python 3.13; paper runs needing finer receive times must use 3.13+; the measured resolution belongs in the session-01 feed benchmark). docs/ARCHITECTURE.md:200-202 repeats it and points to U-08. Nit: the text of U-08 (docs/DECISION_LOG.md:459-465) asks for OS and Python version but does not mention clock resolution.",
+     "id": "DI-23",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "tests/gie/contracts/test_run.py (RunContext and RunManifest; no journal run-scope test yet)",
+     "evidence": "SHARED_CONTRACTS.md:125-129 defines the comparison: canonical bytes, same run configuration, input truncated after input k identified by its ordering key. Stream key (run_id, stream) at :272-274; one journal per run at :355. Re-run: a record of another run is refused (GIE.CONTRACT.INVALID 'record belongs to another run') and a second manifest is refused (GIE.SEQ.CONFLICT), gie/contracts/journal.py:134-155. RunContext at gie/contracts/run.py:138-168; RunManifest at :40-135.",
+     "id": "DI-24",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "",
+     "evidence": "Storage encoding freedom at SHARED_CONTRACTS.md:404-405. Third-party allow-list at specifications/dependency_graph.yaml:158-161: 'Every other session proposes its allow-list with its first review package'. DataOrigin doc now covers vendor feeds (gie/contracts/common.py:99); symbol mapping at SHARED_CONTRACTS.md:108.",
+     "id": "DI-25",
+     "remaining": "CR-003, cited by the disposition, contains neither the allow-list nor the feature dictionary ('feature dictionar' has no hit in docs/CHANGE_REQUESTS.md). The feature-dictionary location and canonical format are recorded nowhere, with no owner or gate, although the DI-05 identity table and ModelVersion.feature_schema_sha256 depend on it. Keeping the raw source timestamp or UTC offset is not stated.",
+     "verdict": "partial"
+    }
+   ]
+  },
+  {
+   "group": "PD",
+   "scope": "prediction, decision and learning lens (sessions 04, 05, 09)",
+   "summary": "PD group (25 findings) verified against the current tree: 16 done, 9 partial, 0 not_done, 0 cannot_verify. No PD disposition depends on the tools still being built. Reproducers were re-run in memory with tests/gie/samples.py (scripts: <scratchpad>/pd1.py .. pd5.py); nothing in the repository was created or edited.\n\nMost serious first:\n1. PD-04 (partial) - the defect itself still reproduces. In a PAPER run a SELECTED plan citing a model registered nowhere, with model_status REJECTED (also RESEARCH, SHADOW, ROLLED_BACK), gets a valid APPROVED RiskDecision and passes validate_entry_authorization. Only the fields and registry lookups were added; the rule is open item U-17, which states no gate. The disposition is labelled 'fix'.\n2. PD-08 (partial) - validate_registry_history accepts re-activating a RETIRED version whose successor was merely RETIRED, by citing a ROLLED_BACK version of another model family (it only checks 'is ROLLED_BACK'). The independent test test_reactivation_naming_a_rolled_back_version_of_another_family_is_refused currently FAILS (DID NOT RAISE). The journal/ledger path applies only validate_model_transition, so it admits a re-activation citing a never-registered id with a reused approval.\n3. PD-20 (partial) - 'CR-003 extended ... for every additional shared type' is not true: FeatureDictionary artifact/hash, LatencyReport and ErrorEvent appear nowhere in CR-003 or contract_extensions; InstrumentSpec has no cost schedule; the CX-02 and CX-04 gates omit S04 and S05.\n4. PD-05, PD-06 (partial) - both are recorded with a proposer and a gate, but the gate differs from what the disposition says (PD-05: 'before wave 3' vs recorded 'before start of S09, S11'; PD-06: 'before S04 trains' is not gated, only S09 start). CX-08 and CX-09 record only a name, not the required content.\n5. PD-17 (partial) - plan targets are still not linked to predicted destinations (Target has label, price, close_frac only).\n6. PD-23 (partial) - no rule ties baseline_r plus weights to expected_net_r: baseline_r=5.0 with expected_net_r=0.25 is accepted.\n7. PD-09 (partial) - sub-defect (5), a snapshot / consistent registry view, is neither implemented nor recorded.\n8. PD-19 (partial) - table and RecordSource are fixed, but nothing states how a consumer such as 05 receives records live.\n\nCoverage note (not a reason for any 'partial'): at verification time there are no tests for Candidate, TradePlan, Position, the journal, the ledger group rule, check_derivation or the interfaces. Those fixes are guarded only by the schema lock (invariant ids and transition tables in the locked schemas) and the golden messages.",
+   "verdicts": [
+    {
+     "covered_by": "python -m gie.contracts.schema_gen --check (CND-3 in locked Candidate schema); python -m tools.make_golden --check (tests/gie/golden/Candidate-1.0.0/scored.json). No behavioural test for Candidate or PlanScorer yet.",
+     "evidence": "gie/contracts/candidate.py:221 risk_unit_price, CND-3 at :319 (set iff scored); gie/contracts/interfaces.py:91-107 PlanScorer returns PlanEstimate (gie/contracts/trade_plan.py:132); specifications/SHARED_CONTRACTS.md:93-97 'What 1 R is ... never from rescaling candidate numbers'. Run: scored candidate with risk_unit_price=None -> ContractValidationError CND-3; unscored with risk_unit_price -> CND-3.",
+     "id": "PD-01",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "tests/gie/core/test_ids.py::test_an_opportunity_identifier_is_stable_and_sensitive_to_every_identity_part; tests/gie/contracts/test_order_event.py::test_oev5_an_entry_must_carry_plan_approval_group_reference_and_stop. The ledger's one-per-group rule has no test yet.",
+     "evidence": "gie/contracts/identity.py:128-150 (opportunity_id; alternative_group_id = f(opportunity)); gie/contracts/trade_plan.py:313 PLN-2; gie/contracts/ledger.py:90-105; specifications/SHARED_CONTRACTS.md:34-35 (05 consumes OrderEvent, Position), :258-265. Run: plans on candidate rev 0 and rev 1 share alternative_group_id; evidence rev 0/1 and a second engine on the same market event give the same opportunity_id; second ENTRY SUBMIT of the group -> IllegalTransitionError from LifecycleLedger; ENTRY without alternative_group_id -> OEV-5.",
+     "id": "PD-02",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "tests/gie/core/test_ids.py (opportunity identity); schema_gen --check (identity rule in x-gie-behaviour). No test calls identity.candidate_id yet.",
+     "evidence": "gie/contracts/identity.py:142-145 candidate_id(opportunity, model_version, revision), opportunity includes horizon (:128); CND-2 at gie/contracts/candidate.py:312. Run: SCALP vs INTRADAY -> different candidate_id; other model -> different candidate_id, plan_id, risk_decision_id and client_order_id, same opportunity_id (pairing key). docs/DECISION_LOG.md:136-142.",
+     "id": "PD-03",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "tests/gie/golden/Candidate-1.0.0/scored_by_shadow_model.json via tools.make_golden --check (field presence only)",
+     "evidence": "Present: model_status at gie/contracts/candidate.py:213 and gie/contracts/trade_plan.py:272; find/status_at at gie/contracts/interfaces.py:208-218; U-17 at docs/DECISION_LOG.md:543. Reproducer still succeeds: PAPER run, SELECTED plan citing a model registered nowhere with model_status REJECTED (also RESEARCH, SHADOW, ROLLED_BACK) -> plan valid, APPROVED RiskDecision valid, validate_entry_authorization passes. grep model_status|validated in authorization.py, guarded.py, ledger.py, journal.py: 0 hits.",
+     "id": "PD-04",
+     "remaining": "The defect in the title (any model can drive a SELECTED plan to an approved, authorised entry) is unchanged, only made visible. The rule exists solely as open item U-17, which names no gate (before which session it must be decided). Even REJECTED and ROLLED_BACK pass; model_status is self-declared and never checked against the registry.",
+     "verdict": "partial"
+    },
+    {
+     "covered_by": "",
+     "evidence": "docs/CHANGE_REQUESTS.md:109 CX-08 'Decision (the unified decision stream of session 05) | 05 | 09, 11'; specifications/dependency_graph.yaml:107-108 proposed_by [S05], required_before_start_of [S09, S11]; specifications/SHARED_CONTRACTS.md:31 '04 prediction (only)'. Run: SELECTED plan with status_reasons now accepted (PLN-9 relaxed); REJECTED plan for an unscored candidate still fails 'expected_net_r: must be a number' (expected until CX-08).",
+     "id": "PD-05",
+     "remaining": "(1) Disposition says 'required before wave 3'; the recorded gate is 'before the start of S09, S11'. (2) CX-08 records only a name: not that it must hold one ranking pass (candidates considered, scores, selected plan or no-trade) and candidate-level rejections with reason codes; PD-05 is not cited. (3) SHARED_CONTRACTS.md:297-299 still calls a candidate failing the expectancy gate 'an ordinary record with a status and reason codes' although no record can hold it yet.",
+     "verdict": "partial"
+    },
+    {
+     "covered_by": "",
+     "evidence": "docs/CHANGE_REQUESTS.md:110 CX-09 'Outcome / label record | 04 and 09 | 09 | label definitions are a research deliverable of session 04'; specifications/dependency_graph.yaml:109-110 required_before_start_of [S09].",
+     "id": "PD-06",
+     "remaining": "Disposition claims 'required before S04 trains and S09 starts'; only the S09 start is gated, and S10 (counterfactual outcomes) is not named. The substance is not written down: label availability instant for purging, REALIZED vs COUNTERFACTUAL outcomes of rejected/missed setups, label specification id; PD-06 is not cited.",
+     "verdict": "partial"
+    },
+    {
+     "covered_by": "tests/gie/contracts/test_model_version.py::test_out_of_sample_starts_strictly_after_information_end_plus_embargo and the MDL-3 cases (:147-171); CND-11 only via schema_gen --check",
+     "evidence": "gie/contracts/model_version.py:197-209 (training_information_end_ns covers labels, transforms, selection; embargo_ns; split_spec_sha256), :470 is_out_of_sample (exported from gie.contracts); gie/contracts/candidate.py:237 support_count, :268 memory_cutoff_time_ns, CND-11 at :384. Run: candidate dated 30 days before the model's information end -> is_out_of_sample False; at end+embargo False, +1 ns True; memory_cutoff > as_of -> CND-11 error; data used but no information end -> MDL-3 error.",
+     "id": "PD-07",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "tests/gie/contracts/test_model_version.py (:902-1016; one test currently failing on exactly this gap)",
+     "evidence": "gie/contracts/model_version.py:221, :262-269 (derived_from / replaces / rollback_of), :408-411, :414-467. Fixed (run): from-scratch version can be ROLLED_BACK; RETIRED->ACTIVE without rollback_of refused; same approval reused for the same version refused; two ACTIVE per family refused. Still reproduces: A re-activated after successor B was only RETIRED, citing a ROLLED_BACK version of another family -> accepted (:455-459 checks only 'is ROLLED_BACK'). pytest tests/gie/contracts/test_model_version.py::test_reactivation_naming_a_rolled_back_version_of_another_family_is_refused -> FAILED, DID NOT RAISE. LifecycleLedger (gie/contracts/ledger.py:119-121) admits RETIRED->ACTIVE citing a never-registered id with a reused approval.",
+     "id": "PD-08",
+     "remaining": "validate_registry_history must require rollback_of_model_version_id to be the same-family version that was ACTIVE immediately before and was rolled back; an old or foreign rollback can be re-cited. The journal/ledger path does not apply the registry-history rules although specifications/SHARED_CONTRACTS.md:475-486 says the ledger enforces them.",
+     "verdict": "partial"
+    },
+    {
+     "covered_by": "tests/gie/contracts/test_model_version.py (:1069-1087 composite cases); the Protocol itself is untested",
+     "evidence": "gie/contracts/interfaces.py:188-222: get (newest entry), active(kind, model_name), find, history, status_at, register, transition; gie/contracts/model_version.py:224 component_model_version_ids, MDL-9 at :336. Run: COMPOSITE without components and non-COMPOSITE with components -> MDL-9 error; hasattr(ModelRegistry, 'snapshot') -> False.",
+     "id": "PD-09",
+     "remaining": "Sub-defect (5) - no snapshot / consistent view, two reads in one scoring pass can straddle a promotion - is neither implemented, declined nor recorded. Replay is covered by RunManifest.model_version_ids; paper is not.",
+     "verdict": "partial"
+    },
+    {
+     "covered_by": "tests/gie/contracts/test_model_version.py::test_active_model_fitted_on_fixture_data_is_never_validated and MDL-3 cases",
+     "evidence": "gie/contracts/model_version.py:183-193 training_data_origin / training_data_sha256 / training_config_sha256 (MDL-3), :148-151 'Registry times are always readings of the system clock ... a replay takes the models it uses from its run configuration', :347-353 validated is False for fixture-trained models; gie/contracts/run.py:89 model_version_ids. Run: fixture-trained ACTIVE sample -> validated False. Wording nit: specifications/SHARED_CONTRACTS.md:469 'Every record names its run, mode ...' is still literally untrue for ModelVersion.",
+     "id": "PD-10",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "tests/gie/contracts/test_model_version.py (MDL-6 cases :186-187, test_status_time_strictly_increases :790, test_active_is_first_reached_only_from_shadow :692)",
+     "evidence": "gie/contracts/model_version.py:166 status_reasons (MDL-6 at :316), :245-261 evaluation report uri+hash, promotion_criteria_sha256, shadow_run_ids (MDL-7 at :321), :406 status_time must strictly increase. Run: reviewer's chain with identical status_time_ns -> IllegalTransitionError; ACTIVE with only approved_by and approval_reference -> MDL-7 error; REJECTED / RETIRED without reasons -> MDL-6 error. Registry duty stated at gie/contracts/interfaces.py:198-201.",
+     "id": "PD-11",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "tests/gie/core/test_ordering.py::test_a_decision_chain_that_shares_one_instant_sorts_in_causal_order (also :281, :297)",
+     "evidence": "specifications/SHARED_CONTRACTS.md:332-353 (input order vs journal order; journal_seq is the total order); gie/core/ordering.py:59-69 ranks follow data flow; gie/contracts/ordering.py:66-68 requests rank 80. Run at one instant: EventKey order = tick, evidence, candidate, trade_plan, risk_decision, order_request; MemoryJournal journals the cascade as journal_seq 1..6; a plan whose watermark lies beyond the newest tick -> FutureDataError.",
+     "id": "PD-12",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "python -m gie.contracts.schema_gen --check (transition tables in x-gie-behaviour of TradePlan and Candidate schemas). No test calls validate_plan_transition or validate_candidate_transition yet.",
+     "evidence": "gie/contracts/trade_plan.py:66-104 (status definitions, PLAN_STATUS_TRANSITIONS), :194-198 (a new revision voids approval and reservation; working entry must be cancelled), :409-448; gie/contracts/candidate.py:47-73, :410-438; enforced in gie/contracts/ledger.py:125-130. Run: stop 2647.80 -> 2640.00 refused by validator and by MemoryJournal; REJECTED -> SELECTED refused; entry for a new revision citing the old approval refused. Note: the validator compares the stop level, so a revision that moves the entry away with the stop unchanged is accepted (re-approval is forced by plan_fingerprint).",
+     "id": "PD-13",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "",
+     "evidence": "gie/contracts/causality.py:32-80 check_derivation; specifications/SHARED_CONTRACTS.md:119 (as_of_time_ns = market-data watermark, direct or through inputs), :195-207 (reference instants; 'entry order <= risk approval <= plan <= candidate <= every evidence'); gie/contracts/authorization.py:70-79; parameter procedure at docs/DECISION_LOG.md:165-170 and :302-304. Run: plan valid 1 h beyond its candidate is constructible but check_derivation raises 'does not outlive its inputs'; approval outliving plan raises; order outliving approval refused by validate_entry_authorization.",
+     "id": "PD-14",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "tests/gie/golden/TradePlan-1.0.0/pullback_by_market_order_armed.json via python -m tools.make_golden --check; schema_gen --check (PLN-3)",
+     "evidence": "gie/contracts/trade_plan.py:318-322 PLN-3 'entry_price is null iff entry_style is MARKET', :219-239 entry_price as intended level, entry_trigger, invalidations, :168-181 geometry on effective entry, :201-202 re-issue rule. Run: BUY PULLBACK by MARKET order with entry_price 2648.00 at quote 2650.35, target 2650.00, stop 2646.50 -> valid (risk_per_unit 1.50); same style end to end plan -> approval -> market entry authorised.",
+     "id": "PD-15",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "python -m gie.contracts.schema_gen --check (CND-5, PLN-12); no behavioural test yet",
+     "evidence": "gie/contracts/candidate.py:232-240, CND-5 at :330; gie/contracts/trade_plan.py:262-265, PLN-12 at :376; specifications/SHARED_CONTRACTS.md:98-101; U-16 at docs/DECISION_LOG.md:531-541 (owner or supervisor decides, 'before session 05 starts'). Run: candidate with quantiles only accepted, with stderr only accepted, with no uncertainty -> CND-5 error; plan with no uncertainty -> PLN-12 error.",
+     "id": "PD-16",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "python -m gie.contracts.schema_gen --check (DEST-1); tests/gie/golden/Candidate-1.0.0/scored.json",
+     "evidence": "gie/contracts/candidate.py:89-116 (scenario, horizon_ns, touch probability defined, DEST-1), :249-256 expected_win_r / expected_loss_r, :274-283 unique (scenario, label). Run: probability without horizon -> DEST-1 error; duplicate (scenario, label) refused. gie/contracts/trade_plan.py:115-129: Target fields are label, price, close_frac only.",
+     "id": "PD-17",
+     "remaining": "Third defect of the title, 'plan targets are not linked to predicted destinations', is not addressed: Target has no reach probability or destination reference, and its label alone does not identify a Destination (key is scenario + label). Whether adverse destinations are allowed is not stated (one is accepted).",
+     "verdict": "partial"
+    },
+    {
+     "covered_by": "tests/gie/contracts/test_evidence.py::test_intermarket_evidence_may_carry_levels_of_any_sign_while_gold_levels_must_be_positive; tests/gie/golden/Evidence-1.0.0/intermarket_real_yield.json; python -m tools.render_contract_docs --check",
+     "evidence": "specifications/SHARED_CONTRACTS.md:102-105 'Direction of evidence ... always describe the instrument named in its symbol. They are never pre-translated into a gold direction'; gie/contracts/evidence.py:170-173, :204, :221-229, :110 and gie/contracts/common.py:229 unit 'quote currency per unit'; docs/DECISION_LOG.md:246-249. Run: INTERMARKET evidence on DXY constructs.",
+     "id": "PD-18",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "",
+     "evidence": "specifications/SHARED_CONTRACTS.md:29 Tick consumers '02, 03, 04, 05, 06, 07, 08, 10, 11', :34-35 OrderEvent and Position consumed by 05; gie/contracts/interfaces.py:49 TickSink docstring, :79-88 RecordSource; gie/contracts/journal.py:76-124 MemoryJournal, :204-215 FileJournal layout (one canonical JSON line per record).",
+     "id": "PD-19",
+     "remaining": "Minor: nothing states how a consumer receives records live (how 05 gets Candidate, OrderEvent, Position within a step). The only input Protocol is TickSink.on_tick, RecordSink is defined as the run journal, and RecordSource names 09, 10, 11, 12 as readers. The reviewer's proposed statement (a subsystem's input port wired by gie.app) is neither adopted nor declined.",
+     "verdict": "partial"
+    },
+    {
+     "covered_by": "",
+     "evidence": "docs/CHANGE_REQUESTS.md:101-110 and specifications/dependency_graph.yaml:87-110 list CX-01..CX-09 with proposer and gate; U-11 at docs/DECISION_LOG.md:483-493. RunManifest and RecordSource were delivered instead (D-019, interfaces.py:79). grep -i 'FeatureDictionary|LatencyReport|ErrorEvent|cost schedule' in CHANGE_REQUESTS.md and dependency_graph.yaml: 0 hits.",
+     "id": "PD-20",
+     "remaining": "'Every additional shared type' is not true. Not recorded anywhere: the FeatureDictionary artifact with a defined hash (ModelVersion.feature_schema_sha256 still points at nothing), LatencyReport and ErrorEvent record types; CX-04 InstrumentSpec has no cost schedule. Gates omit the sessions of this lens: CX-02 lists 02, 06, 08 (not 04, 05); CX-04 lists 06, 08 (not 04, 05).",
+     "verdict": "partial"
+    },
+    {
+     "covered_by": "python -m gie.contracts.schema_gen --check (PLN-11 in the locked TradePlan schema); no behavioural test yet",
+     "evidence": "gie/contracts/trade_plan.py:371-375 PLN-11; specifications/SHARED_CONTRACTS.md:455. Run: SELECTED with expected_net_r -0.5, ARMED with -2.0 and SELECTED with 0.0 -> ContractValidationError PLN-11; PREPARED with -0.5 accepted.",
+     "id": "PD-21",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "tests/gie/contracts/test_evidence.py (EVD-6 cases :326-332, :491-513, :655); tests/gie/golden/Evidence-1.0.0/contra.json",
+     "evidence": "gie/contracts/evidence.py:74-76 (CONTRA defined; scores describe the contradicting observation), :255-264 contradicts_market_event_ids (list, stable across revisions), EVD-6 at :313-321. Run: one CONTRA record naming two market events accepted; CONTRA with none and ACTIVE with one -> EVD-6 error; contradicts_evidence_id no longer exists.",
+     "id": "PD-22",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "python -m gie.contracts.schema_gen --check (CONTRIB-1, fields); golden Candidate and TradePlan messages",
+     "evidence": "gie/contracts/common.py:249-288 Contribution (evidence_id xor feature, CONTRIB-1); gie/contracts/candidate.py:284-291 baseline_r and contributions on Candidate; gie/contracts/trade_plan.py:154-157 on PlanEstimate, :288-293 on TradePlan. Run: candidate with baseline_r=5.0 and expected_net_r=0.25 accepted; contributions with baseline_r null accepted; plan with a single weight 9.0 and expected_net_r 0.25 accepted.",
+     "id": "PD-23",
+     "remaining": "Both title defects are fixed. The third point of the finding is not: no rule relates baseline_r plus the weights to expected_net_r (no invariant, no tolerance), so an attribution can still be arbitrary; this is neither declined nor recorded.",
+     "verdict": "partial"
+    },
+    {
+     "covered_by": "tests/gie/golden/Candidate-1.0.0/unscored.json via tools.make_golden --check; schema_gen --check (CND-4, close_frac bound)",
+     "evidence": "gie/contracts/trade_plan.py:125-129 close_frac >= 0, :245-255 at least one target; gie/contracts/candidate.py:217-220 unscored_reason, CND-4 at :325. Run: plan with one destination and close_frac 0 accepted; no targets refused; unscored candidate without unscored_reason -> CND-4 error, with TOO_FEW_NEIGHBOURS accepted. Side remark of the finding not acted on: specifications/SHARED_CONTRACTS.md:454 still cites G04-12 for the destination rule.",
+     "id": "PD-24",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "python -m gie.contracts.schema_gen --check (POS-8); tests/gie/golden/Position-1.0.0/closed.json. No test_position.py yet.",
+     "evidence": "gie/contracts/position.py:169 peak_time_ns, :172 trough_net_pnl_amount, :194 close_reason, POS-8 at :251, :33 'never learns from them'; gie/contracts/order_event.py:357-360 reason_code documented as the exit reason on EXIT and protective requests; specifications/SHARED_CONTRACTS.md:510-513 'Learning and model fitting use GIE-owned positions only'. Run: OPEN position with close_reason and CLOSED GIE position without -> POS-8 error.",
+     "id": "PD-25",
+     "remaining": "",
+     "verdict": "done"
+    }
+   ]
+  },
+  {
+   "group": "SF",
+   "scope": "safety lens",
+   "summary": "SF group, state at about 12:07 UTC: 7 done, 15 partial, 1 not fully checkable (SF-24), 0 not_done. The claim \"all done\" does not hold. The repository changed under me (HEAD moved to ec6ae4e; tools/check_live_lock.py appeared untracked at 12:03; gie/core/freshness.py and errors.py have uncommitted edits), so line numbers are as read then.\n\nMost serious first:\n\n1. **SF-06 / SF-07: the gateway trusts what the caller hands it and never consults its own ledger.**\n   - An EXIT of 0.50 lots is accepted against a stale position snapshot while the ledger knows 0.25 is open, or that the position is CLOSED.\n   - Three EXIT orders of 0.50 are accepted on one 0.50-lot position.\n   - An entry on plan revision 0 reaches the adapter after the ledger admitted revision 1 = WITHDRAWN.\n   - A different RiskDecision object with the same decision_id but 500 lots is accepted.\n   - Three tests in test_guarded_adapter.py fail on exactly these.\n2. **SF-16: the ledger does not enforce what section 9.2 says it enforces.**\n   - Only validate_model_transition is called: two ACTIVE versions of one family, and a re-activation on a used approval, are admitted. Two test_journal.py tests failed on this in my 11:5x snapshot.\n   - If the gateway is given journal.ledger (\"the run's LifecycleLedger\"), a poll() with two reports of one order makes the journal refuse the first. It works only with separate ledgers; the wiring is not specified.\n3. **SF-02: the stated protection path cannot pass the gateway.** A stop order \"created by the simulated broker\" is refused by poll() both as SUBMIT_REQUESTED and as ACCEPTED alone. The path is defined only in a docstring, not in SHARED_CONTRACTS sections 9/10.\n4. **SF-10: reproducer P1 still passes.** BUY LIMIT 2700 with ask 2650.35 and stop 2660 is accepted as a plan and as an entry request.\n5. **SF-01 / SF-18: scan and document checks are incomplete.**\n   - check_live_lock.py now exists and caught every violation of the reviewer's rule list (a)-(g) that I planted in a scratch copy.\n   - It exits 1 on the repository: specifications/lock_pins.json is missing and tools/build_review.py:809 and :1072 trip LL013. It is untracked and has no test file.\n   - README.md is unchanged since before the review, including \"nothing in this repository can send an order to a broker\".\n   - Still absent: check_docs_paths, check_no_secrets, check_architecture, baseline_freeze.\n   - tools/check_protected_paths.py is called by tools/ci.py:87 and cited in docs/BASELINE_AUDIT.md:25, is absent, and is not on the list of tools under construction.\n6. **Smaller residuals, each reproduced:**\n   - SF-11: the profit floor can be lowered via an intermediate NORMAL decision; a negative floor is accepted.\n   - SF-15: re-activation passes the ledger on the old approval, and passes the history validator when it names a rolled-back version of another family.\n   - SF-13: a fill one hour after valid_until_ns is admitted.\n   - SF-14: a fixture RULESET that is ACTIVE reads validated=True with no label.\n   - SF-05: the module allow-list is defeated by one self-assigned `__module__` line at run time.\n   - SF-08: `RunMode.LIVE = RunMode.PAPER` is still silent in the self-check; a tampered `_member_names_` raises a raw KeyError.\n   - SF-22: the journal accepts a fixture tick in a run declared BROKER_FEED.\n   - SF-21: the plain helpers still take a tolerance without a clock.\n   - SF-23: U-18 has no gate.\n\nTwo dispositions misname the rule: SF-11 says RSK-10 (the surplus rule is RSK-8) and SF-12 says POS-8 (the id check is in POS-3).\n\nThe full suite in a scratch copy at about 11:55 gave 174 failed, 9089 passed, 2 errors. 99 of the failures were the then-stale test_routing_lock.py, which was down to 4 after its update.\n\nI wrote nothing in the repository. Experiments ran with `python3 -B` and in copies under the session scratchpad. That scratchpad turned out to be shared with other agents: I created copy/, copy2/, copy3/ and sf_verifier_a1/ there, and my first `rm -rf copy` ran before I knew it was shared.",
+   "verdicts": [
+    {
+     "covered_by": "CI step 'paper-only routing lock (static scan)' (tools/ci.py:77), currently failing; tests/gie/tools/test_check_live_lock.py does not exist",
+     "evidence": "tools/check_live_lock.py appeared untracked at 12:03 (1726 lines, rules LL000-LL014); wired at tools/ci.py:77. On a scratch copy with planted code it flagged socket/subprocess/ctypes/MetaTrader5/os.system (LL002/LL003), order_send (LL001), registry and enum internals, `._adapter`, `__module__` rebinding (LL008), object.__setattr__ (LL009), guard and record subclasses (LL010), registration outside the allow-list (LL011), adapter.submit (LL012), production-tree literal (LL013). On the repository: `python3 -B -m tools.check_live_lock` -> exit 1, 3 violations.",
+     "id": "SF-01",
+     "remaining": "specifications/lock_pins.json is missing (LL014), so no hash is pinned although DECISION_LOG.md:195, ARCHITECTURE.md:137 and CLAUDE.md:53 say so. Scan is red on tools/build_review.py:809 and :1072 (LL013). tests/gie/tools/test_check_live_lock.py missing. File not committed. No rule restricts file writes from an adapter module (file-drop IPC to a terminal); a planted open(...MQL5/Files...) in a registered adapter's submit was not flagged.",
+     "verdict": "partial"
+    },
+    {
+     "covered_by": "tests/gie/contracts/test_order_event.py (test_replace_requested_carries_the_wanted_values_and_leaves_the_order_as_it_is, test_replaced_must_apply_exactly_the_requested_volume_and_expiry)",
+     "evidence": "requested_* fields and OEV-14 exist (order_event.py:317-328, 461-468). REPLACE_REQUESTED carrying the new trigger in trigger_price -> refused; widening via requested_trigger_price=2600 -> refused at request time; REPLACED differing from the request -> refused (order_event.py:622-629, 647-672). The stop order id equals client_order_id(run, position_id, 'PROTECTIVE_STOP', 0).",
+     "id": "SF-02",
+     "remaining": "The protection path is stated only in the OrderEvent docstring (order_event.py:257-260), not in SHARED_CONTRACTS sections 9/10, and does not work as written: a stop order 'created by the simulated broker' cannot be reported. poll() refuses its SUBMIT_REQUESTED ('an adapter ... does not issue requests', guarded.py:180-184) and refuses ACCEPTED alone ('first event must be SUBMIT_REQUESTED'). Only an engine-side gateway.submit(stop, position=...) passes. Who emits the stop's first event is still undefined for sessions 06/07.",
+     "verdict": "partial"
+    },
+    {
+     "covered_by": "tests/gie/contracts/test_order_event.py (test_a_reconciliation_cannot_add_risk_to_an_entry, test_a_reconciliation_cannot_widen_a_protective_stop, test_a_reconciliation_cannot_remove_the_expiry_of_a_resting_entry)",
+     "evidence": "order_event.py:630-640 applies _check_no_added_risk to RECONCILED; order_type is immutable (:491); target states exclude the pending ones (:119-122). Re-run: RECONCILED volume 0.50->50, limit 2649.80->2655, attached stop ->100, expiry ->null or later, protective trigger 2647.80->2600, STOP->LIMIT 9000: all refused.",
+     "id": "SF-03",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "tests/gie/contracts/test_guarded_adapter.py, tests/gie/contracts/test_interfaces.py, tests/gie/core/test_routing_lock.py (test_a_subclass_whose_creation_was_refused_cannot_be_used_as_a_guard currently fails: the refused subclass survives in __subclasses__() and can be instantiated; the gateway still refuses it by exact type)",
+     "evidence": "(a) subclassing RoutingGuard and a look-alike guard -> LiveRoutingLockedError (routing_lock.py:208-209, guarded.py:52). (b) inst.submit = other -> AttributeError (slots required, routing_lock.py:170-174). (c) class patch after registration -> refused (:251-257). (d) foreign object with __class__ reassigned -> the registered function is called (guarded.py:84-87). create() at guarded.py:62-73; OrderGateway at interfaces.py:158-185. (e) g._adapter.submit(x) still works at run time (private slot); the new scan flags `._adapter` and getattr spellings (LL008, checked on planted code). Not done and not claimed: Literal typing of the adapter declarations (interfaces.py:142-143).",
+     "id": "SF-04",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "tests/gie/core/test_routing_lock.py (test_a_class_from_any_other_module_cannot_be_registered); scan rules LL011 / LL008 in tools/check_live_lock.py (no test file yet)",
+     "evidence": "routing_lock.py:66 and :163-168: a class defined in __main__ is refused. The scan flagged a planted reference outside the allow-list (LL011). Sealing is declined with a reason in the disposition notes.",
+     "id": "SF-05",
+     "remaining": "At run time admission is still self-service: a class in __main__ with the one line `__module__ = \"gie.execution.simulated\"` registered and its submit was reached through the gateway. The check reads a self-asserted attribute and does not verify that the named module really holds the class. A direct write to routing_lock._SIMULATED_ADAPTER_TYPES still authorises. Both are caught only by scan rule LL008, and only in gie/ and dashboard/. test_registering_a_class_that_compares_equal_to_a_registered_class_does_not_disturb_that_class fails (the genuine class is then refused; fail closed).",
+     "verdict": "partial"
+    },
+    {
+     "covered_by": "tests/gie/contracts/test_authorization.py; tests/gie/contracts/test_guarded_adapter.py (test_an_outdated_position_snapshot_does_not_authorise_more_than_the_open_volume fails for both parameters)",
+     "evidence": "Reviewer's cases through the gateway: EXIT BUY 50 lots on the long position -> refused; PROTECTIVE_STOP as MARKET -> OEV-8; EXIT for an EXTERNAL position -> refused; stop replace 0.50->0.01 -> 'covers the whole open volume'; stop cancel while OPEN -> refused (authorization.py:82-136, guarded.py:141, 150, 159).",
+     "id": "SF-06",
+     "remaining": "A non-entry order can still create exposure with no plan or approval. (1) The gateway checks the caller's Position, not its ledger: EXIT 0.50 was accepted with the revision-0 snapshot while the ledger held revision 1 (0.25 open), and again when the ledger knew the position CLOSED. (2) No aggregate check: three EXIT orders of 0.50 were accepted on one 0.50-lot position. (3) Broker reports are not checked against the position: RECONCILED shrinking a protective stop 0.50->0.01, or moving it to CANCELED, passes validate_order_transition and so poll(). SHARED_CONTRACTS 9.3 states only 'cannot be cancelled', not the tighter-replacement case.",
+     "verdict": "partial"
+    },
+    {
+     "covered_by": "tests/gie/contracts/test_authorization.py; tests/gie/contracts/test_guarded_adapter.py; tests/gie/contracts/test_ledger.py (test_a_second_approval_of_the_same_plan_cannot_open_a_second_entry_either)",
+     "evidence": "validate_entry_authorization (authorization.py:30-79) is called at guarded.py:139. Re-run: 500 lots on a 0.50 grant, a REJECTED decision, attempt 1 (OEV-7), a second entry on the same decision, a second approval while the first order works, an approval older than the plan, stop or price different from the plan, a same-id plan with another stop (plan_fingerprint), expired approval, order outliving approval: all refused.",
+     "id": "SF-07",
+     "remaining": "The gateway never consults its ledger. (1) An entry on plan revision 0 reached the adapter after the ledger admitted revision 1 = WITHDRAWN (test_an_entry_for_a_plan_the_ledger_knows_to_be_withdrawn_never_reaches_the_adapter fails). (2) A caller-built RiskDecision with the same decision_id but volume 500 was accepted while the ledger held the genuine 0.50 approval; decision content is not bound by the id. (3) A request older than its approval is accepted (test_authorization.py::test_an_entry_request_cannot_be_older_than_the_approval_it_cites fails).",
+     "verdict": "partial"
+    },
+    {
+     "covered_by": "tests/gie/core/test_routing_lock.py (test_the_self_check_raises_when_a_vocabulary_gains_a_live_name_as_an_alias, test_the_self_check_detects_an_alias_injected_through_the_member_map, test_the_self_check_detects_a_value_injected_through_the_value_map)",
+     "evidence": "Members are captured and compared by identity (routing_lock.py:62-63, 82-107; _spec.py:386-395). Re-run in subprocesses: alias through _member_map_ -> self-check raises; injected member -> self-check, parse_run_mode, RoutingGuard and record construction all refuse; look-alike enum and str subclass -> refused.",
+     "id": "SF-08",
+     "remaining": "The reviewer's case `RunMode.LIVE = RunMode.PAPER` (plain attribute) is still silent: assert_live_routing_locked() returns None; the proposed `'LIVE' not in vars(RunMode)` check is absent. It resolves to the genuine PAPER member, and the scan flags it (LL008) in gie/. A tampered _member_names_ makes the self-check raise a raw KeyError instead of LiveRoutingLockedError (test_the_self_check_reports_an_unknown_name_in_the_member_list_as_a_broken_lock fails for both vocabularies).",
+     "verdict": "partial"
+    },
+    {
+     "covered_by": "tests/gie/contracts/test_roundtrip.py (test_a_subclass_instance_of_a_contract_cannot_be_encoded), test_journal.py (test_a_subclass_of_a_contract_is_not_the_registered_contract), test_guarded_adapter.py (test_an_unvalidated_order_event_subclass_from_poll_is_refused)",
+     "evidence": "Defining EvilOrderEvent(OrderEvent) outside gie.contracts -> TypeError (_spec.py:616-622). Even when forced with a spoofed __module__, the unvalidated instance is refused by to_wire (codec.py:47-51), Obj.check (_spec.py:527-535), gateway submit and poll (guarded.py:89-91) and journal publish; a nested Target subclass is refused too. All ten contracts carry @final. object.__setattr__ on a record still works at run time and is flagged by scan rule LL009 (checked on planted code). Residue: LifecycleLedger still uses isinstance (ledger.py:74-88), so ledger.admit(evil) returned True when called directly.",
+     "id": "SF-09",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "tests/gie/contracts/test_order_event.py (test_oev11_*), tests/gie/contracts/test_position.py (test_pos4_*), tests/gie/contracts/test_trade_plan.py (test_a_market_plan_is_checked_against_the_reference_price)",
+     "evidence": "Fixed: BUY MARKET entry with stop 9999 / take profit 1 -> OEV-11; market entry without reference_price -> OEV-5; a fill below the attached stop -> OEV-11; GIE BUY position with initial stop 9000 -> POS-4 (order_event.py:155-184, position.py:76-85).",
+     "id": "SF-10",
+     "remaining": "Reviewer's case P1 still passes: BUY LIMIT 2700 with ask 2650.35 and stop 2660 constructs as a TradePlan (PLN-5 compares with entry_price only, trade_plan.py:166-173) and as an ENTRY SUBMIT_REQUESTED (OEV-11 uses the reference only for MARKET orders). It fails only when the FILLED event is built. No entry-versus-reference rule exists (BUY LIMIT <= ask, BUY STOP >= ask). Minimum stop distance (stop 1E-12 below entry; stop at 0.000000000001) is still accepted; that part is recorded as CX-04 InstrumentSpec (CHANGE_REQUESTS.md:105, proposed by S07, before S06 and S08), but SHARED_CONTRACTS 9.1 (line 454) does not state the limit.",
+     "verdict": "partial"
+    },
+    {
+     "covered_by": "tests/gie/contracts/test_risk_decision.py (test_rsk8_a_hair_above_the_floor_only_the_surplus_may_be_risked, test_rsk3_a_zero_risk_fraction_with_a_positive_amount_is_never_an_approval); tests/gie/contracts/test_ledger.py (test_a_lowered_profit_floor_is_refused_and_the_floor_stays)",
+     "evidence": "Floor +1E-10 with risk_frac 0.02 -> refused by RSK-8 (risk_decision.py:56-60, 230-235; the disposition calls it RSK-10). risk_frac 0 -> RSK-3; risk_frac 5 -> field bound <= 1 (:108-112); risk_amount 1E15 -> RSK-9 with reference_equity_amount; quality_validated without a model id -> RSK-12. A floor lowered 0.05 -> 0.04 on consecutive decisions -> refused (:292-297). AccountSnapshot is recorded as CX-05 (CHANGE_REQUESTS.md:106).",
+     "id": "SF-11",
+     "remaining": "The floor is compared only between two consecutive decisions that both carry one: PROFIT_PROTECTION(0.05) -> NORMAL -> PROFIT_PROTECTION(0.01) on the same day is accepted (test_risk_decision.py::test_the_floor_cannot_be_lowered_by_leaving_and_re_entering_profit_protection_in_one_day fails). profit_floor_frac -0.9 in PROFIT_PROTECTION is still accepted, including with an approval. reference_equity_amount may change within a trading day unchecked.",
+     "verdict": "partial"
+    },
+    {
+     "covered_by": "tests/gie/contracts/test_position.py (test_an_external_position_is_observed_not_judged, test_the_largest_observed_volume_of_an_external_position_never_decreases, test_pos4_does_not_judge_what_another_system_did_with_its_stop)",
+     "evidence": "position.py:341-344 ends the transition check for EXTERNAL owners after identity and time rules. Re-run: external stop widened 1.0900 -> 1.0950, stop removed, volume grown 0.50 -> 1.00 (initial_volume_lots = largest observed): accepted. GIE position_id 'pos_' + 32 zeros -> refused by POS-3 (position.py:64-65; the disposition calls it POS-8). GIE stop widening and volume growth are still refused.",
+     "id": "SF-12",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "tests/gie/contracts/test_order_event.py (test_oev13_a_resting_entry_must_expire, test_the_expiry_of_an_entry_may_only_move_earlier), tests/gie/contracts/test_authorization.py (test_the_order_may_not_outlive_its_approval)",
+     "evidence": "LIMIT or STOP entry with valid_until_ns=None -> OEV-13; expiry before event time -> OEV-13 (order_event.py:227-240); replace moving the expiry later -> 'may only be moved earlier' (:544-546); REPLACED with null expiry -> OEV-13; an order outliving its approval -> refused (authorization.py:78-79).",
+     "id": "SF-13",
+     "remaining": "The consequence the reviewer named is not excluded: a FILLED report one hour after the entry's valid_until_ns passes validate_order_transition and LifecycleLedger.admit. SHARED_CONTRACTS 3.3 (lines 184-207) does not say the simulated broker must expire an entry at that instant or that a later fill is a violation. An approval valid until 2^63-1 is still constructible (bounded only at the gateway).",
+     "verdict": "partial"
+    },
+    {
+     "covered_by": "tests/gie/contracts/test_model_version.py (test_active_model_fitted_on_fixture_data_is_never_validated, test_no_sample_model_claims_to_be_validated, test_approver_name_refused)",
+     "evidence": "training_data_origin exists (model_version.py:183-187). The fixture ACTIVE sample and tests/gie/golden/ModelVersion-1.0.0/active_fixture_approval.json carry SYNTHETIC_FIXTURE, and .validated is False (:347-353). approved_by ' ' -> refused (pattern at :43). RiskDecision.quality_model_version_id is set iff quality_validated (RSK-12).",
+     "id": "SF-14",
+     "remaining": "A model without training data has no label at all: the fixture RULESET, made ACTIVE with FIXTURE-OWNER / D-999, gives validated=True and training_data_origin null on the wire. No fixture range of approval references is reserved, and nothing in Session 00 checks that an ACTIVE record cites an existing decision (left to session 09 by the ModelRegistry docstring, interfaces.py:198-201).",
+     "verdict": "partial"
+    },
+    {
+     "covered_by": "tests/gie/contracts/test_model_version.py (test_rollback_of_is_set_exactly_on_a_reactivation, test_sample_lifecycle_and_a_full_rollback_path_are_valid_step_by_step)",
+     "evidence": "Revision floors in MDL-5 (model_version.py:92-99, 307-315): ACTIVE at revision 1 and SHADOW at revision 0 -> refused. RETIRED -> ACTIVE without rollback_of -> refused (:408-411). validate_registry_history refuses a reused approval (:450-454). First ACTIVE -> ROLLED_BACK is now accepted. ModelRegistry docstring obliges validation (interfaces.py:198-201).",
+     "id": "SF-15",
+     "remaining": "(1) RESEARCH -> SHADOW -> ACTIVE(D-999) -> RETIRED -> ACTIVE(D-999) with rollback_of set to any unregistered id passes validate_model_transition and LifecycleLedger.admit, i.e. the journal path. (2) validate_registry_history accepts a re-activation whose rollback_of names a ROLLED_BACK version of another family while its own successor was only RETIRED (test_reactivation_naming_a_rolled_back_version_of_another_family_is_refused fails). (3) Rollback of a version without parent is allowed in code but its meaning ('no active model, fail closed') is not documented anywhere.",
+     "verdict": "partial"
+    },
+    {
+     "covered_by": "tests/gie/contracts/test_ledger.py, tests/gie/contracts/test_journal.py, tests/gie/contracts/test_guarded_adapter.py",
+     "evidence": "SHARED_CONTRACTS is split into 9.1 record invariants (line 448), 9.2 sequence rules (line 471) and 9.3 authorisation (line 489). LifecycleLedger exists (ledger.py:38-163) and is called by the journal (journal.py:178, 189) and the gateway (guarded.py:142-145, 185).",
+     "id": "SF-16",
+     "remaining": "(1) The ledger calls only validate_model_transition (ledger.py:119-121): a second ACTIVE version of one family and a re-activation on a used approval were admitted, although 9.2 line 486 lists them as enforced at publication. In my 11:5x snapshot, test_journal.py::test_a_second_active_version_of_a_model_family_is_refused_by_the_journal and ::test_a_reactivation_with_a_used_approval_is_refused_by_the_journal failed; not re-run after the later test edits. (2) With the gateway given journal.ledger ('the run's LifecycleLedger', guarded.py:55), a poll() returning ACCEPTED and PARTIALLY_FILLED of one order made journal.publish refuse the first ('order_seq must increase by exactly 1'); with separate ledgers it works. The wiring is specified nowhere and not tested. (3) tests/gie/contracts/test_transitions.py, named by the finding, does not exist.",
+     "verdict": "partial"
+    },
+    {
+     "covered_by": "tests/gie/core/test_params.py (test_a_percentage_typed_for_a_required_fraction_is_refused, test_daily_levels_in_the_wrong_order_are_refused, test_an_unknown_top_level_key_is_refused)",
+     "evidence": "On scratch copies of research_parameters.toml: halt '-3', '0.03', '-0.01'; profit-protection table deleted; '0_5', ' 5 ', '1e3'; tick target -5 and '0.001'; unknown top-level and per-parameter keys; schema_version true and 1.0 -> all ConfigError (params.py:114-136, 139-151, 164-169, 183-188, 205-210). parameters_sha256 changes with a value (params.py:75-87) and is bound into RunManifest and RunContext (run.py:65, 159-160). Adjacent, outside the finding: test_params.py had 4 failures in my snapshot; I reproduced that parameters_sha256 is reassignable on the loaded view, and did not reproduce the over-long integer case.",
+     "id": "SF-17",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "CI step 'documents name only paths that exist' (tools/ci.py:92); the tool it calls does not exist",
+     "evidence": "Now present: specifications/REQUIREMENTS_MATRIX.md, docs/IMPLEMENTATION_STATUS.md, tools/audit/, tools/gie_registers.py. CI step exists at tools/ci.py:92. But `git log -- README.md` shows README unchanged since 80a2996, before the reviewed commit. README.md:4 still reads 'nothing in this repository can send an order to a broker'; :6 'submitted for owner review'; :10 'PDF + machine-readable evidence' (no PDF in reviews/session_00/).",
+     "id": "SF-18",
+     "remaining": "tools/check_docs_paths.py is absent, so the CI check cannot be verified. 'Documents reworded to the true state' is not true for README.md (lines above). docs/CHANGE_REQUESTS.md:34-35 still say 'harness built and self-tested' and 'proven ... (protected path check)' while tools/baseline_freeze.py and tools/check_protected_paths.py are absent. CLAUDE.md:53, DECISION_LOG.md:195 and ARCHITECTURE.md:137 name specifications/lock_pins.json, which is absent. tools/check_protected_paths.py is called at tools/ci.py:87 and cited in docs/BASELINE_AUDIT.md:25, but is not on the list of tools under construction.",
+     "verdict": "partial"
+    },
+    {
+     "covered_by": "tests/gie/core/test_canonical.py (test_decimal_from_str_rejects_a_trailing_newline), tests/gie/core/test_ids.py (test_is_valid_id_rejects_a_trailing_newline), tests/gie/core/test_errors.py, tests/gie/contracts/test_spec_framework.py (test_integers_for_float_fields_must_be_exactly_representable), tests/gie/contracts/test_roundtrip.py",
+     "evidence": "(a) A 1.0.0 message without valid_until_ns -> 'field is missing' (_spec.py:709-714). (b) Trailing newline on a decimal, schema_version, id and trading day -> refused (fullmatch; no .match( left in gie/). (c) NamedValue(value=2**53+1) -> refused (_spec.py:304-305). (d) tick(bid=Decimal('1E+1000000')) -> ContractValidationError (_spec.py:238-241). (e) GieError details 2**70 and 10**5000 -> journalable (current working tree of errors.py). Adjacent failures of the same class, outside the five places: test_roundtrip.py::test_json_schema_refuses_a_message_without_an_optional_key (the published schema still lets optional keys be absent); test_spec_framework.py (an invariant raising AttributeError/IndexError/KeyError escapes raw); test_identity.py (NaN identity price).",
+     "id": "SF-19",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "tests/gie/contracts/test_compatibility.py (test_any_change_of_the_venue_vocabulary_is_major, test_adding_live_cannot_be_released_below_a_major_bump), tests/gie/contracts/test_schema_lock.py (test_changed_routing_vocabulary_is_reported_although_the_lock_is_only_proposed); CI step schema_gen --check",
+     "evidence": "Appending LIVE to mode and venue of OrderEvent-1.0.0: classify_schema_change -> MAJOR with 'routing-lock vocabulary changed' (compat.py:85-90); check_evolution 1.0.0 -> 1.1.0 reports a problem. schema_gen.check on a scratch copy of the schema directory reports the vocabulary problem while the lock is PROPOSED, and still does after LOCK.json is re-hashed by hand (schema_gen.py:72-85, 134, 139-141). Reordering the enum is MAJOR. Adjacent: compat alone still classifies a newly added mode/venue field as MINOR (test_introducing_a_wider_routing_vocabulary_through_a_new_field_is_major failed in my snapshot); schema_gen.check covers that case.",
+     "id": "SF-20",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "tests/gie/core/test_freshness.py (test_replay_refuses_any_non_zero_future_tolerance, test_clock_based_helpers_bound_the_tolerance_in_every_mode, test_the_largest_future_tolerance_is_one_second)",
+     "evidence": "Reviewer's case (tolerance 10 s, reference 5 s ahead) -> refused: tolerance bounded to 1 s (freshness.py:33, 49-54). is_fresh_now / require_fresh_now with a replay clock and tolerance 1 -> refused. In the current uncommitted working tree, any non-SYSTEM clock gets no tolerance (freshness.py:121-130).",
+     "id": "SF-21",
+     "remaining": "The plain helpers (age_ns, is_fresh, require_fresh) are still public and take a caller-chosen tolerance without a clock: is_fresh(now, reference 0.5 s ahead, tolerance 1 s) -> True, so up to 1 s of look-ahead is still possible in a replay if a component uses them. The bound is the constant MAX_FUTURE_TOLERANCE_NS, not a research parameter as proposed, and the disposition does not say so.",
+     "verdict": "partial"
+    },
+    {
+     "covered_by": "tests/gie/contracts/test_causality.py (test_a_derived_record_never_claims_a_better_origin_than_its_input), tests/gie/contracts/test_identity.py (test_run_id_refuses_every_mode_that_is_not_replay_or_paper), tests/gie/contracts/test_run.py, tests/gie/contracts/test_tick.py",
+     "evidence": "TickFlag.RECEIVE_TIME_MODELLED exists (tick.py:46-48). derive_origin and check_derivation exist (common.py:116-125, causality.py:32-80): BROKER_FEED evidence over a SYNTHETIC_FIXTURE tick -> refused when called. identity.run_id('LIVE', ...) and a bad hash or label -> refused (identity.py:61-75). RunManifest binds run_id, mode, config, parameter hash and commit (run.py:40-135); the journal refuses a record whose mode differs from its run.",
+     "id": "SF-22",
+     "remaining": "Origin is still only self-declared where records are published. The journal of a run whose manifest says SYNTHETIC_FIXTURE accepted evidence labelled BROKER_FEED, and a PAPER run declared BROKER_FEED accepted a SYNTHETIC_FIXTURE tick; the journal does not compare a tick's origin with the manifest's data_origin. check_derivation runs only if a producer calls it. No rule ties a PAPER run to non-fixture origins.",
+     "verdict": "partial"
+    },
+    {
+     "covered_by": "",
+     "evidence": "docs/DECISION_LOG.md:555-565, U-18 'Read-only access for the paper data connection', Status OPEN: read-only (investor) credentials, one read-only facade enforced by the scan, no credentials in the repository; 'Proposal for session 01', question put to the owner. The scan side exists in the new tool (LL001, LL002 with facade gie/market_data/broker_readonly.py, LL013).",
+     "id": "SF-23",
+     "remaining": "No gate: U-18 does not say before what it must be answered (for example before session 01 connects a terminal or before the first PAPER run), and the start gate in dependency_graph.yaml:11-20 does not refer to open items. Narrower than the finding: it covers the price connection only, not account observation of other systems' positions, not the alternative of an account with trading disabled, and not the indirect driving of the existing bots.",
+     "verdict": "partial"
+    },
+    {
+     "covered_by": "tests/gie/contracts/test_position.py (test_an_external_reference_is_never_free_text), tests/gie/contracts/test_identity.py (test_external_position_id_uses_the_alias_and_never_collides_with_gie_positions)",
+     "evidence": "Verified: account alias documented (identity.py:201-206, SHARED_CONTRACTS.md:276-277, position.py:121); external_ref pattern ^[A-Za-z0-9._:-]{1,64}$ (common.py:83, position.py:119-122): free text 'my password is hunter2' -> refused. CI step exists at tools/ci.py:97.",
+     "id": "SF-24",
+     "remaining": "tools/check_no_secrets.py does not exist, so the secret scan over reviews/ and CI evidence cannot be verified. A digits-only alias (a login number) is still accepted by external_position_id; the rule is documentation only. GieError.details still takes arbitrary text.",
+     "verdict": "cannot_verify"
+    }
+   ]
+  },
+  {
+   "group": "DT",
+   "scope": "determinism lens",
+   "summary": "DT group (23 findings): 9 done, 14 partial, 0 not_done, 0 cannot_verify. No DT disposition depends on a tool that is still being built. State checked at 12:01 UTC against HEAD 7eebdaf; `gie/` was unchanged during the check apart from a docstring in position.py. I changed nothing in the repository; my experiments used in-memory patches and a scratchpad directory.\n\nMost serious first:\n\n1. **DT-16 – a valid record cannot be read back.** A float in [2^53, 2^63) that is not a \"round\" integer is written canonically as an integer literal that the decoder then refuses. Example: an Evidence feature holding float(T0+123456789) is written `1795685400123456800`; `from_json(to_json(record))` is refused and a FileJournal containing it cannot be reopened (JournalCorruptError). Two claimed parts are also missing: there is no golden message with 1e19, and the canonical.py docstring is uncorrected.\n2. **DT-12 – a PATCH bump still breaks restart.** The fingerprint itself is fixed, but FileJournal compares canonical bytes including `schema_version` on reopen. With Tick.VERSION simulated as 1.0.1, an existing journal fails with JournalCorruptError at line 1. Section 8 says only a MAJOR bump needs a cut-over.\n3. **DT-19 – \"golden check skips other MAJORs\" is not implemented.** tools/make_golden.py is unchanged since 80a2996; a simulated MAJOR bump gives 5 × \"no longer decodes: incompatible MAJOR\". A repo test (test_golden.py:412) pins the reporting behaviour. Only the section 8 sentence exists.\n4. **DT-08 – the lock covers tables, not behaviour.** Transition tables, immutable field lists, streams and ranks are locked (mutations detected). Identity rules are hand-written text, so replacing `identity.plan_id` passes `schema_gen.check()`; a no-op `validate_order_transition` passes both the schema and golden checks. There are no golden lifecycle traces.\n5. **DT-01 – journal order is in place, but the EventKey fallback is still anti-causal for orders.** A request and its report in the same stream at one instant sort as seq [1, 0] and `merge_ordered` raises. The journal also accepts a RiskDecision before its TradePlan.\n6. **DT-09 – (a) and (b) are fixed, but `call_after` is not mode-equivalent.** It is the recommended idiom, yet paper anchors it to the wall clock: paper gives input, input, timer where replay gives input, timer, input. Paper also clamps beyond MAX_TIME_NS where replay raises.\n7. **DT-03 – the fail-open is gone, but the step counter undercounts.** A second backward step while the wall clock is still behind is never counted (2 steps → 1).\n8. **DT-07 – table, watermark and clock helpers exist, with two gaps.** The replay check is `mode is ClockMode.REPLAY`, so a clock reporting \"REPLAY\" as text or an unknown mode gets a tolerance. The end-to-end delay definition is unchanged.\n9. **DT-21 – two of six sub-items not done.** The ReplayClock and ListOf docstrings are uncorrected. The new range checks also raise ValueError (not a GieError) for huge ints and return (0, 0) for out-of-range days.\n10. **DT-05 – identity functions validate only part of their inputs.** `market_event_id` raises decimal.InvalidOperation / TypeError for NaN among prices, and still accepts timeframe 'm5' and a free-text kind.\n11. **DT-06 – collision fixed, scope not stated.** The identity table is not in section 4, and its scope column says \"everything\" for ids that recur across runs with different content.\n12. **DT-22 – the Candle record lacks substance.** CX-01 does not list the time/ordering properties the proposal must fix, and S10 is not among the consumers.\n13. **DT-18 – `restore()` has two holes.** It cannot restore the last ordering time, and it raises TypeError on malformed `recent`.\n14. **DT-15 – the integer-token rule is named but never stated.**\n\nDone (reproducers re-run and now refused or correct): DT-02, DT-04, DT-10, DT-11, DT-13, DT-14, DT-17, DT-20, DT-23.\n\nFourteen tests in the repo currently fail on exactly these gaps (DT-01, 03, 05, 07, 09, 16, 18, 21); they are named per finding. Two disposition labels are wrong although the defect is fixed: market_event_id is verified by EVD-2 (not EVD-11), and the GIE position_id by POS-3 (not POS-8).",
+   "verdicts": [
+    {
+     "covered_by": "tests/gie/contracts/test_journal.py::test_a_same_instant_decision_chain_keeps_its_causal_publication_order (passes); tests/gie/contracts/test_contract_ordering.py::test_request_and_report_of_one_stream_at_the_same_instant_keep_their_stream_order (currently FAILS)",
+     "evidence": "Total order is now journal_seq (gie/contracts/journal.py:5-8,194; SHARED_CONTRACTS.md:343-350; DECISION_LOG D-020; ARCHITECTURE.md:153). Reviewer's reproducer now gives ['tick','position','evidence','candidate','plan','risk','order']. But SUBMIT_REQUESTED (rank 80, seq 0) and its ACCEPTED report (rank 20, seq 1) at one receive_time_ns sort as seq [1,0], and merge_ordered on that stream raises OutOfOrderError. MemoryJournal accepted RiskDecision, TradePlan, Candidate, Evidence in that reversed order.",
+     "id": "DT-01",
+     "remaining": "EventKey is still anti-causal for request -> broker report -> position sharing one instant (normal in replay), and contradicts seq order inside the one order_event/<producer> stream, while SHARED_CONTRACTS.md:352 calls it a 'causal fallback'. The journal does not check that a referenced record was published first; 'causal by construction' is not enforced.",
+     "verdict": "partial"
+    },
+    {
+     "covered_by": "tests/gie/contracts/test_authorization.py::test_an_approval_with_a_foreign_plan_fingerprint_is_refused; tests/gie/contracts/test_roundtrip.py::test_fingerprint_binds_a_risk_decision_to_the_plan_content",
+     "evidence": "RiskDecision.plan_fingerprint (gie/contracts/risk_decision.py:87) is compared in validate_entry_authorization (gie/contracts/authorization.py:51-52), which the gateway calls. Reproducer: plans a and b (stop 2600) still share plan_id, but entry with plan b + approval of a is refused ('the approval was given for exactly this plan content (plan_fingerprint)'); plan a + stop 2600 is refused ('the attached protective stop is the plan's stop').",
+     "id": "DT-02",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "tests/gie/core/test_clock.py::test_after_a_backward_step_time_continues_at_the_pace_of_the_monotonic_source; tests/gie/core/test_freshness.py::test_expiry_keeps_failing_closed_when_the_paper_clock_is_stepped_back; tests/gie/core/test_clock.py::test_a_second_backward_step_while_the_wall_source_is_still_behind_is_counted_too (currently FAILS: [0,1,1,1,1] != [0,1,1,2,2])",
+     "evidence": "gie/core/clock.py:317-334: while the wall clock is behind, now = last + monotonic elapsed. Reproducer with a moving monotonic source: is_fresh [True, False], is_expired [True, True] (was [True, True] / [False, False]). regressions_observed is on the Clock protocol (clock.py:66-73) and on ClockReading. Step counting: readings [100,90,91,92,99,100,101,50,102] with a moving monotonic source give regressions_observed == 1 (two backward steps).",
+     "id": "DT-03",
+     "remaining": "A second backward step while the clock is still 'behind' is not counted (clock.py:325-327). After a real step back the wall clock never catches up, so no later step is ever counted, although SHARED_CONTRACTS.md:165-166 says 'each step is counted'.",
+     "verdict": "partial"
+    },
+    {
+     "covered_by": "tests/gie/core/test_ordering.py::test_a_decreasing_ordering_time_is_refused_without_changing_state; tests/gie/contracts/test_journal.py::test_a_decreasing_ordering_time_within_a_stream_is_refused",
+     "evidence": "Rule receive_time_ns = max(previous receive time, event + modelled delay) with mandatory RECEIVE_TIME_MODELLED is in SHARED_CONTRACTS.md:369-372 and gie/contracts/tick.py:65-67. SequenceTracker.observe takes time_ns and refuses a decrease (gie/core/ordering.py:239-246); the journal passes it (journal.py:179-184). Reproducer: old-rule ticks (T0+2ms, +12ms, +6ms) -> third refused 'ordering time of a stream may not decrease' by tracker and journal; new-rule ticks merge as [0,1,2].",
+     "id": "DT-04",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "tests/gie/contracts/test_evidence.py::test_identity_level_order_and_roles_do_not_change_the_market_event_id; tests/gie/contracts/test_identity.py::test_non_finite_or_unrepresentable_identity_price_is_refused_with_a_gie_error (3 cases currently FAIL)",
+     "evidence": "Forged market_event_id is refused (invariant EVD-2, not EVD-11 as the disposition says). PriceLevel.identity exists; adding a non-identity WICK_LOW level keeps the id; adding an identity level or anchor +1 ns without a new id is refused. Section 4 (l.242-248) and section 11 (l.540-541) assign the per-kind identity levels and anchor to the S02 feature dictionary. identity.market_event_id refuses str/int/float prices and a bool anchor. But market_event_id(..., [NaN, price]) raises decimal.InvalidOperation, a signalling NaN raises TypeError, 'm5' is accepted and gives a different id than 'M5', and kind 'Liquidity Sweep!!' is accepted.",
+     "id": "DT-05",
+     "remaining": "Identity functions validate only part of their inputs (gie/contracts/identity.py:49-52,92-102): kind, symbol and timeframe are only 'printable text' (no CODE/SYMBOL pattern, no Timeframe value), and non-finite prices or a huge anchor (10**5000) escape as non-GieError exceptions.",
+     "verdict": "partial"
+    },
+    {
+     "covered_by": "tests/gie/contracts/test_candidate.py::test_candidate_id_is_per_scorer_and_revision; tests/gie/contracts/test_candidate.py::test_a_different_opportunity_obtains_a_different_id; tests/gie/contracts/test_identity.py::test_candidate_id_differs_per_scorer_and_per_revision",
+     "evidence": "candidate_id = f(opportunity_id, model_version_id, revision) and opportunity_id includes horizon (gie/contracts/identity.py:128-145). Reproducer now gives different candidate, opportunity and alternative-group ids for scalp vs intraday; forged ids are refused by CND-1 / CND-2; another model gives another candidate_id with the same opportunity. Section 4 has prose only and points to the module table (SHARED_CONTRACTS.md:233-235); that table (identity.py:11-30) says 'unique within: everything' for every identifier. S.evidence() and S.evidence(run_id=other, ...) share evidence_id while the records differ.",
+     "id": "DT-06",
+     "remaining": "The per-prefix identity table is not in section 4 as the disposition claims, and the uniqueness scope (global vs per run) is still not stated truthfully: evd/opp/cnd/pln/grp ids contain no run and recur across runs with different content.",
+     "verdict": "partial"
+    },
+    {
+     "covered_by": "tests/gie/core/test_freshness.py::test_replay_refuses_any_non_zero_future_tolerance (passes); tests/gie/core/test_freshness.py::test_a_clock_that_reports_replay_as_text_gets_no_future_tolerance and ::test_a_clock_of_unknown_mode_gets_no_future_tolerance (currently FAIL)",
+     "evidence": "Reference-instant table is in SHARED_CONTRACTS.md:193-200; as_of_time_ns is defined as the transitive market-data watermark (l.119; gie/contracts/common.py:329-334); feed_silence_ns exists; clock-based helpers refuse a tolerance in replay (gie/core/freshness.py:121-127). But a clock whose mode is the text 'REPLAY' (== ClockMode.REPLAY) was granted future_tolerance_ns=10, because the check is `clock.mode is ClockMode.REPLAY`. SHARED_CONTRACTS.md:130 still defines end-to-end delay as decision_time_ns - as_of_time_ns.",
+     "id": "DT-07",
+     "remaining": "The replay tolerance refusal fails open for a clock whose mode is not the enum member itself (text or unknown mode). The end-to-end delay still measures time since the newest input; the reviewer's counter-example (old evidence, fresh tick, near-zero delay) still applies, with no trigger time and no id-chain definition.",
+     "verdict": "partial"
+    },
+    {
+     "covered_by": "tests/gie/contracts/test_schema_lock.py::test_order_event_behaviour_carries_the_full_transition_table, ::test_status_transition_tables_are_published; CI step 'python -m gie.contracts.schema_gen --check'",
+     "evidence": "gie/contracts/behaviour.py emits stream, ordering time, rank, immutable/replaceable fields and transition tables as x-gie-behaviour. In-memory mutations: ORDER_TRANSITIONS.clear() -> schema_gen.check() reports OrderEvent; RESEARCH -> any reports ModelVersion; Tick ordering time -> event_time_ns reports Tick. But identity.plan_id replaced -> schema_gen.check() == [] (IDENTITY_RULES is a hand-written dict, behaviour.py:32-65; only make_golden.check notices, 24 problems). validate_order_transition replaced by a no-op -> schema [] and golden 0 problems.",
+     "id": "DT-08",
+     "remaining": "Identity rules are locked only as descriptive text, not derived from the functions. Validator code, invariant predicates, canonical sort keys and error codes are still outside the lock. No golden lifecycle traces exist (tests/gie/golden holds single messages only).",
+     "verdict": "partial"
+    },
+    {
+     "covered_by": "tests/gie/core/test_clock.py::test_a_due_time_in_the_past_is_not_an_error_in_paper_and_fires_at_the_next_poll, ::test_timers_and_inputs_interleave_identically_in_a_replay_loop_and_a_late_paper_loop (pass); ::test_call_after_beyond_the_largest_instant_behaves_the_same_in_replay_and_paper (currently FAILS)",
+     "evidence": "(a) PollingScheduler.call_at(sc.now_ns(), cb) returns handle 0 and fires at the next poll (gie/core/clock.py:366-368); the asymmetry is documented (clock.py:88-95). (b) run_due(limit_ns) exists (clock.py:383-406): input@100, timer@110, poll@120 gives input, timer, input in both paper and replay. Scheduler is in SHARED_CONTRACTS.md:151-171. But call_after: input received at 100 and processed at wall 105, call_after(10), next input at 112 -> paper [input, input, timer@115], replay [input, timer@110, input].",
+     "id": "DT-09",
+     "remaining": "call_after, documented as 'same behaviour in replay and paper' (SHARED_CONTRACTS.md:153; clock.py:354-355), is anchored to the wall clock in paper (clock.py:372), so the timer/input order of a recorded paper session differs in replay. Beyond MAX_TIME_NS paper clamps silently while replay raises. No test records a paper session and replays it.",
+     "verdict": "partial"
+    },
+    {
+     "covered_by": "tests/gie/contracts/test_trade_plan.py::test_the_geometry_is_decided_exactly_under_a_hostile_decimal_context; tests/gie/contracts/test_tick.py::test_mid_and_spread_do_not_depend_on_the_ambient_decimal_context",
+     "evidence": "gie/contracts/trade_plan.py:391 uses EXACT.abs(EXACT.subtract(...)); gie/contracts/order_event.py:683 uses EXACT.add(...). Reproducers: under prec=4, risk_per_unit(2649.80, 2637.455) == 12.345; under prec=3, the wrong cumulative 11.0 is refused and the correct 11.05 accepted. All samples encode byte-identically and the golden check reports 0 problems under prec=3. An AST scan of gie/contracts found no other decimal arithmetic outside EXACT (position.py:274 divides floats for an R multiple).",
+     "id": "DT-10",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "tests/gie/contracts/test_position.py::test_pos3_the_id_of_a_gie_position_is_derived_from_run_and_opening_order; tests/gie/contracts/test_evidence.py::test_evidence_id_is_per_engine_event_and_revision_and_supersedes_links_are_verified; tests/gie/contracts/test_order_event.py::test_oev7_other_orders_derive_their_id_from_position_intent_and_attempt",
+     "evidence": "(a) S.position(position_id='pos_000...') is refused; the check is in POS-3, not POS-8 as the disposition says (POS-8 is about close_reason, gie/contracts/position.py:250-258). (b) A forged supersedes_* at revision 1 is refused by EVD-7, CND-10 and PLN-10; the correct predecessor id is accepted. (c) OrderEvent.attempt exists (gie/contracts/order_event.py:269-272); a forged client_order_id, an entry with attempt=1 and a stop order with a changed attempt are refused by OEV-7.",
+     "id": "DT-11",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "tests/gie/contracts/test_compatibility.py::test_fingerprint_ignores_minor_and_patch_but_not_major (fingerprint only; no test reopens a journal across a version bump)",
+     "evidence": "gie/contracts/codec.py:70-79: fingerprint is the hash of contract name, MAJOR and fields. Reproducer: a tick decoded from schema_version 1.0.1 has the same fingerprint, and SequenceTracker returns DUPLICATE. But a FileJournal written at 1.0.0 and reopened with Tick.VERSION simulated as '1.0.1' raises JournalCorruptError 'journal line does not match the record it contains (line=1)'; journal.py:263 compares canonical bytes that include schema_version.",
+     "id": "DT-12",
+     "remaining": "The consequence the reviewer named (restart after a documentation-only bump reported as conflict/corruption) still occurs at the durable journal. SHARED_CONTRACTS.md:440-441 says only a MAJOR bump needs a cut-over and l.424 says 'PATCH never affects decoding'. Either make the reopen check version-tolerant or state that any bump requires a journal cut-over.",
+     "verdict": "partial"
+    },
+    {
+     "covered_by": "tests/gie/contracts/test_spec_framework.py::test_integers_for_float_fields_must_be_exactly_representable",
+     "evidence": "gie/contracts/_spec.py:297-304: Float.check refuses an int whose float() differs. NamedValue(name='x1', value=2**53+1) -> ContractValidationError 'integer is not exactly representable as a double'; 2**53 -> 9007199254740992.0; 10**5000 -> 'must be a finite number'; bool refused.",
+     "id": "DT-13",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "tests/gie/contracts/test_spec_framework.py::test_parse_semver_refuses_everything_else (includes '1.0.1234567890')",
+     "evidence": "gie/contracts/registry.py:13-15: components bounded to (0|[1-9][0-9]{0,8}). Reproducer: schema_version '1.0.'+'9'*5000 -> ContractVersionError 'schema_version must be MAJOR.MINOR.PATCH' through from_wire and from_json; a 10-digit component is refused, 9 digits accepted.",
+     "id": "DT-14",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "tests/gie/contracts/test_schema_lock.py::test_schema_says_that_it_is_necessary_but_not_sufficient; tests/gie/contracts/test_spec_framework.py::test_the_published_printable_pattern_never_refuses_text_the_framework_accepts",
+     "evidence": "Every schema carries $comment 'Necessary but not sufficient: ...' (gie/contracts/schema_gen.py:60-64); SHARED_CONTRACTS.md:401-403 says the same. Scalar unique lists have uniqueItems: true (e.g. Tick.flags). No string in any schema lacks a pattern (PRINTABLE_PATTERN, gie/contracts/_spec.py:45-46). The decoder still refuses seq 5.0 / 5e0 while the schema says {type: integer}.",
+     "id": "DT-15",
+     "remaining": "The integer-token rule is only named ('the integer-token rule', 'exact 64-bit integer tokens'); nowhere is it stated that an integer field written with a fraction or exponent is refused. SHARED_CONTRACTS.md:402-403 says these rules are 'carried as x-gie-* annotations', but no such annotation exists for the integer-token or printable rule. Calendar validity of trading_day is not listed as decoder-only.",
+     "verdict": "partial"
+    },
+    {
+     "covered_by": "tests/gie/contracts/test_roundtrip.py::test_every_finite_double_of_a_float_field_round_trips_also_between_2_53_and_2_63 (currently FAILS)",
+     "evidence": "SHARED_CONTRACTS.md:385-389 now states that number tokens carry no type and float fields may be integer literals. Golden with 1.0 exists (tests/gie/golden/Candidate-1.0.0/scored.json: \"expected_loss_r\":1). No golden file contains 10000000000000000000 or any float >= 1e15. gie/core/canonical.py:23-25 still says 'a larger literal that is exactly a double'; 18446744073709555712 is still refused. New reproducer: Evidence feature value float(T0+123456789) is written as 1795685400123456800; from_json(to_json(record)) -> 'integer is not exactly representable as a double'; FileJournal reopen -> JournalCorruptError (line=2).",
+     "id": "DT-16",
+     "remaining": "(1) The reader refuses the writer's own canonical rendering for doubles in [2^53, 2^63) whose shortest digits are not the exact integer (Float.decode, gie/contracts/_spec.py:327-328); such a record is accepted and journaled but can never be decoded again. (2) The claimed 1e19 golden message does not exist. (3) The canonical.py docstring is not corrected.",
+     "verdict": "partial"
+    },
+    {
+     "covered_by": "tests/gie/contracts/test_evidence.py::test_levels_are_unique_by_role_and_price_and_canonically_sorted; tests/gie/contracts/test_candidate.py::test_destinations_are_unique_by_scenario_and_label_and_canonically_sorted; tests/gie/contracts/test_trade_plan.py::test_a_plan_has_at_least_one_and_at_most_eight_targets_unique_by_price_and_sorted",
+     "evidence": "Evidence.levels is sorted and unique by (role, price); Candidate.destinations by (scenario, label); TradePlan.targets by price (gie/contracts/trade_plan.py:245-255). Schemas carry x-gie-canonical-order and x-gie-unique for all three. Reproducer: reversed input order gives identical to_json bytes for all three lists; duplicates are refused ('duplicate item').",
+     "id": "DT-17",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "tests/gie/core/test_ordering.py::test_restore_re_establishes_the_position_of_a_stream, ::test_a_decreasing_ordering_time_is_refused_without_changing_state (pass); ::test_restore_rejects_fingerprint_keys_of_mixed_types_with_a_contract_error (currently FAILS)",
+     "evidence": "gie/core/ordering.py:172-273. (1) SequenceTracker().observe('s',7,'h') -> SequenceGapError (first_seq default 0). (2) After restore('s',5,{4:'f',5:'g'}), a re-sent seq 5 is DUPLICATE, other content is a conflict, seq 2 is OutOfOrderError, seq 6 is ACCEPTED. (3) A None or empty fingerprint is refused. (4) window=True and first_seq=-1 are refused. (5) observe(..., time_ns) refuses a decreasing time. But after restore('s',5,...), observe('s',6,'h',time_ns=1) is ACCEPTED, and restore('s',5,{5:'g','4':'f'}) raises TypeError.",
+     "id": "DT-18",
+     "remaining": "restore() cannot restore the last ordering time, so the non-decreasing-time rule is not enforced for the first arrival after a restart. restore() raises a non-GieError TypeError for a malformed `recent` argument (ordering.py:208-209).",
+     "verdict": "partial"
+    },
+    {
+     "covered_by": "tests/gie/contracts/test_golden.py::test_a_golden_file_of_an_unreadable_version_is_reported (pins the opposite of the claimed behaviour: other-MAJOR files are reported, not skipped)",
+     "evidence": "Recorded in SHARED_CONTRACTS.md:440-441: 'A MAJOR bump ... requires a migration tool and a journal cut-over, decided and recorded by the coordinator (not needed for 1.x)' (owner: coordinator; gate: a MAJOR bump). Nothing in docs/CHANGE_REQUESTS.md or DECISION_LOG.md. tools/make_golden.py:59-66 still decodes every */*.json with the current code and was last changed in 80a2996. Simulated bump (Tick.VERSION='2.0.0' on a scratch copy): 5 x 'Tick-1.0.0/...: no longer decodes: [GIE.CONTRACT.VERSION] incompatible MAJOR version'.",
+     "id": "DT-19",
+     "remaining": "The claimed 'golden check skips other MAJORs' is not implemented; the check will fail after the first MAJOR bump unless old directories are deleted, and SHARED_CONTRACTS.md:437-438 still demands that golden messages 'decode forever within their MAJOR'. The record exists only as a sentence in the spec, not as a change request or open item.",
+     "verdict": "partial"
+    },
+    {
+     "covered_by": "tests/gie/contracts/test_journal.py::test_a_record_of_another_run_is_refused, ::test_a_tick_stream_is_joined_at_its_current_position, ::test_reopening_reproduces_the_entries_and_continues_the_sequence",
+     "evidence": "SHARED_CONTRACTS.md:272-277 defines the scope: (run_id, stream name) for run-scoped records, seq from 0 continuing across restarts; Tick.seq assigned once at ingest, never restarts, preserved by replay. gie/contracts/tick.py:57-63 says the same. Enforcement: MemoryJournal refuses a record of another run ('record belongs to another run'), run streams must start at 0 (SequenceGapError for evidence seq 3), and a tick stream may be joined at seq 5000.",
+     "id": "DT-20",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "covered_by": "tests/gie/core/test_timeutil.py::test_bounds_of_the_first_representable_day_are_clamped_to_the_epoch; tests/gie/core/test_canonical.py::test_strict_loads_rejects_non_zero_literals_that_underflow_to_zero; tests/gie/contracts/test_roundtrip.py::test_nested_errors_report_the_full_path (pass); tests/gie/core/test_freshness.py::test_an_instant_too_large_to_print_is_rejected_with_a_contract_error and tests/gie/core/test_timeutil.py::test_a_day_outside_the_instant_range_has_no_bounds (currently FAIL)",
+     "evidence": "(1) trading_day_bounds_ns('1970-01-01') -> (0, 82800000000000) and the last day is clamped (gie/core/timeutil.py:94-119). (2) strict_loads('1e-400') -> 'number underflows a double'. (5) The nested error path is joined: path='targets[0].price'. (6) is_fresh(now_ns=-5, ...) is refused. NOT done: (3) gie/core/clock.py:170-171 still says 'advancing to the current instant is a no-op', while advance_to(100) fires a timer due at 100. (4) gie/contracts/_spec.py:448 still says 'a key function over encoded items'. Also is_fresh(now_ns=10**5000, ...) raises ValueError, and trading_day_bounds_ns('1969-12-31') returns (0, 0).",
+     "id": "DT-21",
+     "remaining": "The two docstrings (3) and (4) are not corrected although the disposition says so. The new range check in gie/core/freshness.py:40 raises a non-GieError ValueError for integers beyond 4300 digits. Days outside the instant range return an empty clamped interval instead of an error, and MAX_TIME_NS is not inside the half-open bounds of its own day.",
+     "verdict": "partial"
+    },
+    {
+     "covered_by": "",
+     "evidence": "CR-003 (docs/CHANGE_REQUESTS.md:106): 'CX-01 | Candle (completed bar with its construction rule) | 01 | 02, 03, 04'. specifications/dependency_graph.yaml:96 has proposed_by [S01], consumed_by [S02, S03, S04], with gates.extension_gate (first deliverable of the proposer; consumers write no code against the type before integration). Extension rule: SHARED_CONTRACTS.md:322-324 'A new shared contract obtains its stream prefix, ordering-time field and rank in gie.contracts.ordering.STREAMS when the coordinator adds it.'",
+     "id": "DT-22",
+     "remaining": "The record does not carry the substance of the finding: nothing requires the Candle proposal to fix open/close instants, the availability instant (= ordering time), the rank relative to TICK and ORDER_EVENT, the stream name, the quiet-interval (timer-closed) rule or DST behaviour. S10 (replay driver) is not among the consumers of CX-01.",
+     "verdict": "partial"
+    },
+    {
+     "covered_by": "",
+     "evidence": "SHARED_CONTRACTS.md:172-176: 'Background work in replay. Results of asynchronous strategic work and modelled decision latency are delivered as records at a virtual instant scheduled through the scheduler (with a modelled, seeded delay that is part of the run configuration) - never \"when a thread finishes\". Measured latency (section 3.5) is evidence only; it never enters a record or influences a decision in replay.' Consistent with l.132-134 and ARCHITECTURE.md section 7.",
+     "id": "DT-23",
+     "remaining": "",
+     "verdict": "done"
+    }
+   ]
+  }
+ ],
+ "schema_version": 1,
+ "totals": {
+  "cannot_verify": 2,
+  "done": 76,
+  "partial": 58
+ }
+}

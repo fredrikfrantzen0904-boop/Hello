@@ -141,6 +141,16 @@ active model, a shadow model and an unscored candidate of the same opportunity a
 most one may be executed. `client_order_id` is derived from the authorising risk decision (entries)
 or from the position (protective and reducing orders).
 
+*Amended 2026-11-27 after review round 2 (verification items DT-05, DT-06, DT-16).* Every identity
+function validates every part with the vocabulary of the corresponding record field and fails with
+a contract error only. The scope of each identifier is stated in `gie/contracts/identity.py`:
+identifiers that contain the run name one thing among all runs; identifiers of market events and
+models are derived from what they describe and are deliberately equal across runs; identifiers of
+evidence, opportunities, candidates, alternative groups and plans contain no run and are therefore
+named by `(run_id, id)` in any store that holds more than one run. A float field reads an integer
+literal exactly when it is the canonical rendering of a double (golden message
+`tests/gie/golden/TradePlan-1.0.0/float_edge_values.json`).
+
 ## D-009 - Total order by availability time
 
 - Status: SUPERSEDED
@@ -197,6 +207,18 @@ updated together with a decision-log entry.
 Honest limit, unchanged: Python cannot stop a person who rewrites the lock module or lies inside an
 adapter method; that is what the scan, the pins, the tests and review are for.
 
+*Amended 2026-11-27 after review round 2 (findings L2B-16, L2E-15; verification items SF-01,
+SF-08).* A class body can assign `__module__` freely, so the allow-lists no longer trust it alone:
+registration of a simulated adapter also requires that the module whose code calls the
+registration and the module that owns each adapter method (`function.__globals__`) are allowed,
+and the record framework requires that the code which creates a record class belongs to
+`gie.contracts` or the tests. The code, defaults and closures of the registered adapter methods are
+remembered and compared on every use. The self-check also detects an alias attribute added to the
+run-mode or venue enumeration. The static scan, its tests and the pins
+(`specifications/lock_pins.json`) exist now; the scan also forbids file-system writes below `gie/`
+outside the journal module, because a file dropped into a terminal's exchange folder would be a
+routing channel that needs no network call.
+
 ## D-012 - Master-specification safety rules are structural contract invariants
 
 - Status: PROPOSED
@@ -220,6 +242,15 @@ journal (D-021), so a violating sequence is refused where it would be published 
 Positions of other systems on the same account (`PositionOwner.EXTERNAL`) are observations, not
 GIE decisions: a widened or removed stop or a grown volume of an external position is recorded as
 observed, never refused, and GIE never sends an order for such a position.
+
+*Amended 2026-11-27 after review round 2 (findings L2E-01, L2E-08; verification items SF-10,
+SF-13).* A position grows only through fills of its own entry order (partial fills); any other
+increase of volume stays unrepresentable (no averaging down, no martingale). An entry may fill at or
+beyond its stop - the fill is what happened and must be recordable - while the stop itself is never
+wider than the initial stop. A resting entry must lie beyond the market it was priced against (plan
+rule PLN-14, order rule OEV-17), so a "limit" order that is in fact marketable, with a geometry the
+risk gate did not evaluate, cannot be built; a fill is strictly earlier than the expiry of its
+order.
 
 ## D-013 - Trading day is the Europe/Prague calendar date
 
@@ -249,6 +280,12 @@ another instrument relates to gold is learned and reported by session 04 (G06-09
 pre-translated by the producer. `INACTIVE` (the engine looked and found nothing: scores 0/0) and
 `MISSING` (the engine could not evaluate: scores null, reason mandatory) are different states and
 neither is ever stored as 0.5 or merged with another engine's record.
+
+*Amended 2026-11-27 after review round 2 (verification items DI-06, DI-15, DI-21).* The stage of an
+observation never goes back along its revisions; a setup that falls back is INVALIDATED and a new
+observation starts. The slot rule, the meaning of a pending limit and the price series of a candle
+close are stated in `specifications/SHARED_CONTRACTS.md` section 11 as provisional rules for
+session 02 to confirm against the engines after the audit (B-001).
 
 ## D-015 - Requirement traceability and evidence are generated, never typed
 
@@ -341,6 +378,21 @@ deterministic replay is therefore "same inputs produce the same journal bytes".
 Sessions 01/07 may choose a different storage engine behind the same `RecordSink` / `RecordSource`
 interfaces; the rules above are the contract.
 
+*Amended 2026-11-27 after review round 2 (findings L2B-01, L2B-03, L2B-07, L2B-13, L2E-14, L2E-20;
+verification items DT-01, DT-12).* The journal can be given the clock of the run; a record is then
+accepted only at the step instant it belongs to (D-024). The look-ahead guard judges *declared*
+watermarks - it cannot detect a producer that read later data and declared an earlier watermark;
+the prefix-invariance test of session 10 remains mandatory. Checks run in a fixed order (type and
+run, stream position, provenance against the manifest, time, run ledger) and a refused record
+changes nothing. The journal owns the one lifecycle ledger of the run, which also enforces
+referential integrity: a record refers only to records that are already part of the run. A file
+journal is durable before visible, fails closed after a write error, holds an operating-system lock
+against a second writer, offers one synchronisation per step (`commit`), repairs a torn last line
+only through an explicit restart call, and verifies canonical form and fingerprint of every line it
+reads back; `JournalReader` is the read-only, tailing reader for the dashboard and for analysis.
+Known limits, measured in `reviews/session_00/evidence/benchmark.json`: journal and ledger keep the
+run in memory; checkpoints, eviction and the storage of raw ticks are extension CX-19.
+
 ## D-021 - One order gateway enforces authorisation, lifecycle and the routing lock
 
 - Status: PROPOSED
@@ -361,6 +413,16 @@ Why in the shared contracts and not in session 07: the same rules must hold for 
 broker, the reflex engine, the backtester and any later adapter, and they are the rules the owner
 stated without exception. Session 07 implements the simulator *behind* the gateway; session 08
 implements the risk gate that issues the approvals the gateway demands.
+
+*Amended 2026-11-27 after review round 2 (findings L2B-04, L2E-02, L2E-04, L2E-05, L2E-16).* The
+gateway no longer keeps a ledger of its own and no longer accepts plan, approval or position from
+its caller: it reads them from the ledger of the run's journal (newest revision only), so the
+gateway and the journal cannot disagree. The order of every call is: routing lock, authorisation,
+journal (write-ahead), adapter. A request that is already journaled is forwarded again - the adapter
+is idempotent per `order_event_id` - so a crash between journal and adapter loses nothing. `poll()`
+journals every report on its own and returns `PollResult(events, duplicates, errors)`; a refused
+report never hides the reports after it. Reduce-only rules are aggregates of the ledger: at most one
+working protective stop per position, working exit and take-profit volume within the open volume.
 
 ## D-022 - Timers come from an injected scheduler; there are no timer threads
 
@@ -392,6 +454,108 @@ in `reviews/session_00/` (136 findings in round 1). A failing test is never weak
 the documented behaviour changed (the test is rewritten to the new documentation, equally strict)
 or the code is wrong (it is fixed or the failure is reported). This does not replace the
 supervisor's independent review or session 12; it reduces what they have to find.
+
+*Amended 2026-11-27 (round 2).* A second panel reviewed the reworked foundation from the viewpoint of
+the consuming sessions (40 findings, `reviews/session_00/evidence/review_round2_findings.json`), and
+separate verifiers checked every disposition of round 1 against the code instead of trusting the
+coordinator's claim (`reviews/session_00/evidence/review_round1_verification.json`); what they found
+unfinished was fixed in the second rework (`reviews/session_00/rework_2_change_notice.md`). After
+that rework the test authors' suites were maintained by engineers who again did not write the code,
+under the same rule: a test follows documented behaviour, never the code. Limits of this
+independence, stated plainly: all of these roles are sub-agents instructed by the coordinator;
+during the second rework a usage limit stopped several of them mid-task, their unfinished work was
+completed by the coordinator or by sub-agents of another model, and the extension of
+`tools/make_golden.py` (golden run trace) was written by the coordinator itself. There was no third
+review round. The supervisor's review and session 12 remain the independent instances.
+
+## D-024 - Step time: a component sees the instant of the input it is processing
+
+- Status: PROPOSED
+- Date: 2026-11-27
+- Requirements: S00-ASG-19, S00-ASG-21, S00-ACC-03, S10-ASG-01, S10-ACC-01, S10-ACC-02, S06-ASG-01, G03-10, G03-11
+
+Review round 2 showed that "the same code runs in replay and paper" was not true for time: in
+replay `now` was the instant of the input, in paper it was whenever the component happened to ask.
+A record produced in paper could therefore carry a time that no replay of the same inputs would
+reproduce, and a timer could fire "between" two inputs. Decision: in both modes `now_ns()` is the
+*step instant* - the availability time of the input (tick, broker report or timer) that the run
+loop is processing - and only the run loop moves it (`ReplayClock.advance_to`,
+`PaperClock.begin_step`). Components receive read-only views (`ClockView`, `SchedulerView`); timers
+are relative to the step instant and fire as steps of their own. How long processing really took is
+measured separately (`LatencyRecorder`, wall clock) and never enters a record. Consequence for
+sessions 06 and 07: a protective decision is stamped with the tick that caused it; the processing
+delay is reported as a latency measurement, not as a later decision time. The shared step driver
+that both modes use is extension CX-10 (coordinator) and must exist before any subsystem is
+integrated.
+
+## D-025 - Order events have one writer; the broker may create protective orders
+
+- Status: PROPOSED
+- Date: 2026-11-27
+- Requirements: S07-ASG-01, S07-ASG-06, S07-ASG-09, S07-ACC-02, S06-ASG-03, G08-07, G08-08, G04-12
+
+Two components writing events of the same order (execution engine and reflex engine) cannot keep
+one gap-free order sequence. Decision: order events are written by session 07 only (engine and
+simulated broker). The reflex engine states intents through `interfaces.ProtectionPort`
+(`tighten_stop`, `exit`) and reads the result from the journal. Every order event carries its
+`originator`: `EXECUTION` for an order the engine requested, `BROKER` for an order the simulated
+broker created itself - the protective stop or take profit attached to an entry, or a broker-side
+close. A broker-created order enters through `poll()`, must belong to a position whose entry order
+has filled, and can only reduce or protect; an `ENTRY` is never broker-created, and the gateway's
+`submit` accepts `EXECUTION` only. A position names its protective order or states why it has none
+(`unprotected_reason`), and a protective stop never expires.
+
+## D-026 - Which model may lead to a paper order depends on the role of the run
+
+- Status: PROPOSED
+- Date: 2026-11-27
+- Requirements: G07-08, G07-09, G07-10, G07-12, G04-08
+
+Round 1 only made the model status visible on candidates and plans; any model could still drive an
+approved entry (verification item PD-04). Decision, enforced by `validate_entry_authorization` and
+by the journal: the manifest of a run pins its models with status and validity period
+(`RunManifest.models`); a candidate or plan must be scored by a pinned model with exactly the pinned
+status; an entry rests on a model whose status is allowed for the role of the run - `PRIMARY`:
+`ACTIVE` only; `SHADOW`: `ACTIVE` or `SHADOW`; `RESEARCH`: additionally `RESEARCH`. A `REJECTED`,
+`ROLLED_BACK` or `RETIRED` model never leads to an order. A promotion therefore takes effect in a
+new run, never in the middle of one. This is the coordinator's proposal for open item U-17; until
+the owner has promoted a first model, a primary paper run trades only what approved rule sets
+propose.
+
+## D-027 - A run is identified by the content of its manifest
+
+- Status: PROPOSED
+- Date: 2026-11-27
+- Requirements: S10-ACC-01, S10-DEL-03, S10-DEL-04, S10-ASG-10, M-AUTH-16, M-GATE-05, S08-ASG-09
+
+`run_id` was derived from mode, configuration hash and a label, so two runs that differed in role,
+seed, code, data or models could share an identifier (findings L2B-05, L2B-06, L2B-11, L2B-12).
+Decision: `run_id` is derived from the mode and the hash of every other field of the manifest
+(role, risk regime, data origin, sources and period, configuration and parameter hashes, seed, code
+commit and dirty flag, pinned models). Two replays with identical manifests are by definition the
+same run and must produce the same journal; anything else is a different run. A replay manifest
+contains no wall-clock time. `risk_regime` separates runs under the challenge rules from
+unconstrained research (allowed only with role `RESEARCH`), so results of the two can never be
+mixed unnoticed. Every pseudo-random element takes its seed from `RunContext.seed_for(purpose)`.
+Not built here and recorded as extension CX-12 (session 10): the run-configuration document,
+per-stream data digests, the run catalogue and the bookkeeping of experiments, trials and holdouts.
+
+## D-028 - Amounts decide, fractions report
+
+- Status: PROPOSED
+- Date: 2026-11-27
+- Requirements: S08-ASG-06, S08-ASG-07, S08-ACC-01, S08-ACC-02, S08-ACC-03, S08-ACC-04, S08-ACC-05, G05-02, G05-04, G05-06
+
+The daily limits are stated as fractions of a reference equity, but a fraction of an arbitrary
+equity is rarely an exact decimal, and "exactly at the floor" cannot be decided on a rounded value
+(finding L2E-18). Decision: a risk decision carries the amounts in account currency
+(`daily_pnl_amount`, `profit_floor_amount`, risk, open and pending risk) and every boundary is
+decided on amounts. Fractions remain on the record for reporting and are derived by one function,
+`gie.core.canonical.fraction_of`, with a stated rounding direction (a result is rounded down, a
+floor or a risk is rounded up), and the record verifies the derivation. The sequence rule of a
+trading day - the floor never decreases or disappears, a halt is sticky, the reference equity is
+frozen - is `advance_daily_risk`, enforced by the run ledger across all risk producers. The numeric
+levels themselves stay research parameters (D-018).
 
 ---
 
@@ -462,7 +626,10 @@ Needed for the trade-frequency goal and for every per-day statistic.
 - Requirements: S00-ASG-06, G03-07
 
 Operating system, Python version and hardware of the machine that will run GIE, and whether it is
-the same machine that runs the existing bots (resource isolation, G07-08).
+the same machine that runs the existing bots (resource isolation, G07-08). Also needed: the
+resolution of the system clock on that machine (about 15.6 ms on Windows before Python 3.13), which
+bounds how finely receive times can be measured in a paper run; it is measured by the feed
+benchmark of session 01.
 
 ## U-09 - Authorised market data
 
@@ -561,4 +728,9 @@ Paper mode needs live prices from the broker terminal. The same terminal API tha
 can also send orders. Proposal for session 01: connect only with read-only ("investor") credentials
 if the broker offers them, keep all terminal access behind one read-only facade module that exposes
 no order function (enforced by the static scan), and never store credentials in the repository.
-Does the owner's account offer investor credentials, and may GIE use them?
+Does the owner's account offer investor credentials, and may GIE use them? If not: is there an
+account on which trading is disabled by the broker?
+The same answer is needed for reading the account state (equity, margin and the positions of the
+other systems, extension CX-05) and it must exclude any indirect way of driving the existing bots.
+**Gate:** this item must be answered before session 01 connects to any terminal and before the
+first PAPER run; until then paper runs use recorded or synthetic data only.

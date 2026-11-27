@@ -38,6 +38,7 @@ before editing anything.
 |---|---|
 | `specifications/source/`, `specifications/extracted/` | the owner's PDFs and their text (never edit) |
 | `specifications/requirements_matrix.yaml` | every requirement with status (source of truth) |
+| `specifications/requirements_lock.json` | hash of every requirement; a requirement cannot disappear or be reworded unnoticed (`python -m tools.gie_registers lock`) |
 | `specifications/acceptance_tests.yaml` | acceptance test register |
 | `specifications/SHARED_CONTRACTS.md` | normative contract rules (units, time, ids, ordering, errors, versions) |
 | `specifications/contracts/FIELDS.md` | generated field reference (do not edit) |
@@ -61,13 +62,20 @@ before editing anything.
   in the coordinator's composition root. See `specifications/dependency_graph.yaml`.
 - Time comes from an injected `gie.core.clock.Clock`. Never call `time.time()`, `datetime.now()`
   or similar in `gie/` code (except inside `gie/core/clock.py` and latency measurement).
+  Components see **step time** (the instant of the input being processed, in paper as in replay)
+  through read-only views; only the run loop moves time. Measured latency never enters a record.
 - Prices, volumes, money and risk fractions are `decimal.Decimal`; never floats.
 - Identifiers come from `gie.contracts.identity`; never `uuid4`, never random, never wall-clock.
 - Errors derive from `gie.core.errors.GieError`; fail closed; never repair invalid input.
 - No network calls, LLM calls or model training in any tick/decision path.
 - Timers come from the injected `gie.core.clock.Scheduler`; never threads, sleeps or `threading.Timer`.
 - Orders reach an execution adapter only through `gie.contracts.guarded.GuardedExecutionAdapter`
-  (name the variable `gateway` or `order_gateway`); never call an adapter directly.
+  (name the variable `gateway` or `order_gateway`); never call an adapter directly. Order events
+  are written by session 07 only; the reflex engine uses `interfaces.ProtectionPort`.
+- Account limits are decided on exact amounts; fractions are derived with
+  `gie.core.canonical.fraction_of` and only reported.
+- Code below `gie/` does not write files (only the journal module does); pseudo-randomness takes
+  its seed from `RunContext.seed_for(purpose)`.
 - Records are published through the run's journal (`RecordSink`); a derived record carries the
   market-data watermark it was computed from (`as_of_time_ns`) and never outlives its inputs.
 - A shared type that is missing (see `contract_extensions` in the dependency graph) is proposed to

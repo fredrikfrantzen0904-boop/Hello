@@ -93,29 +93,74 @@ sessions:
 #   consumed_by - sessions that build on the type and wait for its integration before doing so
 # ---------------------------------------------------------------------------------------------
 contract_extensions:
-  - {id: CX-01, name: Candle, proposed_by: [S01], consumed_by: [S02, S03, S04],
-     change_request: CR-003, requirements: [S01-ASG-04, S02-DEP-01]}
+  - {id: CX-01, name: Candle, proposed_by: [S01], consumed_by: [S02, S03, S04, S10],
+     change_request: CR-003, requirements: [S01-ASG-04, S02-DEP-01],
+     must_define: [open and close instant, availability instant (its ordering time), price series (bid / ask / mid),
+                   stream name and rank relative to ticks and order events, rule for a quiet interval (timer-closed candle),
+                   daylight-saving behaviour]}
   - {id: CX-02, name: BrokerCalendar and session classifier, proposed_by: [S01],
-     consumed_by: [S02, S06, S08], change_request: CR-003,
+     consumed_by: [S02, S04, S05, S06, S08, S10], change_request: CR-003,
      requirements: [S01-ASG-05, S08-ASG-08, S08-ASG-10]}
   - {id: CX-03, name: Tick usability policy per quality flag, proposed_by: [S01],
      consumed_by: [S02, S06, S07, S08], change_request: CR-005,
      requirements: [S01-ASG-06, S01-ASG-08, G03-12]}
-  - {id: CX-04, name: InstrumentSpec (broker constraints of the instrument), proposed_by: [S07],
-     consumed_by: [S06, S08], change_request: CR-003,
-     requirements: [S07-ASG-15, S08-ASG-02]}
-  - {id: CX-05, name: AccountSnapshot (account-wide state including other systems' positions),
-     proposed_by: [S08], consumed_by: [S05, S06, S07], change_request: CR-003,
-     requirements: [S08-ASG-01, S08-ASG-02, S08-ACC-08, S08-DEP-01]}
-  - {id: CX-06, name: Observation with release vintage / news and calendar events,
+  - {id: CX-04, name: InstrumentSpec (broker constraints of the instrument) and shared valuation function,
+     proposed_by: [S07], consumed_by: [S04, S05, S06, S08, S10], change_request: CR-003,
+     requirements: [S07-ASG-15, S08-ASG-02],
+     must_define: [contract size, price and volume steps, minimum stop distance, margin, swap, cost schedule,
+                   executable net P&L of a position from a quote]}
+  - {id: CX-05, name: AccountSnapshot (account-wide state including other systems' positions) and daily risk state,
+     proposed_by: [S08], consumed_by: [S05, S06, S07, S10, S11, S12], change_request: CR-003,
+     requirements: [S08-ASG-01, S08-ASG-02, S08-ACC-08, S08-DEP-01],
+     must_define: [daily state and result, profit floor, reference equity, breach flags,
+                   emission on every state change and at every trading-day boundary and periodically,
+                   sequence rule (risk_decision.advance_daily_risk)]}
+  - {id: CX-06, name: Observation with release vintage / news and calendar events / futures data,
      proposed_by: [S01], consumed_by: [S03], change_request: CR-003,
-     requirements: [S01-ASG-12]}
+     requirements: [S01-ASG-12],
+     must_define: [release vintage, futures last and volume, contract month, expiry and roll]}
   - {id: CX-07, name: MarketCondition / TradingRestriction, proposed_by: [S03],
      consumed_by: [S05, S08], change_request: CR-003, requirements: [S08-ASG-10]}
   - {id: CX-08, name: Decision (unified decision stream), proposed_by: [S05],
-     consumed_by: [S09, S10, S11], change_request: CR-003, requirements: [S11-DEP-01]}
+     consumed_by: [S09, S10, S11], change_request: CR-003, requirements: [S11-DEP-01],
+     must_define: [one ranking pass (candidates considered, scores, selected plan or no trade),
+                   candidate-level rejections with reason codes]}
   - {id: CX-09, name: Outcome / label record, proposed_by: [S04],
-     consumed_by: [S09, S10], change_request: CR-003, requirements: [S09-DEP-01]}
+     consumed_by: [S09, S10], change_request: CR-003, requirements: [S09-DEP-01],
+     must_define: [label specification id, instant at which a label becomes available (purging),
+                   realised versus counterfactual outcomes of rejected and missed setups]}
+  - {id: CX-10, name: Step driver (one run loop for replay and paper) with conformance test,
+     proposed_by: [S00], consumed_by: [S01, S06, S07, S10], change_request: CR-003,
+     requirements: [S10-ASG-01, S00-ASG-19, S10-ACC-01],
+     must_define: [order of work inside a step (broker reports - positions - reflex - tactical - strategic),
+                   delivery of journaled records to listeners, timer steps, replay / paper conformance]}
+  - {id: CX-11, name: Health / error event and heartbeat rule, proposed_by: [S00],
+     consumed_by: [S01, S06, S07, S11, S12], change_request: CR-003,
+     requirements: [G08-06, G08-09, S09-ASG-05]}
+  - {id: CX-12, name: Run configuration document / data digests / run catalogue / experiment and holdout bookkeeping / split specification,
+     proposed_by: [S10], consumed_by: [S04, S09, S11, S12], change_request: CR-003,
+     requirements: [S10-DEL-03, S10-DEL-04, S10-ACC-07, S10-ACC-09, S09-DEL-01]}
+  - {id: CX-13, name: Feed status record, proposed_by: [S01], consumed_by: [S06, S07, S08, S11],
+     change_request: CR-003, requirements: [S01-ASG-08, S11-ASG-10, G08-06]}
+  - {id: CX-14, name: Latency summary record, proposed_by: [S01], consumed_by: [S06, S07, S11, S12],
+     change_request: CR-003, requirements: [S01-ACC-10, G03-10, G03-11, S11-ASG-11, S09-ASG-03],
+     must_define: [feed delay, age of evidence at the decision, processing delay per stage,
+                   end-to-end delay from the triggering input to the order request]}
+  - {id: CX-15, name: Run result records (trades / daily metrics / baseline comparison),
+     proposed_by: [S10], consumed_by: [S09, S11], change_request: CR-003,
+     requirements: [S10-DEL-01, S10-DEL-02, S11-ASG-14]}
+  - {id: CX-16, name: Learning result records (experiments / candidate models / promotion requests),
+     proposed_by: [S09], consumed_by: [S11], change_request: CR-003,
+     requirements: [S09-DEL-01, S09-DEL-02, S11-ASG-13]}
+  - {id: CX-17, name: Display projection of records for browsers, proposed_by: [S11], consumed_by: [S12],
+     change_request: CR-003, requirements: [S11-DEL-03, S11-ASG-15],
+     must_define: [decimal and 64-bit integer values as strings (never parsed as doubles), labels for simulated /
+                   unavailable / unvalidated values]}
+  - {id: CX-18, name: Reservation life-cycle record, proposed_by: [S08], consumed_by: [S07],
+     change_request: CR-003, requirements: [S08-ASG-03, S08-ACC-06]}
+  - {id: CX-19, name: Adapter reconciliation queries / journal checkpoints / ledger eviction / raw tick storage,
+     proposed_by: [S07], consumed_by: [S01, S10], change_request: CR-003,
+     requirements: [S07-ASG-07, S07-ASG-08, S01-ASG-02, G08-04, G08-05]}
 
 # ---------------------------------------------------------------------------------------------
 # Brief path -> repository path (COM-03: "paths are proposed until coordinator approves").
@@ -174,6 +219,24 @@ third_party:
 # Paths that the documents name although they do not exist yet, each explicitly described there
 # as "not started" / "created at first integration" (tools/check_docs_paths.py).
 docs_path_ignore:
+  # names that look like paths but are not files of this repository
+  - Europe/Prague                           # IANA time zone
+  - claude/gold-intelligence-engine-l9uw10  # git branch
+  - gie/s01-market-data                     # example of a session branch name
+  - fredrikfrantzen0904-boop/Hello          # the repository itself
+  - reviews/session_NN/                     # pattern, NN = session number
+  - core/                                   # path names used by the briefs (see path_mapping)
+  - contracts/
+  - execution/
+  - risk/
+  # files the owner's audit tool writes on the owner's machine, and examples in its README
+  - inventory.json
+  - manifest.jsonl
+  - processes.json
+  - audit_log.txt
+  - config.py
+  - requirements.txt
+  # directories described as not started / created later
   - gie/app/
   - gie/market_data/
   - gie/strategy_intelligence/

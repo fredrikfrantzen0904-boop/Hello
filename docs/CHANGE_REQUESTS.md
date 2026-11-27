@@ -41,10 +41,16 @@ Nothing about the existing system has been assumed or invented in its place.
 
 1. *Owner runs the read-only audit tool* (recommended). `tools/audit/gie_baseline_audit.py` is a
    single standard-library Python file. It only reads, never writes inside the audited tree, uses no
-   network, emits no file contents and no credentials, and produces `inventory.json`,
-   `manifest.jsonl` (SHA-256 of every file - the proof that nothing changed, and the basis for
-   freezing the baselines) and optionally `processes.json`. Instructions: `tools/audit/README.md`.
-   The owner reviews the output and uploads the folder to this session.
+   network and emits no credentials. It does not copy file contents, with three narrow exceptions
+   that the inventory needs: the names and version specifiers of packages in dependency files, the
+   column names of CSV / TSV files (only when the first line looks like a header) and Python
+   version strings. It produces `inventory.json`, `manifest.jsonl` (size, modification time and
+   SHA-256 per file - the proof that nothing changed, and the basis for freezing the baselines)
+   and optionally `processes.json`. Not hashed, and listed as such: files with secret-like names,
+   files in excluded directories (version control, virtual environments, caches), files above the
+   size cap and files that cannot be read; a baseline is only frozen from files that were hashed.
+   Instructions: `tools/audit/README.md`. The owner reviews the output and uploads the folder to
+   this session.
 2. *Connect the machine through Claude Remote Control* so that this session can read the folder
    directly. Faster, but commands would then run on the production machine; only acceptable with
    read-only discipline and the owner's explicit approval.
@@ -103,16 +109,33 @@ types it consumes are.
 
 | id | shared type | proposed by | consumed by | why it cannot be defined now |
 |---|---|---|---|---|
-| CX-01 | `Candle` (completed bar with its construction rule) | 01 | 02, 03, 04 | candle construction and timeframes of the six engines are unknown (B-001) |
-| CX-02 | Broker calendar and session classifier | 01 | 02, 06, 08 | broker trading hours, rollover and the Prague reset are account facts (U-04) |
-| CX-04 | `InstrumentSpec` (contract size, digits, volume step, stop distance, margin, swap) | 07 | 06, 08 | broker data (U-10) |
-| CX-05 | `AccountSnapshot` (equity, margin, account-wide positions including other systems) | 08 | 05, 06, 07 | account currency, reference equity and the other systems on the account are unknown (U-04) |
-| CX-06 | Single-valued observations with release vintage; news and calendar events | 01 | 03 | licensed feeds are unknown (U-09) |
+| CX-01 | `Candle` (completed bar with its construction rule) | 01 | 02, 03, 04, 10 | candle construction and timeframes of the six engines are unknown (B-001) |
+| CX-02 | Broker calendar and session classifier | 01 | 02, 04, 05, 06, 08, 10 | broker trading hours, rollover and the Prague reset are account facts (U-04) |
+| CX-04 | `InstrumentSpec` (contract size, digits, volume step, minimum stop distance, margin, swap, cost schedule) and the shared valuation function | 07 | 04, 05, 06, 08, 10 | broker data (U-10) |
+| CX-05 | `AccountSnapshot` (equity, margin, account-wide positions including other systems) and the daily risk state as a record | 08 | 05, 06, 07, 10, 11, 12 | account currency, reference equity and the other systems on the account are unknown (U-04) |
+| CX-06 | Single-valued observations with release vintage; news and calendar events; futures data (last, volume, contract month, expiry and roll) | 01 | 03 | licensed feeds are unknown (U-09) |
 | CX-07 | Market condition / trading restriction record | 03 | 05, 08 | news and rollover restrictions are account rules (U-04) |
 | CX-08 | `Decision` (the unified decision stream of session 05) | 05 | 09, 10, 11 | its content is the design task of session 05 |
 | CX-09 | Outcome / label record | 04 | 09, 10 | label definitions are a research deliverable of session 04 |
+| CX-10 | Step driver: the one run loop of replay and paper, with a replay / paper conformance test | 00 | 01, 06, 07, 10 | needs the first tick source and adapter to be proven against; required before any subsystem is integrated (D-024) |
+| CX-11 | Health / error event and heartbeat rule | 00 | 01, 06, 07, 11, 12 | defined together with the step driver |
+| CX-12 | Run configuration document, per-stream data digests, run catalogue, experiment / trial / holdout bookkeeping, split specification | 10 | 04, 09, 11, 12 | research procedure is the design task of session 10 (D-027) |
+| CX-13 | Feed status record | 01 | 06, 07, 08, 11 | depends on the real feed (U-09) |
+| CX-14 | Latency summary record | 01 | 06, 07, 11, 12 | measured quantities are defined with the feed benchmark of session 01 |
+| CX-15 | Run result records (trades, daily metrics, comparison with baselines) | 10 | 09, 11 | metric definitions depend on the baseline reconciliation (U-05, U-07) |
+| CX-16 | Learning result records (experiments, candidate models, promotion requests) | 09 | 11 | design task of session 09 |
+| CX-17 | Display projection of records for browsers | 11 | 12 | design task of session 11 |
+| CX-18 | Reservation life-cycle record | 08 | 07 | reservation rules are the design task of session 08 |
+| CX-19 | Adapter queries for reconciliation, journal checkpoints, ledger eviction, storage of raw ticks | 07 | 01, 10 | depends on the persistence design of sessions 07 and 01 |
 
 (CX-03 is CR-005.) Open item U-11 asks the owner to confirm this procedure.
+
+What each proposal must settle is recorded with it in `specifications/dependency_graph.yaml`
+(`must_define`), so that the findings of the review are not lost: for example the candle proposal
+fixes open and close instants, the availability instant, the price series, the rank relative to
+ticks and order events and the rule for a quiet interval; the decision record holds one ranking
+pass with candidate-level rejections; the outcome record separates realised from counterfactual
+outcomes and states when a label becomes available.
 
 ## CR-004 - Interpretations built into the contracts need confirmation
 
@@ -160,3 +183,39 @@ approval and can be rejected individually.
 | Order gateway in front of every execution adapter | `gie/contracts/guarded.py` | D-021 |
 | Derivation check (causality, expiry and data-origin propagation) | `gie/contracts/causality.py` | D-010, D-020 |
 | Scheduler interface and polling scheduler | `gie/core/clock.py` | D-022 |
+
+## CR-007 - Evidence fields of a risk decision proposed by session 08
+
+- Status: OPEN
+- Raised: 2026-11-27 (Session 00, review round 2, finding L2E-19)
+- Requirements: S08-ASG-01, S08-ASG-05, G04-02, G04-03, G04-08
+
+The `RiskDecision` contract states the outcome, the granted volume and risk, the aggregates the
+approval rests on and the daily state. The review from the viewpoint of session 08 found that four
+values a reviewer needs to reproduce a sizing decision have no field yet: the aggregate exposure
+(gross and net), the correlated risk, the base size before adaptation and the quality value that
+was used for adaptive sizing. Their definitions are the design task of session 08 and depend on the
+instrument and account facts (U-04, U-10), so they were not invented here.
+Proposal: session 08 proposes them with its first review package as new **optional** fields of
+`RiskDecision` (a MINOR change under `specifications/SHARED_CONTRACTS.md` section 8); the
+coordinator integrates them. Until then session 08 reads the candidate of a plan through the run
+ledger and reports these values in its own review evidence.
+
+## CR-008 - Attribution of an estimate is recorded but not yet checked
+
+- Status: OPEN
+- Raised: 2026-11-27 (Session 00, verification of review round 1, items PD-23, PD-09, DI-25)
+- Requirements: S05-ACC-07, S11-ASG-05, S02-DEL-01, S04-ASG-08
+
+Three points of the prediction and learning review are recorded here rather than built, because
+their content belongs to session 04:
+1. A candidate or plan may carry `baseline_r` and per-feature `contributions`; no rule relates them
+   to `expected_net_r` yet (an additive attribution with a stated tolerance, or another method).
+   Session 04 proposes the rule together with its first model.
+2. The feature dictionary (a deliverable of session 02, used by session 04) that
+   `ModelVersion.feature_schema_sha256` refers to has no agreed location and canonical format;
+   sessions 02 and 04 propose both with their first review packages, and the hash is only then
+   meaningful.
+3. A scoring pass in a paper run reads the model registry once: the models of a run are pinned in
+   its manifest (D-026), which gives replay and paper the same consistent view; a registry
+   snapshot API beyond that is added only if session 04 or 05 shows the need.

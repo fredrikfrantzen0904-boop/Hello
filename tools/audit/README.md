@@ -1,6 +1,6 @@
 # GIE baseline audit - instructions for the owner
 
-`gie_baseline_audit.py` makes an inventory of the existing system in `D:\ftmo_eurusd` so that the
+`tools/audit/gie_baseline_audit.py` makes an inventory of the existing system in `D:\ftmo_eurusd` so that the
 Gold Intelligence Engine project can describe it without ever touching it. You run it on your own
 machine, look at the result, and send the result folder back. (Requirements S00-ASG-01..07,
 S00-ACC-06 "no production changes", S00-DEL-04, M-AUTH-12, M-AUTH-15; blocker B-001.)
@@ -23,7 +23,7 @@ to use the network, or to start a program other than the two Windows queries of 
 
 ## How to run it (Windows PowerShell)
 
-You need Python 3.8 or newer and nothing else: the tool is the single file `gie_baseline_audit.py`
+You need Python 3.8 or newer and nothing else: the tool is the single file `tools/audit/gie_baseline_audit.py`
 (standard library only, no installation). Use a Python that is installed **outside**
 `D:\ftmo_eurusd` (not the virtual environment of the trading system) and keep the tool **outside**
 that folder too - it refuses to start otherwise. Best time: when the trading system is idle
