@@ -2,7 +2,10 @@
 
 ``python -m tools.benchmark_foundation --out FILE`` times contract construction
 (validation), canonical encoding, strict decoding and the core primitives, and
-writes count / min / mean / p50 / p95 / p99 / max per operation.
+writes count / min / mean / p50 / p95 / p99 / max per operation.  It also times
+the enforcement path that every record or order passes: journal publication
+(in memory, and to a file with and without fsync), the lifecycle ledger, the
+entry and reducing-order authorisation checks and the routing guard.
 
 What these numbers are: single-thread micro-benchmarks on *this* machine with
 labelled synthetic sample records (``tests/gie/samples.py``).
@@ -20,13 +23,27 @@ import json
 import os
 import platform
 import sys
+import tempfile
 import time
 from collections.abc import Callable
 from functools import partial
 from pathlib import Path
 from typing import Any
 
-from gie.contracts import fingerprint, from_json, ordering_key, to_json, to_wire
+from gie.contracts import (
+    FileJournal,
+    LifecycleLedger,
+    MemoryJournal,
+    fingerprint,
+    from_json,
+    ordering_key,
+    to_json,
+    to_wire,
+    validate_entry_authorization,
+    validate_order_transition,
+    validate_position_transition,
+    validate_reducing_order,
+)
 from gie.core.canonical import canonical_dumps
 from gie.core.clock import ReplayClock
 from gie.core.freshness import require_fresh
@@ -34,7 +51,12 @@ from gie.core.ids import make_id
 from gie.core.latency import LatencyRecorder
 from gie.core.ordering import SequenceTracker
 from gie.core.params import load_research_parameters
-from tests.gie import samples
+from gie.core.routing_lock import RoutingGuard, RunMode
+from gie.core.timeutil import NS_PER_MS
+from tests.gie import benchmark_adapter, samples
+
+#: fsync is slow and its cost depends on the storage device; fewer samples are enough.
+FSYNC_ITERATIONS = 300
 
 
 def _time(name: str, operation: Callable[[int], Any], iterations: int, warmup: int) -> dict[str, Any]:
@@ -55,6 +77,107 @@ def _ignore_index(operation: Callable[[], Any]) -> Callable[[int], Any]:
         return operation()
 
     return call
+
+
+def _ticks(count: int) -> list[Any]:
+    """*count* consecutive labelled fixture ticks of one stream, one millisecond apart."""
+    return [
+        samples.tick(
+            seq=index,
+            event_time_ns=samples.T0 + index * NS_PER_MS,
+            receive_time_ns=samples.T0 + index * NS_PER_MS + 1,
+        )
+        for index in range(count)
+    ]
+
+
+def _journal_publish(journal: MemoryJournal, name: str, iterations: int, warmup: int) -> dict[str, Any]:
+    ticks = _ticks(iterations + warmup)
+    journal.publish(samples.run_manifest())
+    return _time(name, lambda index: journal.publish(ticks[index]), iterations, warmup)
+
+
+def _enforcement_path(iterations: int, warmup: int) -> list[dict[str, Any]]:
+    """Cost of the checks every published record and every order passes."""
+    results: list[dict[str, Any]] = []
+
+    results.append(
+        _journal_publish(MemoryJournal(), "journal: MemoryJournal.publish(tick)", iterations, warmup)
+    )
+    with tempfile.TemporaryDirectory(prefix="gie-bench-") as folder:
+        with FileJournal(Path(folder) / "no_fsync.jsonl", fsync=False) as journal:
+            results.append(
+                _journal_publish(journal, "journal: FileJournal.publish(tick), no fsync", iterations, warmup)
+            )
+        with FileJournal(Path(folder) / "fsync.jsonl", fsync=True) as journal:
+            results.append(
+                _journal_publish(journal, "journal: FileJournal.publish(tick), fsync", FSYNC_ITERATIONS, 20)
+            )
+
+    plan = samples.trade_plan()
+    decision = samples.risk_decision(plan)
+    entry = samples.order_event()
+    now_ns = entry.receive_time_ns
+    results.append(
+        _time(
+            "gateway: validate_entry_authorization",
+            lambda _i: validate_entry_authorization(plan, decision, entry, now_ns=now_ns),
+            iterations,
+            warmup,
+        )
+    )
+
+    held = samples.position()
+    stop_submit, stop_working, stop_request, _stop_replaced = samples.protective_stop_lifecycle()
+    results.append(
+        _time(
+            "gateway: validate_reducing_order (protective stop)",
+            lambda _i: validate_reducing_order(held, stop_submit),
+            iterations,
+            warmup,
+        )
+    )
+    results.append(
+        _time(
+            "gateway: validate_order_transition (stop replace request)",
+            lambda _i: validate_order_transition(stop_working, stop_request),
+            iterations,
+            warmup,
+        )
+    )
+    ledger = LifecycleLedger()
+    ledger.admit(stop_submit)
+    ledger.admit(stop_working)
+    results.append(
+        _time(
+            "gateway: LifecycleLedger.check (next event of an order)",
+            lambda _i: ledger.check(stop_request),
+            iterations,
+            warmup,
+        )
+    )
+
+    opened, tightened, _closed = samples.position_lifecycle()
+    results.append(
+        _time(
+            "reflex: validate_position_transition (stop tightened)",
+            lambda _i: validate_position_transition(opened, tightened),
+            iterations,
+            warmup,
+        )
+    )
+
+    guard = RoutingGuard(RunMode.REPLAY)
+    adapter = benchmark_adapter.BenchmarkSimulatedAdapter()
+    results.append(
+        _time(
+            "gateway: RoutingGuard.authorized_methods",
+            lambda _i: guard.authorized_methods(adapter),
+            iterations,
+            warmup,
+        )
+    )
+    return results
 
 
 def run(iterations: int) -> dict[str, Any]:
@@ -109,6 +232,8 @@ def run(iterations: int) -> dict[str, Any]:
     results.append(
         _time("core: SequenceTracker.observe", lambda i: tracker.observe("s", i, "f"), iterations, warmup)
     )
+
+    results.extend(_enforcement_path(iterations, warmup))
 
     parameters = load_research_parameters()
     targets = {

@@ -48,9 +48,10 @@ before editing anything.
 | `docs/IMPLEMENTATION_STATUS.md` | generated status summary |
 | `docs/ARCHITECTURE.md`, `docs/WORKTREES.md`, `docs/BASELINE_AUDIT.md` | architecture, branch/worktree procedure, audit status |
 | `gie/core/` | clock, ids, canonical JSON, freshness, ordering, latency, routing lock, errors (stdlib only) |
-| `gie/contracts/` | the nine shared contracts, codec, schemas, compatibility checker, interfaces |
+| `gie/contracts/` | the ten shared contracts, codec, schemas, compatibility checker, journal, lifecycle ledger, order gateway, interfaces |
 | `tools/` | audit, CI checks, register and review tooling |
-| `tests/gie/<area>/` | tests; `tests/gie/samples.py` holds labelled synthetic sample records |
+| `specifications/lock_pins.json` | pinned hashes of the routing lock and the order gateway |
+| `tests/gie/<area>/` | tests; `tests/gie/samples.py` holds labelled synthetic sample records; `tests/gie/golden/` the golden messages of every contract version |
 | `reviews/session_NN/` | review package (PDF + machine-readable evidence) per session |
 
 ## Code rules
@@ -64,6 +65,13 @@ before editing anything.
 - Identifiers come from `gie.contracts.identity`; never `uuid4`, never random, never wall-clock.
 - Errors derive from `gie.core.errors.GieError`; fail closed; never repair invalid input.
 - No network calls, LLM calls or model training in any tick/decision path.
+- Timers come from the injected `gie.core.clock.Scheduler`; never threads, sleeps or `threading.Timer`.
+- Orders reach an execution adapter only through `gie.contracts.guarded.GuardedExecutionAdapter`
+  (name the variable `gateway` or `order_gateway`); never call an adapter directly.
+- Records are published through the run's journal (`RecordSink`); a derived record carries the
+  market-data watermark it was computed from (`as_of_time_ns`) and never outlives its inputs.
+- A shared type that is missing (see `contract_extensions` in the dependency graph) is proposed to
+  the coordinator, never defined locally.
 
 ## Commands
 
@@ -76,6 +84,8 @@ python -m ruff check . && python -m ruff format --check .
 python -m mypy
 python -m gie.contracts.schema_gen --check # schemas match code, lock intact, evolution rules hold
 python -m tools.render_contract_docs --check
+python -m tools.make_golden --check        # golden messages of every contract still round-trip
+python -m tools.check_live_lock            # static scan of the paper-only routing lock
 ```
 
 ## Test rules

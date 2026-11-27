@@ -43,7 +43,7 @@ sessions:
   S00: {name: Project Coordinator, wave: 1, depends_on: [], contract_only: [], optional: [],
         owns: [gie/__init__.py, gie/core/, gie/contracts/, gie/app/, specifications/, docs/, tools/,
                .github/, tests/__init__.py, tests/conftest.py, tests/gie/__init__.py,
-               tests/gie/samples.py, tests/gie/golden/, tests/gie/core/, tests/gie/contracts/,
+               tests/gie/samples.py, tests/gie/benchmark_adapter.py, tests/gie/golden/, tests/gie/core/, tests/gie/contracts/,
                tests/gie/tools/, tests/gie/baseline/, reviews/session_00/, CLAUDE.md, README.md,
                pyproject.toml, .gitignore]}
   S01: {name: Market Data, wave: 2, depends_on: [S00], contract_only: [], optional: [],

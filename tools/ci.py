@@ -68,6 +68,11 @@ def build_steps(evidence_dir: Path) -> list[Step]:
             ("S00-DEL-02",),
         ),
         Step(
+            "golden contract messages still decode and re-encode byte for byte",
+            (py, "-m", "tools.make_golden", "--check"),
+            ("S00-ACC-01", "S00-ACC-02"),
+        ),
+        Step(
             "paper-only routing lock (static scan)",
             (py, "-m", "tools.check_live_lock"),
             ("S00-ACC-04", "G08-03", "G08-10", "OWN-14"),
@@ -81,6 +86,16 @@ def build_steps(evidence_dir: Path) -> list[Step]:
             "protected paths unchanged (no production changes)",
             (py, "-m", "tools.check_protected_paths"),
             ("S00-ACC-06", "OWN-13", "M-AUTH-12"),
+        ),
+        Step(
+            "documents name only paths that exist",
+            (py, "-m", "tools.check_docs_paths"),
+            ("M-AUTH-08", "OWN-21"),
+        ),
+        Step(
+            "no credentials in the repository",
+            (py, "-m", "tools.check_no_secrets"),
+            ("M-AUTH-15",),
         ),
         Step(
             "tests with requirement evidence",
@@ -155,9 +170,7 @@ def run_step(step: Step) -> StepResult:
 
 
 def _git(*args: str) -> str:
-    completed = subprocess.run(
-        ("git", *args), cwd=REPO_ROOT, capture_output=True, text=True, check=False
-    )
+    completed = subprocess.run(("git", *args), cwd=REPO_ROOT, capture_output=True, text=True, check=False)
     return completed.stdout.strip() if completed.returncode == 0 else ""
 
 

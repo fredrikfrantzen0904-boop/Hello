@@ -80,6 +80,12 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
         }
 
 
+def _skip_reason(longrepr: object) -> str:
+    """The reason given to ``pytest.skip`` (for example ``BLOCKED: B-001 - ...``), never lost."""
+    reason = str(longrepr[2] if isinstance(longrepr, tuple) and len(longrepr) == 3 else longrepr)
+    return reason.removeprefix("Skipped: ")[:500]
+
+
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]) -> Any:
     outcome = yield
@@ -104,15 +110,14 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]) ->
             entry["outcome"] = report.outcome
             if report.failed:
                 entry["detail"] = str(report.longrepr)[-2000:]
+            elif report.skipped:
+                entry["detail"] = _skip_reason(report.longrepr)
     elif report.when == "setup" and report.skipped:
         entry["outcome"] = "skipped"
-        longrepr = report.longrepr
-        entry["detail"] = str(longrepr[2] if isinstance(longrepr, tuple) else longrepr)[:500]
+        entry["detail"] = _skip_reason(report.longrepr)
     elif report.failed:
         entry["outcome"] = "error"
         entry["detail"] = str(report.longrepr)[-2000:]
-    elif report.when == "call" and report.skipped:
-        entry["outcome"] = "skipped"
 
 
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:

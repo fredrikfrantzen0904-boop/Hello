@@ -399,20 +399,39 @@ def requirement_rows(requirements: list[dict[str, Any]]) -> list[list[Any]]:
     return rows
 
 
+#: The nine contracts named by the brief, in data-flow order; any further registered contract
+#: (RunManifest, decision D-019) follows.
+BRIEF_CONTRACTS = (
+    "Tick",
+    "Evidence",
+    "Candidate",
+    "TradePlan",
+    "RiskDecision",
+    "OrderEvent",
+    "Position",
+    "ModelVersion",
+    "Clock",
+)
+
+
+def contract_order() -> list[str]:
+    registered = all_contracts()
+    return [name for name in BRIEF_CONTRACTS if name in registered] + sorted(
+        name for name in registered if name not in BRIEF_CONTRACTS
+    )
+
+
+def id_range(entries: list[dict[str, str]], status: str) -> str:
+    """'D-002 .. D-023 (22)' for the entries with the given status, or 'none'."""
+    ids = [entry["id"] for entry in entries if entry.get("status") == status]
+    if not ids:
+        return "none"
+    return ids[0] if len(ids) == 1 else f"{ids[0]} .. {ids[-1]} ({len(ids)})"
+
+
 def contract_section(story: list[Any]) -> None:
-    order = [
-        "Tick",
-        "Evidence",
-        "Candidate",
-        "TradePlan",
-        "RiskDecision",
-        "OrderEvent",
-        "Position",
-        "ModelVersion",
-        "Clock",
-    ]
     contracts = all_contracts()
-    for name in order:
+    for name in contract_order():
         record_type = contracts[name]
         doc = " ".join((record_type.__doc__ or "").split())
         story.append(p(f"{esc(name)} {esc(record_type.VERSION)}", H3))
@@ -554,7 +573,13 @@ def build(evidence_dir: Path, out: Path, reviewed_commit: str) -> None:
     story.append(p("Decision requested from the owner", H2))
     story.append(
         p(
-            "1. Approve, conditionally approve or reject the shared contracts (section 4, appendix A) and the architecture decisions D-002 .. D-018 (section 8).<br/>2. Choose how the existing system will be made accessible so that the audit and the baseline freeze can be completed (blocker B-001, open item U-01).<br/>3. Answer the open items U-02 .. U-13 (section 9), or delegate them to the sessions that need them.<br/>4. Authorise - or not - the start of wave 2 (sessions 01, 02, 07, 08). Nothing beyond Session 00 has been started."
+            "1. Approve, conditionally approve or reject the shared contracts (section 4, appendix A) and the proposed decisions "
+            + esc(id_range(decision_entries, "PROPOSED"))
+            + " (section 8).<br/>2. Choose how the existing system will be made accessible so that the audit and the baseline freeze can be completed (blocker B-001, open item U-01).<br/>3. Answer the open items "
+            + esc(id_range(open_items, "OPEN"))
+            + " and decide the open change requests "
+            + esc(id_range(change_requests, "OPEN"))
+            + " (section 9), or delegate them to the sessions that need them.<br/>4. Authorise - or not - the start of wave 2 (sessions 01, 02, 07, 08). Nothing beyond Session 00 has been started."
         )
     )
     story.append(PageBreak())
@@ -583,13 +608,13 @@ def build(evidence_dir: Path, out: Path, reviewed_commit: str) -> None:
         ],
         [
             "Deterministic",
-            "canonical JSON (RFC 8785 with exact integers), content-derived ids, injected time, total order",
-            "gie/core",
+            "canonical JSON (RFC 8785 with exact integers), content-derived ids, injected time and timers; the order of a run is its journal (one input, run to completion, publish, next input)",
+            "gie/core, gie/contracts/journal.py",
         ],
         [
             "Causal (no look-ahead)",
-            "ordering by availability time; causality watermark as_of_time_ns <= decision_time_ns; future data is an error",
-            "gie/core/ordering.py, freshness.py",
+            "inputs ordered by availability time; every derived record carries its market-data watermark; the journal refuses a record that depends on a tick not yet delivered; a derived record never outlives its inputs",
+            "gie/contracts/journal.py, causality.py, gie/core/freshness.py",
         ],
         [
             "Fail closed",
@@ -598,13 +623,18 @@ def build(evidence_dir: Path, out: Path, reviewed_commit: str) -> None:
         ],
         [
             "Labelled data",
-            "every record names run, mode and data origin; fixtures are SYNTHETIC_FIXTURE",
-            "gie/contracts/common.py",
+            "every record names run, mode and data origin; a derived record cannot claim a better origin than its inputs; fixtures are SYNTHETIC_FIXTURE; every run starts with a RunManifest",
+            "gie/contracts/common.py, causality.py, run.py",
         ],
         [
             "No live trading",
-            "four-layer routing lock (vocabulary, constant, guard, static scan)",
-            "gie/core/routing_lock.py, tools/check_live_lock.py",
+            "four-layer routing lock (vocabulary, constant, guard + order gateway, static scan with pinned hashes)",
+            "gie/core/routing_lock.py, gie/contracts/guarded.py, tools/check_live_lock.py",
+        ],
+        [
+            "Rules across records",
+            "sequence rules (stops only tighten, nothing after a terminal state, one executed alternative) and plan / approval / order agreement are enforced where records are published and where orders are sent",
+            "gie/contracts/ledger.py, authorization.py, journal.py, guarded.py",
         ],
         [
             "Parallel work without collisions",
@@ -616,7 +646,7 @@ def build(evidence_dir: Path, out: Path, reviewed_commit: str) -> None:
     story.append(p("Routing lock", H2))
     story.append(
         p(
-            '"Real routing" is any order message leaving the process towards a broker, terminal or exchange - demo accounts included (decision D-011, to be confirmed: U-06). (1) <b>Vocabulary</b>: RunMode = {REPLAY, PAPER}, ExecutionVenue = {SIMULATED}; a live order cannot be constructed or decoded. (2) <b>Constant</b>: LIVE_ROUTING_PERMITTED is the literal False, read from no environment variable, file or flag. (3) <b>Guard</b>: RoutingGuard.authorize admits only registered simulated adapter types. (4) <b>Static scan</b> in CI for broker order-entry calls, broker SDK imports and tampering. Honest limit: Python cannot stop a person who edits the lock module itself; such an edit is caught by the scan, the tests and review. There is no configuration that unlocks it.'
+            '"Real routing" is any order message leaving the process towards a broker, terminal or exchange - demo accounts included (decision D-011, to be confirmed: U-06). (1) <b>Vocabulary</b>: RunMode = {REPLAY, PAPER}, ExecutionVenue = {SIMULATED}; a live order cannot be constructed or decoded. (2) <b>Constant</b>: LIVE_ROUTING_PERMITTED is the literal False, read from no environment variable, file or flag. (3) <b>Guard and gateway</b>: the only path to an execution adapter is the order gateway (GuardedExecutionAdapter); before every call the RoutingGuard admits only adapter classes registered from the execution or backtesting package (or tests) that declare the simulated venue, carry no per-instance attributes and still have exactly the registered method functions - and the gateway calls those registered functions. (4) <b>Static scan</b> in CI for broker order-entry calls, broker SDK imports, process and network escapes, adapter calls outside the gateway, and the pinned hashes of the lock module and the gateway. Honest limit: Python cannot stop a person who rewrites the lock module or writes an adapter that does something other than simulate; that is caught by the scan, the pins, the tests and review, not by the runtime. There is no configuration that unlocks it.'
         )
     )
     story.append(p("Repository layout and ownership", H2))
@@ -643,6 +673,12 @@ def build(evidence_dir: Path, out: Path, reviewed_commit: str) -> None:
         )
     )
     story.append(dependency_diagram(graph))
+    gate_rows: list[list[Any]] = [["gate", "rule"]]
+    for gate_name, gate in graph.get("gates", {}).items():
+        gate_rows.append([esc(gate_name.replace("_", " ")), esc(gate["description"])])
+    if len(gate_rows) > 1:
+        story.append(p("Gates", H2))
+        story.append(table(gate_rows, [18, 94]))
     story.append(p("Python import rules", H2))
     import_rows: list[list[Any]] = [
         ["package", "owner", "may import (besides the standard library and itself)"]
@@ -681,7 +717,7 @@ def build(evidence_dir: Path, out: Path, reviewed_commit: str) -> None:
         ],
         [
             "Freshness",
-            "usable iff now < valid_until; fresh iff 0 <= age < max_age; data from the future raises FutureDataError; limits are research parameters.",
+            "usable iff now < valid_until; fresh iff 0 <= age < max_age; data from the future raises FutureDataError; a derived record never outlives its inputs and an order never outlives its plan and approval; limits are research parameters requested by the consuming session.",
         ],
         [
             "Error semantics",
@@ -689,27 +725,22 @@ def build(evidence_dir: Path, out: Path, reviewed_commit: str) -> None:
         ],
         [
             "Event ordering",
-            "per-stream sequence numbers (duplicate / gap / conflict detection); total order (availability time, stream rank, stream, seq); late ticks are flagged, not reordered.",
+            "per-stream sequence numbers (duplicate / gap / conflict detection); inputs are taken in (availability time, stream rank, stream, seq); the total order of a run is its journal: one input, every consumer runs to completion, all records of the step are published, then the next input; late ticks are flagged, not reordered.",
         ],
         [
             "Versioning",
-            "semantic version per contract; PATCH = documentation, MINOR = new optional field or enum value, MAJOR = anything else; readers refuse another MAJOR, ignore unknown fields only from a newer MINOR, always refuse unknown enum values; CI enforces the rules on the locked schemas.",
+            "semantic version per contract; PATCH = documentation, MINOR = new optional field or enum value, MAJOR = anything else; readers refuse another MAJOR, ignore unknown fields only from a newer MINOR, always refuse unknown enum values; behaviour (ordering, identity, transition tables) is published in the schema so that a change of behaviour is a detected change; CI enforces the rules on the locked schemas and on golden messages.",
         ],
     ]
     story.append(table(rules_rows, [16, 96]))
-    story.append(p("The nine contracts", H2))
+    story.append(p("The contracts", H2))
+    story.append(
+        p(
+            "The nine contracts named by the brief, and <b>RunManifest</b>, a tenth contract added in Session 00 (decision D-019, change request CR-006 - an addition the owner may reject)."
+        )
+    )
     overview_rows: list[list[Any]] = [["contract", "version", "fields", "invariants", "purpose"]]
-    for name in (
-        "Tick",
-        "Evidence",
-        "Candidate",
-        "TradePlan",
-        "RiskDecision",
-        "OrderEvent",
-        "Position",
-        "ModelVersion",
-        "Clock",
-    ):
+    for name in contract_order():
         record_type = all_contracts()[name]
         purpose = " ".join((record_type.__doc__ or "").split()).split(". ")[0]
         overview_rows.append(
@@ -722,18 +753,46 @@ def build(evidence_dir: Path, out: Path, reviewed_commit: str) -> None:
             ]
         )
     story.append(table(overview_rows, [16, 9, 8, 10, 69]))
-    story.append(p("Safety rules that are structural", H2))
+    story.append(p("Safety rules and where each is enforced", H2))
+    safety_rows = [
+        ["kind of rule", "rules", "enforced by"],
+        [
+            "Inside one record (a violating record cannot be constructed or decoded)",
+            "no live mode or real venue exists; only XAUUSD can be planned, ordered or held by GIE; every plan has a hard stop on the losing side; every entry order carries its plan, its risk approval and an attached protective stop; a rejection grants nothing; emergency halt never approves; at or below the daily profit floor nothing is approved; a stop is never wider than the initial stop; missing evidence has null scores and inactive evidence zero scores; a model is ACTIVE only with a recorded owner approval and its evidence",
+            "record invariants (appendix A)",
+        ],
+        [
+            "Across a sequence of records",
+            "a stop is only tightened and never removed; a position is never increased; the executable net P&L peak never decreases; a replacement adds no risk; nothing follows a terminal order state; at most one alternative plan of a group is executed; a model reaches ACTIVE only through SHADOW; the profit floor never decreases within a day",
+            "transition validators and LifecycleLedger, applied by the journal and the order gateway",
+        ],
+        [
+            "Between plan, approval and order",
+            "the order is the plan that was approved (same content by fingerprint), within the granted volume, with the planned stop attached, and nothing expired - failing closed exactly at the boundary; every other order may only reduce or protect an open GIE position; GIE never sends orders for positions of other systems",
+            "authorisation checks in the order gateway",
+        ],
+    ]
+    story.append(table(safety_rows, [22, 62, 28]))
+    story.append(p("Provisional elements and shared types still missing", H2))
     story.append(
         p(
-            "A record that violates one of these cannot be constructed or decoded: no live mode or real venue exists; only XAUUSD can be planned, ordered or held by GIE; every plan has a hard stop on the losing side; every entry order carries its plan, its risk approval and an attached protective stop; a rejection grants nothing; emergency halt never approves; at or below the daily profit floor nothing is approved; a stop is never wider than the initial stop and never removed; a position is never increased; the executable net P&L peak never decreases; missing evidence has null scores and inactive evidence zero scores; a model becomes ACTIVE only after SHADOW and with a recorded owner approval."
+            "Because the six engines could not be inspected (B-001), engine-specific vocabularies are open strings or small provisional enumerations (EvidenceStage, MarketSession, TickFlag, ModelKind, reason codes). The following shared types are needed by later sessions and were deliberately <b>not</b> defined in Session 00, because their content depends on the audit and on broker and account facts (change requests CR-003 and CR-005). Each is proposed by the named session as its first deliverable and added to the shared contracts by the coordinator; a session may not start before the types it needs exist."
         )
     )
-    story.append(p("Provisional elements", H2))
-    story.append(
-        p(
-            "Because the six engines could not be inspected (B-001), engine-specific vocabularies are open strings or small provisional enumerations (EvidenceStage, MarketSession, TickFlag, ModelKind, reason codes). Additional shared types (Candle, InstrumentSpec, AccountSnapshot, broker calendar) are expected to be proposed by sessions 01, 07 and 08 (change request CR-003)."
+    extension_rows: list[list[Any]] = [
+        ["id", "shared type", "proposed by", "needed before the start of", "CR"]
+    ]
+    for item in graph.get("contract_extensions", []):
+        extension_rows.append(
+            [
+                esc(item["id"]),
+                esc(item["name"]),
+                ", ".join(item["proposed_by"]),
+                ", ".join(item["required_before_start_of"]),
+                esc(item["change_request"]),
+            ]
         )
-    )
+    story.append(table(extension_rows, [9, 55, 14, 24, 10]))
     story.append(PageBreak())
 
     # ------------------------------------------------------------------ 5 baseline audit
@@ -801,6 +860,34 @@ def build(evidence_dir: Path, out: Path, reviewed_commit: str) -> None:
                 "Outcome counts over all collected tests: "
                 + ", ".join(f"<b>{esc(k)}</b> {v}" for k, v in tests["counts"].items())
                 + f". Total {len(tests['tests'])} tests in {tests['duration_s']:.1f} s."
+            )
+        )
+        areas: dict[str, dict[str, int]] = {}
+        for item in tests["tests"]:
+            area = "/".join(item["nodeid"].split("::")[0].split("/")[:3])
+            bucket = areas.setdefault(area, {})
+            bucket[item["outcome"]] = bucket.get(item["outcome"], 0) + 1
+        area_rows: list[list[Any]] = [["test area", "tests", "passed", "failed / error", "skipped / not run"]]
+        for area in sorted(areas):
+            bucket = areas[area]
+            area_rows.append(
+                [
+                    Paragraph(esc(area), MONO),
+                    str(sum(bucket.values())),
+                    str(bucket.get("passed", 0)),
+                    str(bucket.get("failed", 0) + bucket.get("error", 0)),
+                    str(sum(v for k, v in bucket.items() if k not in ("passed", "failed", "error"))),
+                ]
+            )
+        story.append(table(area_rows, [52, 15, 15, 15, 15]))
+        traced = sorted(
+            {rid for t in tests["tests"] if t["outcome"] == "passed" for rid in t["requirements"]}
+        )
+        unmarked = sum(1 for t in tests["tests"] if not t["requirements"])
+        story.append(
+            p(
+                f"Traceability: {len(traced)} distinct requirement ids are named by at least one passing test; {unmarked} tests carry no requirement id. A passing test shows that the named requirement's foundation part behaves as specified - it does not by itself make a requirement complete (see section 11).",
+                SMALL,
             )
         )
         not_passed = [t for t in tests["tests"] if t["outcome"] != "passed"]
@@ -1006,6 +1093,7 @@ def build(evidence_dir: Path, out: Path, reviewed_commit: str) -> None:
         'python -m pip install -e ".[dev]"',
         "python -m tools.ci --evidence-dir out            # all gates; writes ci_results.json, test_results.json, junit.xml, coverage.json",
         "python -m tools.benchmark_foundation --out out/benchmark.json",
+        "python -m tools.make_file_manifest --check reviews/session_00/evidence/file_manifest.json",
         "python -m tools.build_review --evidence-dir out --out review.pdf --commit <commit>",
     ):
         story.append(p(esc(line), MONO))
