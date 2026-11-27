@@ -238,7 +238,10 @@ def failure_digest(evidence_dir: Path, limit: int = 14) -> list[str]:
         outcome = str(item.get("outcome"))
         bucket[outcome] = bucket.get(outcome, 0) + 1
         text_lines = [line.strip() for line in str(item.get("detail", "")).splitlines() if line.strip()]
+        explained = [line for line in text_lines if line.startswith("E ")]
         reason = _VOLATILE.sub("~", text_lines[-1] if text_lines else "(no text)")[:170]
+        if explained:  # the first line pytest marks as the explanation of the failure
+            reason += " | " + _VOLATILE.sub("~", explained[0])[:260]
         reasons.setdefault(reason, []).append(str(item.get("nodeid", "")))
     lines = [f"test failure digest: {len(bad)} test(s) neither passed nor skipped"]
     for module in sorted(modules, key=lambda name: -sum(modules[name].values())):

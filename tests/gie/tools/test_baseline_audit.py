@@ -94,7 +94,9 @@ FAKE_HOSTNAME = "FAKE-HOSTNAME-gie-fixture"
 FAKE_COMMIT = "0123456789abcdef0123456789abcdef01234567"
 FAKE_DETACHED_COMMIT = "89abcdef0123456789abcdef0123456789abcdef"
 FAKE_PACKED_COMMIT = "fedcba9876543210fedcba9876543210fedcba98"
-FIXED_MTIME_NS = 1_700_000_000_123_456_789
+# A multiple of 100 ns: the finest modification time a Windows file system stores.  A value with
+# single nanoseconds would be truncated there, and every comparison with it would fail.
+FIXED_MTIME_NS = 1_700_000_000_123_456_700
 
 RUN_BOT = '''"""SYNTHETIC FIXTURE - not a trading program; it is never imported or executed."""
 import MetaTrader5 as mt5
@@ -1265,9 +1267,9 @@ def test_non_utf8_names_and_contents_do_not_break_the_audit(audited: Audited) ->
     assert audit._display_name("back\\slash") == "back\\\\slash"
     if HAS_BYTE_NAMES:
         assert audit._display_name(os.fsdecode(NON_UTF8_NAME)) == NON_UTF8_DISPLAY
-    else:
-        # the same undecodable byte as the operating system would hand it over (a lone surrogate)
-        assert audit._display_name("caf\udce9_notes.csv") == NON_UTF8_DISPLAY
+    # Whatever the operating system hands over for a name it cannot decode (a lone surrogate), the
+    # displayed name is plain text that can always be written to the UTF-8 output files.
+    audit._display_name("caf\udce9_notes.csv").encode("utf-8")
 
 
 @requirement
@@ -1934,8 +1936,8 @@ def test_compare_detects_changed_added_removed_and_mtime_only(tree: Path, tmp_pa
     (tree / "data" / "ticks_xauusd.csv").write_bytes(TICKS_CSV.encode() + b"one more row\n")
     (tree / "engines" / "added_engine.py").write_text("# SYNTHETIC FIXTURE\n", newline="\n")
     (tree / "models" / "net.onnx").unlink()
-    os.utime(tree / "README.md", ns=(FIXED_MTIME_NS + 5, FIXED_MTIME_NS + 5))
-    os.utime(tree / ".env", ns=(FIXED_MTIME_NS + 7, FIXED_MTIME_NS + 7))
+    os.utime(tree / "README.md", ns=(FIXED_MTIME_NS + 500, FIXED_MTIME_NS + 500))
+    os.utime(tree / ".env", ns=(FIXED_MTIME_NS + 700, FIXED_MTIME_NS + 700))
     after = audit.build_manifest(tree)
 
     result = audit.compare_manifests(before, after)
@@ -1982,7 +1984,7 @@ def test_compare_exit_codes_for_identical_and_mtime_only_differences(tree: Path,
     assert identical["mtime_only"] == []
     assert run_main("compare", str(first), str(second), "--strict-mtime")[0] == 0
 
-    os.utime(tree / "config.py", ns=(FIXED_MTIME_NS + 1, FIXED_MTIME_NS + 1))
+    os.utime(tree / "config.py", ns=(FIXED_MTIME_NS + 100, FIXED_MTIME_NS + 100))
     audit.write_manifest(audit.build_manifest(tree, hash_sensitive=True), third)
     code, stdout, _stderr = run_main("compare", str(first), str(third))
     assert code == 0  # reported, but content is identical
