@@ -376,7 +376,7 @@ def test_rsk8_does_not_restrict_a_rejection_above_the_floor() -> None:
 
 
 @pytest.mark.requirement("G05-08", "G05-06")
-@settings(derandomize=True, max_examples=150, deadline=None)
+@settings(derandomize=True, max_examples=150, deadline=None, database=None)
 @given(
     pnl_units=st.integers(min_value=-2_000, max_value=120_000),
     floor_units=st.integers(min_value=1, max_value=100_000),
@@ -696,6 +696,24 @@ def test_the_floor_cannot_be_lowered_by_leaving_and_re_entering_profit_protectio
 
     with pytest.raises(IllegalTransitionError):
         leave_and_re_enter_lower()
+
+
+@pytest.mark.requirement("G05-06", "G05-08")
+@pytest.mark.parametrize(
+    "pnl", ["0.05", "0.04"], ids=["exactly_at_the_earlier_floor", "below_the_earlier_floor"]
+)
+def test_no_approval_at_or_below_a_floor_that_was_protected_earlier_the_same_day(pnl: str) -> None:
+    # G05: "protect a nondecreasing daily profit floor ... At exactly the floor no new risk."  A floor
+    # of 0.05 was protected at T0; reporting another daily state a second later does not lower it.
+    protected = _protected(T0, "0.05", "0.062")
+    approval = _at(T0 + NS_PER_SECOND, seq=1, attempt=1, daily_pnl_frac=D(pnl))
+    assert approval.daily_state is DailyState.NORMAL
+    assert approval.approved is True
+    assert approval.profit_floor_frac is None
+    assert approval.trading_day == protected.trading_day == "2026-11-26"
+    assert protected.profit_floor_frac is not None
+    assert approval.daily_pnl_frac <= protected.profit_floor_frac
+    _refused_sequence(protected, approval)
 
 
 def test_decisions_at_the_same_instant_may_follow_each_other() -> None:

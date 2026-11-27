@@ -652,15 +652,15 @@ class _ReprIsNotUnicode:
 
 @pytest.mark.requirement("S00-ASG-24")
 @pytest.mark.parametrize(
-    "value", [_ReprRaises(), _ReprIsNotUnicode()], ids=["repr-raises", "repr-not-unicode"]
+    "value_type", [_ReprRaises, _ReprIsNotUnicode], ids=["repr-raises", "repr-not-unicode"]
 )
-def test_a_value_without_a_usable_text_form_is_still_a_journalable_detail(value: Any) -> None:
-    """ "Values of any other type are carried as text": also when their own text form is unusable.
+def test_a_value_without_a_usable_text_form_is_still_a_journalable_detail(value_type: type) -> None:
+    """A value "of any other type" is carried as text, also when its own text form is unusable.
 
     The error being raised is the information that must survive; a detail must never replace it
     with another exception (here ``RuntimeError``) or make the journal line unwritable.
     """
-    error = OutOfOrderError("synthetic", offender=value, seq=5)
+    error = OutOfOrderError("synthetic", offender=value_type(), seq=5)
     assert type(error.details["offender"]) is str
     assert error.details["seq"] == 5
     _assert_journalable(error)

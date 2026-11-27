@@ -70,14 +70,24 @@ TOOL_AST = ast.parse(TOOL_SOURCE)
 # ---------------------------------------------------------------------------------------------
 
 MARKER = "FAKE-NOT-A-SECRET"
-FAKE_ENV_SECRET = MARKER + "-env-7c1d"
-FAKE_CONFIG_SECRET = MARKER + "-config-52aa"
-FAKE_INDEX_SECRET = MARKER + "-index-9e0b"
-FAKE_DB_SECRET = MARKER + "-db-3f44"
-FAKE_MT5_SECRET = MARKER + "-mt5-b6d2"
-FAKE_MQ5_SECRET = MARKER + "-mq5-0c0c"
-FAKE_KEY_BODY = MARKER + "-keybody-1a2b"
-FAKE_TASK_ARGUMENT = MARKER + "-taskarg-e1e1"
+FAKE_ENV_SECRET = "FAKE-NOT-A-SECRET-env-7c1d"
+FAKE_CONFIG_SECRET = "FAKE-NOT-A-SECRET-config-52aa"
+FAKE_INDEX_SECRET = "FAKE-NOT-A-SECRET-index-9e0b"
+FAKE_DB_SECRET = "FAKE-NOT-A-SECRET-db-3f44"
+FAKE_MT5_SECRET = "FAKE-NOT-A-SECRET-mt5-b6d2"
+FAKE_MQ5_SECRET = "FAKE-NOT-A-SECRET-mq5-0c0c"
+FAKE_NOTEBOOK_SECRET = "FAKE-NOT-A-SECRET-notebook-aa01"
+FAKE_KEY_BODY = "FAKE-NOT-A-SECRET-keybody-1a2b"
+FAKE_TASK_ARGUMENT = "FAKE-NOT-A-SECRET-taskarg-e1e1"
+ALL_FAKE_SECRETS = (
+    FAKE_ENV_SECRET,
+    FAKE_CONFIG_SECRET,
+    FAKE_INDEX_SECRET,
+    FAKE_DB_SECRET,
+    FAKE_MT5_SECRET,
+    FAKE_NOTEBOOK_SECRET,
+    FAKE_KEY_BODY,
+)
 FAKE_ACCOUNT = "99000111222333"  # fake account number, deliberately longer than any real login
 FAKE_ROW_VALUE = "FAKEROWVALUE-must-not-be-emitted-4242"
 FAKE_HOSTNAME = "FAKE-HOSTNAME-gie-fixture"
@@ -86,7 +96,7 @@ FAKE_DETACHED_COMMIT = "89abcdef0123456789abcdef0123456789abcdef"
 FAKE_PACKED_COMMIT = "fedcba9876543210fedcba9876543210fedcba98"
 FIXED_MTIME_NS = 1_700_000_000_123_456_789
 
-RUN_BOT = f'''"""SYNTHETIC FIXTURE - not a trading program; it is never imported or executed."""
+RUN_BOT = '''"""SYNTHETIC FIXTURE - not a trading program; it is never imported or executed."""
 import MetaTrader5 as mt5
 
 from config import PASSWORD
@@ -94,7 +104,7 @@ from config import PASSWORD
 
 def connect():
     mt5.initialize()
-    return mt5.login({FAKE_ACCOUNT}, password="{FAKE_MT5_SECRET}", server="Fake-Server")
+    return mt5.login(99000111222333, password="FAKE-NOT-A-SECRET-mt5-b6d2", server="Fake-Server")
 
 
 def send(request):
@@ -110,12 +120,12 @@ if __name__ == "__main__":
     connect()
 '''
 
-CONFIG = f"""# SYNTHETIC FIXTURE - fake values only
-LOGIN = {FAKE_ACCOUNT}
-PASSWORD = "{FAKE_CONFIG_SECRET}"
+CONFIG = """# SYNTHETIC FIXTURE - fake values only
+LOGIN = 99000111222333
+PASSWORD = "FAKE-NOT-A-SECRET-config-52aa"
 SERVER = "Fake-Server"
 EMPTY_PASSWORD = ""
-DATABASE_URL = "postgresql://fakeuser:{FAKE_DB_SECRET}@db.invalid:5432/fake"
+DATABASE_URL = "postgresql://fakeuser:FAKE-NOT-A-SECRET-db-3f44@db.invalid:5432/fake"
 """
 
 SILVER_BULLET = """# SYNTHETIC FIXTURE
@@ -145,17 +155,17 @@ def open_socket():
     return socket.socket()
 """
 
-EXPERT_MQ5 = f"""//+------------------------------------------------------------------+
+EXPERT_MQ5 = """//+------------------------------------------------------------------+
 //| SYNTHETIC FIXTURE - not a real expert advisor                    |
 //+------------------------------------------------------------------+
 #include <Trade\\Trade.mqh>
 CTrade trade;
-input string InpPassword = "{FAKE_MQ5_SECRET}";
+input string InpPassword = "FAKE-NOT-A-SECRET-mq5-0c0c";
 void OnTick()
-  {{
+  {
    MqlTradeRequest request; MqlTradeResult result;
    if(!OrderSend(request, result)) Print("failed");
-  }}
+  }
 """
 
 TEST_ENGINE = """# SYNTHETIC FIXTURE
@@ -188,26 +198,26 @@ class LegacyCase(unittest.TestCase):
         self.assertTrue(True)
 """
 
-REQUIREMENTS = f"""# SYNTHETIC FIXTURE
+REQUIREMENTS = """# SYNTHETIC FIXTURE
 numpy==1.26.4
 pandas>=2.0,<3
 MetaTrader5==5.0.45
 pyzmq
 requests[socks]>=2.31 ; python_version >= "3.9"
 tokenizers==0.15.0
---extra-index-url https://fakeuser:{FAKE_INDEX_SECRET}@pypi.invalid/simple
+--extra-index-url https://fakeuser:FAKE-NOT-A-SECRET-index-9e0b@pypi.invalid/simple
 private-lib @ https://files.invalid/private_lib-1.0.tar.gz
 -r dev-requirements.txt
 this is not a requirement line
 """
 
-PYPROJECT = f"""# SYNTHETIC FIXTURE
+PYPROJECT = """# SYNTHETIC FIXTURE
 [project]
 name = "fake-bot"
 dependencies = [
     "lightgbm>=4.0",   # a comment with a ] bracket
     "scikit-learn==1.4.2",
-    "internal-sdk @ git+https://fakeuser:{FAKE_INDEX_SECRET}@git.invalid/sdk.git",
+    "internal-sdk @ git+https://fakeuser:FAKE-NOT-A-SECRET-index-9e0b@git.invalid/sdk.git",
 ]
 
 [project.optional-dependencies]
@@ -221,7 +231,7 @@ testpaths = ["tests"]
 
 [tool.poetry.dependencies]
 python = "^3.11"
-ccxt = {{version = "^4.2", extras = ["async"]}}
+ccxt = {version = "^4.2", extras = ["async"]}
 """
 
 SETUP_CFG = """# SYNTHETIC FIXTURE
@@ -241,10 +251,10 @@ notify =
 testpaths = tests
 """
 
-ENVIRONMENT_YML = f"""# SYNTHETIC FIXTURE
+ENVIRONMENT_YML = """# SYNTHETIC FIXTURE
 name: fake-env
 channels:
-  - https://fakeuser:{FAKE_INDEX_SECRET}@conda.invalid/channel
+  - https://fakeuser:FAKE-NOT-A-SECRET-index-9e0b@conda.invalid/channel
   - conda-forge
 dependencies:
   - python=3.11.9
@@ -252,33 +262,33 @@ dependencies:
   - ta-lib
   - pip:
       - ib_insync==0.9.86
-      - git+https://fakeuser:{FAKE_INDEX_SECRET}@git.invalid/x.git
+      - git+https://fakeuser:FAKE-NOT-A-SECRET-index-9e0b@git.invalid/x.git
 """
 
 PACKAGE_JSON = json.dumps(
     {
         "name": "fake-dashboard",
-        "scripts": {"start": "node server.js --token " + FAKE_INDEX_SECRET},
+        "scripts": {"start": "node server.js --token FAKE-NOT-A-SECRET-index-9e0b"},
         "dependencies": {
             "express": "^4.19.2",
             "@types/node": "20.11.0",
-            "private-sdk": "git+https://fakeuser:" + FAKE_INDEX_SECRET + "@git.invalid/sdk.git",
+            "private-sdk": "git+https://fakeuser:FAKE-NOT-A-SECRET-index-9e0b@git.invalid/sdk.git",
         },
         "devDependencies": {"ws": "~8.17.0"},
     },
     indent=2,
 )
 
-PIPFILE = f"""# SYNTHETIC FIXTURE
+PIPFILE = """# SYNTHETIC FIXTURE
 [[source]]
-url = "https://fakeuser:{FAKE_INDEX_SECRET}@pypi.invalid/simple"
+url = "https://fakeuser:FAKE-NOT-A-SECRET-index-9e0b@pypi.invalid/simple"
 verify_ssl = true
 name = "private"
 
 [packages]
 flask = "==3.0.3"
 oandapyV20 = "*"
-private-pkg = {{git = "https://fakeuser:{FAKE_INDEX_SECRET}@git.invalid/p.git"}}
+private-pkg = {git = "https://fakeuser:FAKE-NOT-A-SECRET-index-9e0b@git.invalid/p.git"}
 
 [dev-packages]
 pytest = ">=8"
@@ -292,7 +302,7 @@ NOTEBOOK = json.dumps(
                 "source": [
                     "import MetaTrader5 as mt5\n",
                     "mt5.initialize()\n",
-                    'api_key = "' + MARKER + '-notebook-aa01"\n',
+                    'api_key = "FAKE-NOT-A-SECRET-notebook-aa01"\n',
                 ],
             }
         ],
@@ -303,11 +313,11 @@ NOTEBOOK = json.dumps(
     indent=1,
 )
 
-TASK_XML = f"""<?xml version="1.0"?>
+TASK_XML = """<?xml version="1.0"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <!-- SYNTHETIC FIXTURE -->
   <Actions><Exec>
-    <Command>python.exe</Command><Arguments>run_bot.py --password {MARKER}-taskxml</Arguments>
+    <Command>python.exe</Command><Arguments>run_bot.py --password FAKE-NOT-A-SECRET-taskxml</Arguments>
   </Exec></Actions>
 </Task>
 """
@@ -322,8 +332,11 @@ SERVICE_XML = """<service>
 TICKS_CSV = "time,bid,ask,flags\n" + "".join(
     f"2024-01-02 00:00:0{index},2063.1{index},2063.4{index},{FAKE_ROW_VALUE}\n" for index in range(5)
 )
+# U+0A05 followed by U+0100 is 05 0A 00 01 in UTF-16-LE: the bytes of a line feed (0A 00), but not on
+# a character boundary.  Such a pair must not be counted as a line.
 UTF16_CSV = (
-    "\ufeffTime,Bid,Ask\r\n" + "".join(f"0{index}:00,1.1,{FAKE_ROW_VALUE}\r\n" for index in range(3))
+    "\ufeffTime,Bid,Ask\r\n"
+    + "".join(f"0{index}:00,1.1,\u0a05\u0100{FAKE_ROW_VALUE}\r\n" for index in range(3))
 ).encode("utf-16-le")
 BIG_UTF16_ROWS = 700
 BIG_UTF16_CSV = (
@@ -354,12 +367,12 @@ VISIBLE: dict[str, bytes] = {
     "package.json": PACKAGE_JSON.encode(),
     "Pipfile": PIPFILE.encode(),
     "pytest.ini": b"[pytest]\n# SYNTHETIC FIXTURE\n",
-    ".env": f"# SYNTHETIC FIXTURE\nMT5_LOGIN={FAKE_ACCOUNT}\nMT5_PASSWORD={FAKE_ENV_SECRET}\n".encode(),
-    ".env.production": f"TELEGRAM_BOT_TOKEN={FAKE_ENV_SECRET}\n".encode(),
+    ".env": b"# SYNTHETIC FIXTURE\nMT5_LOGIN=99000111222333\nMT5_PASSWORD=FAKE-NOT-A-SECRET-env-7c1d\n",
+    ".env.production": b"TELEGRAM_BOT_TOKEN=FAKE-NOT-A-SECRET-env-7c1d\n",
     ".gitignore": b"# SYNTHETIC FIXTURE\n.env\n",
     ".python-version": b"3.11.9\n",
     "runtime.txt": b"python-3.11.9\n",
-    "latin1_notes.txt": ("# SYNTHETIC FIXTURE caf\xe9\npassword = '" + FAKE_CONFIG_SECRET + "'\n").encode(
+    "latin1_notes.txt": "# SYNTHETIC FIXTURE caf\xe9\npassword = 'FAKE-NOT-A-SECRET-config-52aa'\n".encode(
         "latin-1"
     ),
     "engines/silver_bullet.py": SILVER_BULLET.encode(),
@@ -378,7 +391,7 @@ VISIBLE: dict[str, bytes] = {
     "data/headerless.csv": b"2024.01.02 00:00:01,2063.11,2063.45\n2024.01.02 00:00:02,2063.12,2063.46\n",
     "data/utf16_export.csv": UTF16_CSV,
     "data/big_utf16.csv": BIG_UTF16_CSV,
-    "data/history.sqlite": b"SQLite format 3\x00" + (MARKER + "-sqlite-row").encode() + b"\x00" * 100,
+    "data/history.sqlite": b"SQLite format 3\x00FAKE-NOT-A-SECRET-sqlite-row" + b"\x00" * 100,
     "data/cache.parquet": b"PAR1" + bytes(range(200)) + b"PAR1",
     "models/model_lgb.txt": b"tree\nversion=v3\nSYNTHETIC FIXTURE\n",
     "models/classifier.pkl": b"\x80\x04SYNTHETIC FIXTURE\x00.",
@@ -391,10 +404,12 @@ VISIBLE: dict[str, bytes] = {
     "deploy/task_export.xml": TASK_XML.encode(),
     "deploy/winsw.xml": SERVICE_XML.encode(),
     "secrets/id_rsa": (
-        "-----BEGIN OPENSSH PRIVATE KEY-----\n" + FAKE_KEY_BODY + "\n-----END OPENSSH PRIVATE KEY-----\n"
+        "-----BEGIN OPENSSH "
+        + "PRIVATE KEY-----\nFAKE-NOT-A-SECRET-keybody-1a2b\n-----END OPENSSH "
+        + "PRIVATE KEY-----\n"
     ).encode(),
-    "secrets/accounts.json": json.dumps({"login": FAKE_ACCOUNT, "password": FAKE_CONFIG_SECRET}).encode(),
-    "secrets/prod.csv": f"user,password\nfakeuser,{FAKE_CONFIG_SECRET}\n".encode(),
+    "secrets/accounts.json": b'{"login": "99000111222333", "password": "FAKE-NOT-A-SECRET-config-52aa"}',
+    "secrets/prod.csv": b"user,value\nfakeuser,FAKE-NOT-A-SECRET-config-52aa\n",
     "keys/api_token.txt": (FAKE_KEY_BODY + "\n").encode(),
     "mt5_terminal/terminal64.exe": b"MZ\x00SYNTHETIC FIXTURE - not an executable\x00",
     "mt5_terminal/MQL5/Experts/GoldEA.ex5": b"EX5\x00SYNTHETIC FIXTURE\x00",
@@ -402,14 +417,16 @@ VISIBLE: dict[str, bytes] = {
     "baseline_round1/results.json": b'{"note": "SYNTHETIC FIXTURE", "trades": 0}\n',
     "vendor/nested_repo/lib.py": b"# SYNTHETIC FIXTURE\n",
     "binary_source.py": b"# SYNTHETIC FIXTURE\x00\nimport MetaTrader5\norder_send(1)\n",
+    # the NUL byte lies beyond the first kilobyte but inside the 8 KiB that decide "binary"
+    "engines/late_binary.py": b"# SYNTHETIC FIXTURE\n" + b"value = 1\n" * 300 + b"\x00order_send(1)\n",
 }
 
 #: files inside directories that must be summarised, never listed, hashed or scanned.
 EXCLUDED: dict[str, bytes] = {
     "venv/pyvenv.cfg": b"home = /fake/python\nversion = 3.11.9\ninclude-system-site-packages = false\n",
     "venv/lib/site-packages/leak.py": (
-        'import MetaTrader5\nPASSWORD = "' + FAKE_CONFIG_SECRET + '"\norder_send(1)\n'
-    ).encode(),
+        b'import MetaTrader5\nPASSWORD = "FAKE-NOT-A-SECRET-config-52aa"\norder_send(1)\n'
+    ),
     "custom_runtime/pyvenv.cfg": b"home = /fake/python\nversion_info = 3.12.4.final.0\n",
     "custom_runtime/Lib/thing.py": b"import MetaTrader5\n",
     "__pycache__/run_bot.cpython-311.pyc": b"\x00\x01\x02SYNTHETIC FIXTURE",
@@ -417,8 +434,8 @@ EXCLUDED: dict[str, bytes] = {
     ".git/HEAD": b"ref: refs/heads/main\n",
     ".git/refs/heads/main": (FAKE_COMMIT + "\n").encode(),
     ".git/config": (
-        '[remote "origin"]\n\turl = https://fakeuser:' + FAKE_INDEX_SECRET + "@git.invalid/repo.git\n"
-    ).encode(),
+        b'[remote "origin"]\n\turl = https://fakeuser:FAKE-NOT-A-SECRET-index-9e0b@git.invalid/repo.git\n'
+    ),
     ".git/worktrees/wt-session-01/HEAD": b"ref: refs/heads/session-01\n",
     "vendor/nested_repo/.git/HEAD": (FAKE_DETACHED_COMMIT + "\n").encode(),
     "vendor/packed_repo/.git/HEAD": b"ref: refs/heads/dev\n",
@@ -913,6 +930,7 @@ def test_broker_interface_locations(audited: Audited) -> None:
         path for path in scanned_paths if path.startswith(("venv/", "custom_runtime/", "node_modules/"))
     }
     assert "binary_source.py" not in scanned_paths
+    assert "engines/late_binary.py" not in scanned_paths
     assert broker["mql_files"] == {
         ".ex5": {
             "files": 2,
@@ -1197,7 +1215,7 @@ def test_excluded_directories_are_summarised_not_listed(audited: Audited) -> Non
     assert section["unreadable_count"] == 0
     assert section["changed_while_read"] == []
     assert section["truncated_lists"] == {}
-    assert section["scan_skipped_binary_content"] == ["binary_source.py"]
+    assert section["scan_skipped_binary_content"] == ["binary_source.py", "engines/late_binary.py"]
     assert section["caps"]["max_hash_bytes"] is None
 
 
@@ -1241,7 +1259,7 @@ def test_fake_secrets_appear_in_no_output(audited: Audited) -> None:
     assert len(blobs) == 6
     # the planted values really are in the audited tree (otherwise this test would prove nothing)
     tree_bytes = b"".join(VISIBLE.values()) + b"".join(EXCLUDED.values())
-    for value in (MARKER, FAKE_ACCOUNT, FAKE_ROW_VALUE, FAKE_ENV_SECRET, FAKE_KEY_BODY):
+    for value in (MARKER, FAKE_ACCOUNT, FAKE_ROW_VALUE, *ALL_FAKE_SECRETS):
         assert value.encode() in tree_bytes
     assert FAKE_MQ5_SECRET.encode("utf-16-le") in tree_bytes
     for name, blob in blobs.items():
@@ -1670,6 +1688,21 @@ def test_non_empty_or_non_directory_output_is_refused(tree: Path, tmp_path: Path
         ["unknown-command"],
         [],
     ],
+    ids=[
+        "audit-missing-root",
+        "audit-root-is-a-file",
+        "audit-without-out",
+        "audit-negative-max-hash-bytes",
+        "audit-negative-max-scan-bytes",
+        "audit-unknown-option",
+        "manifest-out-inside-root",
+        "manifest-out-exists",
+        "manifest-missing-root",
+        "compare-missing-file",
+        "compare-not-a-manifest",
+        "unknown-command",
+        "no-command",
+    ],
 )
 def test_refused_arguments_exit_2_and_change_nothing(tree: Path, tmp_path: Path, argv: list[str]) -> None:
     (tmp_path / "a_file").write_text("not a manifest\n")
@@ -1745,6 +1778,13 @@ def test_two_runs_over_the_same_tree_are_identical(tree: Path, tmp_path: Path) -
     assert run_audit(tree, first, "--count-rows")[0] == 0
     assert run_audit(tree, second, "--count-rows")[0] == 0
     assert (first / "manifest.jsonl").read_bytes() == (second / "manifest.jsonl").read_bytes()
+    # processes.json is only written on request
+    assert sorted(path.name for path in first.iterdir()) == [
+        "audit_log.txt",
+        "inventory.json",
+        "manifest.jsonl",
+    ]
+    assert "processes.json: not requested" in (first / "audit_log.txt").read_text(encoding="utf-8")
     one, two = load_inventory(first), load_inventory(second)
     assert one["tool"]["argv"] != two["tool"]["argv"]  # the --out value differs
     assert set(one["run"]) == {
@@ -1957,7 +1997,9 @@ def test_hash_sensitive_hashes_and_scans_but_still_emits_no_secret(tree: Path, t
     found = {(item["path"], item["rule"]) for item in inventory["credential_scan"]["findings"]}
     assert ("secrets/accounts.json", "credential_assignment_literal") in found
     files = {item["path"]: item for item in inventory["data"]["files"]}
-    assert "columns" not in files["secrets/prod.csv"]  # nothing is extracted from a sensitive file
+    # nothing is extracted from a sensitive file, although its first line looks like column names
+    assert VISIBLE["secrets/prod.csv"].startswith(b"user,value\n")
+    assert set(files["secrets/prod.csv"]) == {"path", "size", "mtime_ns", "mtime_utc"}
     for blob in [*(path.read_bytes() for path in out.iterdir()), stdout.encode(), stderr.encode()]:
         for value in FORBIDDEN_OUTPUT_STRINGS[:3]:
             assert value.encode() not in blob
@@ -2073,14 +2115,52 @@ def test_trigger_prefilter_never_changes_the_scan_result() -> None:
         *audit.XML_RULES,
     )
     assert {rule.name for rule in rules} == set(audit._TRIGGERS)
-    variants = (
-        "import MetaTrader5\nMT5.INITIALIZE()\nMt5.Login(12345)\nZMQ\nPyZMQ\nDARWINEX\nDwX_x\ncAlgo\n"
-        "QuickFIX\nFIX.4.4\nfix API\nOANDA\nwss://host.invalid\nWS://host.invalid\nTeleBot\nSMTP_SSL(\nSendMail(\n"
-        "DiscordApp\nWSAStartup\nSystem.Net.Sockets\nimport aiohttp\nurllib.request\nWebRequest(\n"
-        "PASSWORD = 'x'\nApi-Key: 'x'\nAPIKEY = 'x'\nAccount = 12345678\nPWD='x'\n"
-        "Authorization: Bearer abcdefgh1234\n-----BEGIN RSA PRIVATE KEY-----\nftp://u:p@host.invalid/x\n"
-        "IBAPI\nib_async\ncopy_ticks_range(\nOrderSendAsync(\nCTrade t;\ninitialize(login=1)\ntoken: abc\n"
-        "secret=abc\nexport LOGIN=abc\n<service><executable>\nunittest.TestCase\nimport ccxt\n"
+    variants = "\n".join(
+        [
+            "import MetaTrader5",
+            "MT5.INITIALIZE()",
+            "Mt5.Login(12345)",
+            "ZMQ",
+            "PyZMQ",
+            "DARWINEX",
+            "DwX_x",
+            "cAlgo",
+            "QuickFIX",
+            "FIX.4.4",
+            "fix API",
+            "OANDA",
+            "wss://host.invalid",
+            "WS://host.invalid",
+            "TeleBot",
+            "SMTP_SSL(",
+            "SendMail(",
+            "DiscordApp",
+            "WSAStartup",
+            "System.Net.Sockets",
+            "import aiohttp",
+            "urllib.request",
+            "WebRequest(",
+            "PASSWORD = 'FAKE-NOT-A-SECRET'",
+            "Api-Key: 'FAKE-NOT-A-SECRET'",
+            "APIKEY = 'FAKE-NOT-A-SECRET'",
+            "Account = 12345678",
+            "PWD='FAKE-NOT-A-SECRET'",
+            "Authorization: Bearer FAKE-NOT-A-SECRET-0000",
+            "-----BEGIN RSA " + "PRIVATE KEY-----",
+            "ftp://fakeuser:FAKE-NOT-A-SECRET@host.invalid/x",
+            "IBAPI",
+            "ib_async",
+            "copy_ticks_range(",
+            "OrderSendAsync(",
+            "CTrade t;",
+            "initialize(login=1)",
+            "token: FAKE-NOT-A-SECRET",
+            "secret=FAKE-NOT-A-SECRET",
+            "export LOGIN=FAKE-NOT-A-SECRET",
+            "<service><executable>",
+            "unittest.TestCase",
+            "import ccxt",
+        ]
     )
     corpus = [
         *(data.decode("utf-8", "replace") for data in VISIBLE.values()),
@@ -2180,6 +2260,21 @@ def test_csv_headers_can_be_switched_off_and_rows_are_optional(tree: Path, tmp_p
         (b"\x00\x01\x02binary\n", ".csv", None),
         (b"\n1,2\n", ".csv", None),
     ],
+    ids=[
+        "plain",
+        "unnamed-index-column",
+        "quoted-names-with-spaces",
+        "utf8-bom-pipe",
+        "non-ascii-names-semicolon",
+        "tsv",
+        "data-row",
+        "mail-address",
+        "long-number",
+        "url",
+        "sensitive-word",
+        "binary",
+        "empty-first-line",
+    ],
 )
 def test_header_is_only_reported_when_it_looks_like_column_names(
     first_line: bytes, extension: str, expected: list[str] | None
@@ -2220,6 +2315,22 @@ def test_header_longer_than_the_limit_is_truncated_to_whole_column_names() -> No
         ("-e .", "options"),
         ("./local/path/package", "unparsed"),
         ("FAKE NOT A REQUIREMENT", "unparsed"),
+    ],
+    ids=[
+        "pinned",
+        "range-with-spaces",
+        "extras",
+        "inline-comment",
+        "hash-option",
+        "direct-url",
+        "index-url-with-credentials",
+        "vcs-url",
+        "sensitive-word-in-name",
+        "sensitive-word-in-comment",
+        "find-links-option",
+        "editable-option",
+        "local-path",
+        "free-text",
     ],
 )
 def test_requirement_lines_are_reduced_to_name_and_specifier(
@@ -2352,6 +2463,7 @@ def test_files_are_streamed_in_chunks(tree: Path, tmp_path: Path, monkeypatch: p
     assert run_audit(tree, reference, "--count-rows", "--hash-sensitive")[0] == 0
     assert len(BIG_UTF16_CSV) > 4 * 8192
     assert len(BIG_MODULE) > 8192
+    assert 1001 < VISIBLE["engines/late_binary.py"].index(b"\x00") < 8192
     monkeypatch.setattr(audit, "_CHUNK_BYTES", 1001)  # odd on purpose: UTF-16 units straddle chunk borders
     small = tmp_path / "small_chunks"
     assert run_audit(tree, small, "--count-rows", "--hash-sensitive")[0] == 0
@@ -2506,9 +2618,9 @@ SCHTASKS_HEADER = [
 ]
 GOLD_BOT_COMMAND = (
     '"C:\\Python311\\python.exe" D:\\ftmo_eurusd\\run_bot.py'
-    + f" --login {FAKE_ACCOUNT} --password {FAKE_TASK_ARGUMENT}"
+    + " --login 99000111222333 --password FAKE-NOT-A-SECRET-taskarg-e1e1"
 )
-UPDATER_COMMAND = f"C:\\Program Files\\Fake App\\updater.exe /silent /apikey={FAKE_TASK_ARGUMENT}"
+UPDATER_COMMAND = "C:\\Program Files\\Fake App\\updater.exe /silent /apikey=FAKE-NOT-A-SECRET-taskarg-e1e1"
 
 
 def schtasks_row(name: str, command: str, schedule_type: str = "Daily") -> list[str]:
@@ -2592,6 +2704,21 @@ EXPECTED_TASKS = [
         ("COM handler", "COM <redacted>"),
         ("", ""),
     ],
+    ids=[
+        "quoted-python-with-arguments",
+        "unquoted-path-with-spaces",
+        "quoted-without-arguments",
+        "batch-file",
+        "batch-file-with-arguments",
+        "bare-command-with-script",
+        "unterminated-quote",
+        "unterminated-quote-with-spaces",
+        "switch-before-extension",
+        "option-before-second-path",
+        "bare-python-with-script",
+        "com-handler",
+        "empty",
+    ],
 )
 def test_scheduled_task_arguments_are_redacted(command: str, expected: str) -> None:
     assert audit._redact_task_command(command) == expected
@@ -2659,6 +2786,17 @@ def test_schtasks_with_translated_column_names_is_read_by_position() -> None:
         ("C:\\bot\\run.bat", "<withheld>"),
         ("fakeuser@host.invalid", "<withheld>"),
     ],
+    ids=[
+        "status",
+        "date-with-spaces",
+        "us-date",
+        "not-available",
+        "translated-status",
+        "command-line",
+        "option-with-value",
+        "path",
+        "mail-address",
+    ],
 )
 def test_scheduled_task_status_and_time_fields_never_carry_commands(value: str, expected: str) -> None:
     assert audit._short_field(value) == expected
@@ -2678,6 +2816,8 @@ class FakeRunner:
             raise outcome
         if isinstance(outcome, int):
             return subprocess.CompletedProcess(args, outcome, stdout=b"", stderr=b"ERROR: access denied")
+        if isinstance(outcome, tuple):
+            return subprocess.CompletedProcess(args, outcome[0], stdout=outcome[1].encode(), stderr=b"ERROR")
         return subprocess.CompletedProcess(args, 0, stdout=outcome.encode(), stderr=b"")
 
 
@@ -2737,7 +2877,16 @@ def test_failed_process_queries_are_recorded_and_the_other_query_still_runs(
     assert result["processes"]["status"] == "ok"
     assert result["scheduled_tasks"]["status"] == "error"
     assert result["scheduled_tasks"]["error"] == "ExitCode1"
-    assert "tasks" not in result["scheduled_tasks"]
+    assert result["scheduled_tasks"]["tasks"] == []
+
+    # schtasks reports an error for one damaged task but still prints the others: keep them, say so
+    runner = FakeRunner({"tasklist.exe": (1, ""), "schtasks.exe": (1, schtasks_csv(SCHTASKS_HEADER))})
+    monkeypatch.setattr(audit.subprocess, "run", runner)
+    result = audit._collect_processes_windows("D:\\ftmo_eurusd", audit._Guard())
+    assert result["processes"]["status"] == "error"
+    assert result["scheduled_tasks"]["status"] == "partial"
+    assert result["scheduled_tasks"]["error"] == "ExitCode1"
+    assert result["scheduled_tasks"]["tasks"] == EXPECTED_TASKS
 
     def missing_tool(name: str, root: str) -> str:
         raise FileNotFoundError(name)
@@ -2780,7 +2929,9 @@ def test_proc_scan_reads_names_and_memory_but_never_command_lines(tmp_path: Path
         (proc / pid).mkdir(parents=True)
         (proc / pid / "comm").write_text(comm)
         (proc / pid / "status").write_text(status)
-        (proc / pid / "cmdline").write_bytes(f"python\0run_bot.py\0--password\0{FAKE_TASK_ARGUMENT}".encode())
+        (proc / pid / "cmdline").write_bytes(
+            b"python\0run_bot.py\0--password\0FAKE-NOT-A-SECRET-taskarg-e1e1"
+        )
     (proc / "505").mkdir()  # a process that ended: no files left
     (proc / "self").mkdir()
     (proc / "meminfo").write_text("MemTotal: 1 kB\n")

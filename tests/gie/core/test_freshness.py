@@ -970,7 +970,7 @@ def test_a_clock_that_reports_replay_as_text_gets_no_future_tolerance() -> None:
 
 
 @pytest.mark.requirement("S00-ASG-23", "G03-12", "S00-ASG-24")
-@pytest.mark.parametrize("mode", ["PAPER", "LIVE", "", None], ids=repr)
+@pytest.mark.parametrize("mode", ["UNKNOWN", None], ids=repr)
 def test_a_clock_of_unknown_mode_gets_no_future_tolerance(mode: Any) -> None:
     """The tolerance exists for paper mode only, and unknown vocabulary is refused (section 5).
 

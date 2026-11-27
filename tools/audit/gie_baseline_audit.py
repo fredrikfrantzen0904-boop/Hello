@@ -2223,7 +2223,12 @@ def _attempt(errors: Dict[str, str], name: str, function: Any) -> Any:
 
 
 def _host_info(root_real: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-    """Return (stable host facts, volatile facts).  The host name is only reported as a hash."""
+    """Return (stable host facts, volatile facts).  The host name is only reported as a hash.
+
+    Called before the guard is activated: depending on the Python version, the standard library's
+    ``platform.platform()`` runs a helper to read the system version (``ver`` on Windows,
+    ``uname -p`` on POSIX).  That is the only process this tool can cause besides ``--processes``.
+    """
     errors: Dict[str, str] = {}
     node = _attempt(errors, "hostname", platform.node)
     usage = _attempt(errors, "disk", lambda: shutil.disk_usage(root_real))
@@ -2429,10 +2434,11 @@ def _windows_system_tool(name: str, root_real: str) -> str:
     return path
 
 
-def _query_status(completed: subprocess.CompletedProcess[bytes]) -> Dict[str, Any]:
-    if completed.returncode != 0:
-        return {"status": "error", "error": "ExitCode" + str(completed.returncode)}
-    return {"status": "ok", "error": None}
+def _query_status(returncode: int, rows: int) -> Dict[str, Any]:
+    """'ok', or - for a non-zero exit code - 'partial' when rows were still printed, else 'error'."""
+    if returncode == 0:
+        return {"status": "ok", "error": None}
+    return {"status": "partial" if rows else "error", "error": "ExitCode" + str(returncode)}
 
 
 def _collect_processes_windows(root_real: str, guard: _Guard) -> Dict[str, Any]:
@@ -2450,9 +2456,8 @@ def _collect_processes_windows(root_real: str, guard: _Guard) -> Dict[str, Any]:
             timeout=_TASKLIST_TIMEOUT_SECONDS,
             cwd=os.path.dirname(tasklist),
         )
-        processes.update(_query_status(completed))
-        if completed.returncode == 0:
-            processes.update(_parse_tasklist(_decode_console(completed.stdout)))
+        processes.update(_parse_tasklist(_decode_console(completed.stdout)))
+        processes.update(_query_status(completed.returncode, processes["total"]))
     except (OSError, subprocess.SubprocessError, ValueError) as exc:
         processes["error"] = type(exc).__name__
     try:
@@ -2467,9 +2472,8 @@ def _collect_processes_windows(root_real: str, guard: _Guard) -> Dict[str, Any]:
             timeout=_SCHTASKS_TIMEOUT_SECONDS,
             cwd=os.path.dirname(schtasks),
         )
-        tasks.update(_query_status(completed))
-        if completed.returncode == 0:
-            tasks.update(_parse_schtasks(_decode_console(completed.stdout), root_real))
+        tasks.update(_parse_schtasks(_decode_console(completed.stdout), root_real))
+        tasks.update(_query_status(completed.returncode, tasks["total"]))
     except (OSError, subprocess.SubprocessError, ValueError) as exc:
         tasks["error"] = type(exc).__name__
     return {"processes": processes, "scheduled_tasks": tasks}

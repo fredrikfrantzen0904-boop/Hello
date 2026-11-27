@@ -538,9 +538,9 @@ def test_artifact_location_is_a_plain_repository_relative_path(uri: str) -> None
     ],
 )
 def test_malformed_field_is_refused_with_its_path(field: str, value: object) -> None:
-    # The identifier is given explicitly so that the record itself (not the sample builder) refuses.
+    # Built from a valid record so that the record itself (not the sample builder) refuses.
     with pytest.raises(ContractValidationError) as excinfo:
-        samples.model_version(**{"model_version_id": samples.MODEL_ID, field: value})
+        dataclasses.replace(samples.model_version(), **{field: value})
     assert str(excinfo.value.details["path"]).startswith(field)
 
 

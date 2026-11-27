@@ -282,22 +282,22 @@ Specification: V1.0 (27 Nov 2026).
 |---|---|---|---|---|---|
 | M-DOC-01 | GIE / ENGINEERING SPECIFICATION / V1.0 ... GIE \| 27 Nov 2026 \| Paper / research only | all (S00-S12) | not_started | unverified | Note: Header (before '...') and footer (after '...') printed on every page of the master specification and of every brief; the '...' joins the two and is not part of the source. Specification version V1.0; label 'Paper / research only'. |
 
-## 00-12 briefs (identical text in every session brief) - Common brief clauses
+## 00_Project_Coordinator.pdf - Common brief clauses
 
 | id | requirement | sessions | status | review | contributions/notes |
 |---|---|---|---|---|---|
-| COM-01 | Open a dedicated Claude Code session and worktree. | all (S00-S12) | not_started | unverified | Note: Replaced for this project by the owner's launch directive (OWN-01, OWN-06): decision D-001, change request CR-001. |
-| COM-02 | Read MASTER.pdf or its extracted text. | all (S00-S12) | not_started | unverified |  |
-| COM-03 | Paths are proposed until coordinator approves actual repository layout. | all (S00-S12) | not_started | unverified |  |
-| COM-04 | Integrated prompt - paste or attach to Claude. | all (S00-S12) | not_started | unverified | Note: The prompt text is identical to the master 'Authority and scope' clause in all 13 briefs; its atoms are M-AUTH-01 .. M-AUTH-26. |
-| COM-05 | Apply the master requirements G01-G10 relevant to this subsystem. | all (S00-S12) | not_started | unverified |  |
-| COM-06 | Do not redefine shared contracts unilaterally. | all (S00-S12) | not_started | unverified |  |
-| COM-07 | If a dependency is unavailable, use explicitly labeled test fixtures only. | all (S00-S12) | not_started | unverified |  |
-| COM-08 | Do not claim integration complete. | all (S00-S12) | not_started | unverified | Note: Applies when a dependency is unavailable and labelled fixtures are used (COM-07). |
-| COM-09 | Submit the review package and await owner approval before merging. | all (S00-S12) | not_started | unverified |  |
-| COM-10 | Report failed tests explicitly. | all (S00-S12) | not_started | unverified |  |
-| COM-11 | No live trading. | all (S00-S12) | not_started | unverified | Note: Same rule under other ids: M-AUTH-19, G08-10, M-DIR-07, OWN-14, COM-11. |
-| COM-12 | Report unimplemented requirements explicitly. | all (S00-S12) | not_started | unverified | Note: Split from 'Report failed tests and unimplemented requirements explicitly'. |
+| COM-01 | Open a dedicated Claude Code session and worktree. | all (S00-S12) | not_started | unverified | Note: Replaced for this project by the owner's launch directive (OWN-01, OWN-06): decision D-001, change request CR-001. Identical text in every session brief (00-12); the source names the first. |
+| COM-02 | Read MASTER.pdf or its extracted text. | all (S00-S12) | not_started | unverified | Note: Identical text in every session brief (00-12); the source names the first. |
+| COM-03 | Paths are proposed until coordinator approves actual repository layout. | all (S00-S12) | not_started | unverified | Note: Identical text in every session brief (00-12); the source names the first. |
+| COM-04 | Integrated prompt - paste or attach to Claude. | all (S00-S12) | not_started | unverified | Note: The prompt text is identical to the master 'Authority and scope' clause in all 13 briefs; its atoms are M-AUTH-01 .. M-AUTH-26. Identical text in every session brief (00-12); the source names the first. |
+| COM-05 | Apply the master requirements G01-G10 relevant to this subsystem. | all (S00-S12) | not_started | unverified | Note: Identical text in every session brief (00-12); the source names the first. |
+| COM-06 | Do not redefine shared contracts unilaterally. | all (S00-S12) | not_started | unverified | Note: Identical text in every session brief (00-12); the source names the first. |
+| COM-07 | If a dependency is unavailable, use explicitly labeled test fixtures only. | all (S00-S12) | not_started | unverified | Note: Identical text in every session brief (00-12); the source names the first. |
+| COM-08 | Do not claim integration complete. | all (S00-S12) | not_started | unverified | Note: Applies when a dependency is unavailable and labelled fixtures are used (COM-07). Identical text in every session brief (00-12); the source names the first. |
+| COM-09 | Submit the review package and await owner approval before merging. | all (S00-S12) | not_started | unverified | Note: Identical text in every session brief (00-12); the source names the first. |
+| COM-10 | Report failed tests explicitly. | all (S00-S12) | not_started | unverified | Note: Identical text in every session brief (00-12); the source names the first. |
+| COM-11 | No live trading. | all (S00-S12) | not_started | unverified | Note: Same rule under other ids: M-AUTH-19, G08-10, M-DIR-07, OWN-14, COM-11. Identical text in every session brief (00-12); the source names the first. |
+| COM-12 | Report unimplemented requirements explicitly. | all (S00-S12) | not_started | unverified | Note: Split from 'Report failed tests and unimplemented requirements explicitly'. Identical text in every session brief (00-12); the source names the first. |
 
 ## specifications/source/OWNER_DIRECTIVE_2026-11-27.md - Owner launch instructions
 

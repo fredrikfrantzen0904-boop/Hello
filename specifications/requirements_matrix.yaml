@@ -4,9 +4,11 @@ description: Atomised requirements extracted from specifications/source/*.pdf (t
   and from the owner's launch directive. This file is the single source of truth; specifications/REQUIREMENTS_MATRIX.md
   is rendered from it by tools/gie_registers.py. Never delete a requirement; change status only with evidence.
 conventions: 'id: stable, never renumbered, never deleted; atoms split off later are appended. text: the owner''s
-  words (a fragment of source_clause). source_clause: the verbatim paragraph of the specification the atom was taken
-  from. notes: context added by the coordinator, interpretations, cross-references and open items. sessions: sessions
-  that must contribute or comply. contributions: what each session delivered, with status and evidence paths.'
+  words only - every word occurs in source_clause (a few function words may connect them). source: the specification
+  document; source_clause: the verbatim paragraph the atom was taken from - it occurs word for word in the extracted
+  text of the source ('' ... '' marks an omission between two verbatim parts). notes: context added by the coordinator,
+  interpretations, cross-references and open items. sessions: sessions that must contribute or comply. contributions:
+  what each session delivered, with status and evidence paths.'
 specification:
   version: V1.0 (27 Nov 2026)
   note: MASTER.pdf is the copy inside GIE_Project_PDFs.zip; MASTER_owner_upload.pdf is the separately uploaded MASTER_1.pdf.
@@ -2691,44 +2693,44 @@ requirements:
     every brief; the '...' joins the two and is not part of the source. Specification version V1.0; label 'Paper
     / research only'.
 - id: COM-01
-  source: 00-12 briefs (identical text in every session brief)
+  source: 00_Project_Coordinator.pdf
   section: Common brief clauses
   kind: governance
   text: Open a dedicated Claude Code session and worktree.
-  source_clause: Open a dedicated Claude Code session and worktree. Read MASTER.pdf or its extracted text. [Dependencies
-    and owned scope differ per brief.] Paths are proposed until coordinator approves actual repository layout.
+  source_clause: Open a dedicated Claude Code session and worktree. Read MASTER.pdf or its extracted text. ... Paths
+    are proposed until coordinator approves actual repository layout.
   sessions: [S00, S01, S02, S03, S04, S05, S06, S07, S08, S09, S10, S11, S12]
   status: not_started
   review_status: unverified
   contributions: []
   notes: 'Replaced for this project by the owner''s launch directive (OWN-01, OWN-06): decision D-001, change request
-    CR-001.'
+    CR-001. Identical text in every session brief (00-12); the source names the first.'
 - id: COM-02
-  source: 00-12 briefs (identical text in every session brief)
+  source: 00_Project_Coordinator.pdf
   section: Common brief clauses
   kind: governance
   text: Read MASTER.pdf or its extracted text.
-  source_clause: Open a dedicated Claude Code session and worktree. Read MASTER.pdf or its extracted text. [Dependencies
-    and owned scope differ per brief.] Paths are proposed until coordinator approves actual repository layout.
+  source_clause: Open a dedicated Claude Code session and worktree. Read MASTER.pdf or its extracted text. ... Paths
+    are proposed until coordinator approves actual repository layout.
   sessions: [S00, S01, S02, S03, S04, S05, S06, S07, S08, S09, S10, S11, S12]
   status: not_started
   review_status: unverified
   contributions: []
-  notes: ''
+  notes: Identical text in every session brief (00-12); the source names the first.
 - id: COM-03
-  source: 00-12 briefs (identical text in every session brief)
+  source: 00_Project_Coordinator.pdf
   section: Common brief clauses
   kind: governance
   text: Paths are proposed until coordinator approves actual repository layout.
-  source_clause: Open a dedicated Claude Code session and worktree. Read MASTER.pdf or its extracted text. [Dependencies
-    and owned scope differ per brief.] Paths are proposed until coordinator approves actual repository layout.
+  source_clause: Open a dedicated Claude Code session and worktree. Read MASTER.pdf or its extracted text. ... Paths
+    are proposed until coordinator approves actual repository layout.
   sessions: [S00, S01, S02, S03, S04, S05, S06, S07, S08, S09, S10, S11, S12]
   status: not_started
   review_status: unverified
   contributions: []
-  notes: ''
+  notes: Identical text in every session brief (00-12); the source names the first.
 - id: COM-04
-  source: 00-12 briefs (identical text in every session brief)
+  source: 00_Project_Coordinator.pdf
   section: Common brief clauses
   kind: governance
   text: Integrated prompt - paste or attach to Claude.
@@ -2746,9 +2748,9 @@ requirements:
   review_status: unverified
   contributions: []
   notes: The prompt text is identical to the master 'Authority and scope' clause in all 13 briefs; its atoms are
-    M-AUTH-01 .. M-AUTH-26.
+    M-AUTH-01 .. M-AUTH-26. Identical text in every session brief (00-12); the source names the first.
 - id: COM-05
-  source: 00-12 briefs (identical text in every session brief)
+  source: 00_Project_Coordinator.pdf
   section: Common brief clauses
   kind: governance
   text: Apply the master requirements G01-G10 relevant to this subsystem.
@@ -2759,9 +2761,9 @@ requirements:
   status: not_started
   review_status: unverified
   contributions: []
-  notes: ''
+  notes: Identical text in every session brief (00-12); the source names the first.
 - id: COM-06
-  source: 00-12 briefs (identical text in every session brief)
+  source: 00_Project_Coordinator.pdf
   section: Common brief clauses
   kind: governance
   text: Do not redefine shared contracts unilaterally.
@@ -2772,9 +2774,9 @@ requirements:
   status: not_started
   review_status: unverified
   contributions: []
-  notes: ''
+  notes: Identical text in every session brief (00-12); the source names the first.
 - id: COM-07
-  source: 00-12 briefs (identical text in every session brief)
+  source: 00_Project_Coordinator.pdf
   section: Common brief clauses
   kind: governance
   text: If a dependency is unavailable, use explicitly labeled test fixtures only.
@@ -2785,9 +2787,9 @@ requirements:
   status: not_started
   review_status: unverified
   contributions: []
-  notes: ''
+  notes: Identical text in every session brief (00-12); the source names the first.
 - id: COM-08
-  source: 00-12 briefs (identical text in every session brief)
+  source: 00_Project_Coordinator.pdf
   section: Common brief clauses
   kind: governance
   text: Do not claim integration complete.
@@ -2798,9 +2800,10 @@ requirements:
   status: not_started
   review_status: unverified
   contributions: []
-  notes: Applies when a dependency is unavailable and labelled fixtures are used (COM-07).
+  notes: Applies when a dependency is unavailable and labelled fixtures are used (COM-07). Identical text in every
+    session brief (00-12); the source names the first.
 - id: COM-09
-  source: 00-12 briefs (identical text in every session brief)
+  source: 00_Project_Coordinator.pdf
   section: Common brief clauses
   kind: governance
   text: Submit the review package and await owner approval before merging.
@@ -2810,9 +2813,9 @@ requirements:
   status: not_started
   review_status: unverified
   contributions: []
-  notes: ''
+  notes: Identical text in every session brief (00-12); the source names the first.
 - id: COM-10
-  source: 00-12 briefs (identical text in every session brief)
+  source: 00_Project_Coordinator.pdf
   section: Common brief clauses
   kind: governance
   text: Report failed tests explicitly.
@@ -2822,9 +2825,9 @@ requirements:
   status: not_started
   review_status: unverified
   contributions: []
-  notes: ''
+  notes: Identical text in every session brief (00-12); the source names the first.
 - id: COM-11
-  source: 00-12 briefs (identical text in every session brief)
+  source: 00_Project_Coordinator.pdf
   section: Common brief clauses
   kind: governance
   text: No live trading.
@@ -2834,9 +2837,10 @@ requirements:
   status: not_started
   review_status: unverified
   contributions: []
-  notes: 'Same rule under other ids: M-AUTH-19, G08-10, M-DIR-07, OWN-14, COM-11.'
+  notes: 'Same rule under other ids: M-AUTH-19, G08-10, M-DIR-07, OWN-14, COM-11. Identical text in every session
+    brief (00-12); the source names the first.'
 - id: COM-12
-  source: 00-12 briefs (identical text in every session brief)
+  source: 00_Project_Coordinator.pdf
   section: Common brief clauses
   kind: governance
   text: Report unimplemented requirements explicitly.
@@ -2846,7 +2850,8 @@ requirements:
   status: not_started
   review_status: unverified
   contributions: []
-  notes: Split from 'Report failed tests and unimplemented requirements explicitly'.
+  notes: Split from 'Report failed tests and unimplemented requirements explicitly'. Identical text in every session
+    brief (00-12); the source names the first.
 - id: OWN-01
   source: specifications/source/OWNER_DIRECTIVE_2026-11-27.md
   section: Owner launch instructions

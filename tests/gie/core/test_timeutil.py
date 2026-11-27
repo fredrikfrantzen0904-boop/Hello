@@ -14,6 +14,12 @@ The oracles below use only ``calendar`` and plain integer arithmetic in UTC (no 
 database), so they are independent of the code under test.  The 2026 boundary instants were
 additionally checked once with the operating system's ``date`` command.
 
+Revision 2 of the contracts (after the independent review) documents the limits of the range:
+the first (1970-01-01) and the last (2262-04-12) representable trading day begin respectively
+end outside ``0 .. 2**63-1``, so ``trading_day_bounds_ns`` clamps those two bounds to the range
+and every day returned by ``trading_day`` has bounds.  Days outside the range are not days of any
+instant; section 5 ("never repair input ... never clamped") applies to them.
+
 All instants are synthetic fixtures; none is market data.  Nothing here reads the wall clock.
 """
 
@@ -275,7 +281,7 @@ def test_days_of_a_year_are_contiguous_and_have_23_24_or_25_hours(year: int) -> 
 
 
 # =========================================================================== properties
-_EU_RULE_DAYS = st.dates(min_value=dt.date(1996, 1, 1), max_value=dt.date(2262, 4, 10))
+_EU_RULE_DAYS = st.dates(min_value=dt.date(1996, 1, 1), max_value=dt.date(2262, 4, 11))
 
 
 @pytest.mark.requirement("G05-10", "S00-ASG-21")
@@ -286,6 +292,7 @@ _EU_RULE_DAYS = st.dates(min_value=dt.date(1996, 1, 1), max_value=dt.date(2262, 
 @example(dt.date(2026, 10, 26))
 @example(dt.date(1996, 1, 1))
 @example(dt.date(2262, 4, 10))
+@example(dt.date(2262, 4, 11))  # the last day whose end is still an instant
 @example(dt.date(2038, 1, 19))
 @given(_EU_RULE_DAYS)
 def test_bounds_and_trading_day_agree_for_any_day(date: dt.date) -> None:
@@ -686,10 +693,180 @@ def test_range_error_can_be_journaled_in_canonical_form() -> None:
             assert strict_loads(canonical_dumps(journal_form)) == journal_form, (function.__name__, value)
 
 
-# =========================================================================== far-future labels
+# =========================================================================== limits of the instant range
+#: The first and the last trading day that contain an instant (``0`` and ``2**63-1``).
+FIRST_DAY = "1970-01-01"
+LAST_DAY = "2262-04-12"
+#: Prague midnight of the last day: 2262-04-12T00:00 CEST = 2262-04-11T22:00Z (summer time).
+LAST_DAY_START = _utc_ns(2262, 4, 11, 22)
+#: Prague midnight after the first day: 1970-01-02T00:00 CET = 1970-01-01T23:00Z (winter time).
+FIRST_DAY_END = _utc_ns(1970, 1, 1, 23)
+
+
+@pytest.mark.requirement("G05-10", "S00-ASG-21")
+def test_oracle_self_check_for_the_limits_of_the_range() -> None:
+    """Independent of the code under test: where ``0`` and ``2**63-1`` fall in Prague civil time."""
+    assert FIRST_DAY_END == 82_800 * SECOND
+    # 1970-01-01T00:00Z is 01:00 in Prague (CET): the first day began an hour before the epoch
+    assert _utc_ns(1970, 1, 1) - 1 * HOUR < 0 == _utc_ns(1970, 1, 1) < FIRST_DAY_END
+    # 2**63-1 ns is 2262-04-11T23:47:16.854775807Z, i.e. 01:47 on 2262-04-12 in Prague (CEST)
+    assert _utc_ns(2262, 4, 11, 23, 47, 16, 854_775_807) == INT64_MAX == MAX_TIME_NS
+    assert _expected_start_ns(dt.date(2262, 4, 12)) == LAST_DAY_START
+    assert LAST_DAY_START < INT64_MAX < LAST_DAY_START + 24 * HOUR
+    assert INT64_MAX - LAST_DAY_START == 1 * HOUR + 47 * 60 * SECOND + 16 * SECOND + 854_775_807
+
+
+@pytest.mark.requirement("G05-10", "S00-ASG-21")
+def test_the_first_and_the_last_instant_have_a_trading_day() -> None:
+    assert trading_day(0) == FIRST_DAY
+    assert trading_day(1) == FIRST_DAY
+    assert trading_day(FIRST_DAY_END - 1) == FIRST_DAY
+    assert trading_day(FIRST_DAY_END) == "1970-01-02"
+    assert trading_day(LAST_DAY_START - 1) == "2262-04-11"
+    assert trading_day(LAST_DAY_START) == LAST_DAY
+    assert trading_day(MAX_TIME_NS - 1) == LAST_DAY
+    assert trading_day(MAX_TIME_NS) == LAST_DAY
+
+
+@pytest.mark.requirement("G05-10", "S00-ASG-21")
+def test_bounds_of_the_first_representable_day_are_clamped_to_the_epoch() -> None:
+    """Prague midnight of 1970-01-01 is 1969-12-31T23:00Z, before the first instant."""
+    bounds = trading_day_bounds_ns(FIRST_DAY)
+    assert bounds == (0, FIRST_DAY_END)
+    assert type(bounds) is tuple
+    assert type(bounds[0]) is int
+    assert type(bounds[1]) is int
+    # only the start is clamped: the end is the real Prague midnight and the next day begins there
+    assert trading_day_bounds_ns("1970-01-02") == (FIRST_DAY_END, FIRST_DAY_END + 24 * HOUR)
+    assert trading_day(bounds[0]) == FIRST_DAY
+    assert trading_day(bounds[1] - 1) == FIRST_DAY
+    assert trading_day(bounds[1]) == "1970-01-02"
+
+
+@pytest.mark.requirement("G05-10", "S00-ASG-21")
+def test_bounds_of_the_last_representable_day_are_clamped_to_the_largest_instant() -> None:
+    """Prague midnight after 2262-04-12 is 2262-04-12T22:00Z, after the last instant."""
+    bounds = trading_day_bounds_ns(LAST_DAY)
+    assert bounds == (LAST_DAY_START, MAX_TIME_NS)
+    assert type(bounds[0]) is int
+    assert type(bounds[1]) is int
+    # only the end is clamped: the start is the real Prague midnight and the previous day ends there
+    assert trading_day_bounds_ns("2262-04-11") == (LAST_DAY_START - 24 * HOUR, LAST_DAY_START)
+    assert trading_day(bounds[0]) == LAST_DAY
+    assert trading_day(bounds[0] - 1) == "2262-04-11"
+    assert trading_day(bounds[1] - 1) == LAST_DAY
+
+
+@pytest.mark.requirement("G05-10", "S00-ASG-21")
+@pytest.mark.parametrize(
+    "time_ns",
+    [
+        0,
+        1,
+        FIRST_DAY_END - 1,
+        FIRST_DAY_END,
+        LAST_DAY_START - 1,
+        LAST_DAY_START,
+        MAX_TIME_NS - 1,
+        MAX_TIME_NS,
+    ],
+    ids=["0", "1", "first-day-end-1", "first-day-end", "last-day-start-1", "last-day-start", "max-1", "max"],
+)
+def test_every_day_returned_by_trading_day_has_bounds_that_are_instants(time_ns: int) -> None:
+    """The documented purpose of the clamp: no instant has a trading day without bounds."""
+    day = trading_day(time_ns)
+    start, end = trading_day_bounds_ns(day)
+    assert 0 <= start < end <= MAX_TIME_NS
+    assert start <= time_ns <= end
+    # both bounds are themselves valid instants for every other function of the module
+    assert iso_utc(start) <= iso_utc(end)
+    assert utc_datetime(start) <= utc_datetime(end)
+
+
+@pytest.mark.requirement("G05-10", "S00-ASG-21")
+@PROPERTY
+@example(0)
+@example(1)
+@example(FIRST_DAY_END - 1)
+@example(FIRST_DAY_END)
+@example(LAST_DAY_START - 1)
+@example(LAST_DAY_START)
+@example(MAX_TIME_NS - 1)
+@given(st.integers(min_value=0, max_value=MAX_TIME_NS - 1))
+def test_every_instant_lies_within_the_half_open_bounds_of_its_trading_day(time_ns: int) -> None:
+    """Also on the two clamped days (the very last instant is checked separately below)."""
+    day = trading_day(time_ns)
+    start, end = trading_day_bounds_ns(day)
+    assert 0 <= start <= time_ns < end <= MAX_TIME_NS
+    assert trading_day(start) == day
+    assert trading_day(end - 1) == day
+    if start > 0:
+        assert trading_day(start - 1) < day
+    if end < MAX_TIME_NS:
+        assert trading_day(end) > day
+    if start > 0 and end < MAX_TIME_NS:  # a day that is not clamped has its full length
+        assert end - start in (23 * HOUR, 24 * HOUR, 25 * HOUR)
+
+
+@pytest.mark.requirement("G05-10", "S00-ASG-21")
+def test_the_last_instant_lies_within_the_half_open_bounds_of_its_trading_day() -> None:
+    """ "An instant belongs to the day iff ``start_ns <= t < end_ns``" - for every instant.
+
+    ``trading_day(2**63-1)`` is 2262-04-12, so that instant must satisfy the documented membership
+    rule for the bounds of 2262-04-12 like any other instant of that day.
+    """
+    day = trading_day(MAX_TIME_NS)
+    assert day == LAST_DAY
+    start, end = trading_day_bounds_ns(day)
+    assert start <= MAX_TIME_NS < end
+
+
+@pytest.mark.requirement("G05-10", "S00-ASG-21")
+def test_days_next_to_the_limits_are_ordinary_days() -> None:
+    """The clamp affects the first and the last day only."""
+    for day, start in (
+        ("1970-01-02", _utc_ns(1970, 1, 1, 23)),
+        ("1970-01-03", _utc_ns(1970, 1, 2, 23)),
+        ("2262-04-10", _utc_ns(2262, 4, 9, 22)),
+        ("2262-04-11", _utc_ns(2262, 4, 10, 22)),
+    ):
+        assert trading_day_bounds_ns(day) == (start, start + 24 * HOUR)
+        assert trading_day(start) == day
+        assert trading_day(start + 24 * HOUR - 1) == day
+
+
+@pytest.mark.requirement("G05-10", "S00-ASG-21", "S00-ASG-24")
+@pytest.mark.parametrize(
+    "day",
+    [
+        "1969-12-31",  # the day before the first representable day
+        "1900-01-01",
+        "0001-01-01",
+        "2262-04-13",  # the day after the last representable day
+        "2300-01-01",
+        "9999-12-30",
+        "9999-12-31",
+    ],
+)
+def test_a_day_outside_the_instant_range_has_no_bounds(day: str) -> None:
+    """Such a label is a real calendar date but contains no instant: it is refused, not clamped.
+
+    Clamping "affects only the first and the last representable trading day"; for any other day
+    it would return an empty interval (``start == end``) as if it were a day - invalid input
+    repaired silently, which section 5 forbids ("never clamped, defaulted ...").
+    """
+    assert parse_trading_day(day).isoformat() == day  # positive control: the label itself is well formed
+    with pytest.raises(ContractValidationError) as excinfo:
+        trading_day_bounds_ns(day)
+    error = excinfo.value
+    assert error.code == "GIE.CONTRACT.INVALID"
+    assert error.details["value"] == day
+    assert strict_loads(canonical_dumps(error.to_dict())) == error.to_dict()
+
+
 @pytest.mark.requirement("G05-10", "S00-ASG-24")
-def test_bounds_of_the_last_calendar_day_fail_with_a_gie_error() -> None:
-    """``9999-12-31`` is a valid label whose end is not representable; that is a GieError."""
-    assert parse_trading_day("9999-12-31") == dt.date(9999, 12, 31)
-    with pytest.raises(ContractValidationError):
-        trading_day_bounds_ns("9999-12-31")
+@pytest.mark.parametrize("label", ["2262-02-30", "1970-00-01", "1970-1-1", "19700101", "", None, 0, 2262])
+def test_bounds_of_a_label_that_is_not_a_date_are_refused(label: Any) -> None:
+    with pytest.raises(ContractValidationError) as excinfo:
+        trading_day_bounds_ns(label)
+    assert excinfo.value.code == "GIE.CONTRACT.INVALID"

@@ -526,6 +526,39 @@ def test_capacity_must_be_at_least_one(capacity: int) -> None:
 
 
 @pytest.mark.requirement("G03-10", "G03-11")
+@pytest.mark.parametrize("capacity", [1.5, 2.0, float("inf"), "3", None, [3], Decimal(3)])
+def test_capacity_must_be_an_int(capacity: Any) -> None:
+    # SHARED_CONTRACTS.md section 5: invalid input is rejected with ContractValidationError and never
+    # coerced; all errors derive from GieError.  The capacity is a number of samples.  A value that
+    # is not an int must be refused when the recorder is built - not accepted and then fail with a
+    # TypeError inside ``record()`` (i.e. inside the ``finally`` of ``measure()``) once the window
+    # is full.
+    with pytest.raises(ContractValidationError):
+        LatencyRecorder("fixture", capacity=capacity)
+
+
+@pytest.mark.requirement("G03-10", "G03-11")
+def test_measure_reads_only_the_performance_counter(monkeypatch: pytest.MonkeyPatch) -> None:
+    # "Durations are measured with time.perf_counter_ns - never with the injected clock": neither
+    # the wall clock nor the monotonic clock is consulted.
+    def forbidden(*args: object, **kwargs: object) -> int:
+        raise AssertionError("latency must be measured with time.perf_counter_ns only")
+
+    recorder = LatencyRecorder("stage")
+    with monkeypatch.context() as patch:
+        for name in ("time", "time_ns", "monotonic", "monotonic_ns", "perf_counter", "process_time_ns"):
+            patch.setattr(time, name, forbidden)
+        patch.setattr(time, "perf_counter_ns", _FakeCounter([10, 25, 100, 1_100]))
+        with recorder.measure():
+            pass
+        with recorder.measure():
+            pass
+        summary = recorder.summary()
+    assert (summary.count, summary.min_ns, summary.max_ns, summary.mean_ns) == (2, 15, 1_000, 507.5)
+    assert (summary.p50_ns, summary.p95_ns, summary.p99_ns) == (15, 1_000, 1_000)
+
+
+@pytest.mark.requirement("G03-10", "G03-11")
 @_PROPERTY
 @given(
     samples=st.lists(st.integers(0, 2**62), min_size=1, max_size=60),

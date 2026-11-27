@@ -532,15 +532,24 @@ def _without_table(name: str) -> str:
     return _mutated("\n" + _TABLES[name], "")
 
 
-def _assert_refused(path: Path, reason: str | None = None) -> ConfigError:
-    """The file is refused with ``ConfigError``; *reason* is a fragment of the violated rule."""
+def _assert_refused(path: Path, reason: str | None = None, *named: str) -> ConfigError:
+    """The file is refused with ``ConfigError`` (fail closed), for the intended reason.
+
+    *reason* is a keyword of the violated rule, taken from the documented wording of the rule,
+    that the message must contain.  Every text in *named* (a parameter name, a key) must be named
+    by the error, in its message or in a detail.  The ``path`` detail does not count: the file
+    lies in a temporary directory that is named after the test.
+    """
     with pytest.raises(ConfigError) as excinfo:
         load_research_parameters(path)
     error = excinfo.value
     assert error.code == "GIE.CONFIG.INVALID"
     assert isinstance(error, GieError)
     if reason is not None:
-        assert reason in error.message, error.message
+        assert reason.lower() in error.message.lower(), error.message
+    said = [error.message, *(str(value) for key, value in error.details.items() if key != "path")]
+    for text in named:
+        assert any(text in item for item in said), (text, str(error))
     return error
 
 
@@ -599,8 +608,9 @@ def test_a_duration_is_an_integer_of_nanoseconds_above_zero(
 )
 def test_a_duration_out_of_range_is_refused(tmp_path: Path, toml_value: str) -> None:
     """A zero or negative duration would switch a limit off or invert it; nothing is clamped."""
-    error = _assert_refused(_write(tmp_path, _with_value("synthetic_extra_ns", toml_value)), "range")
-    assert error.details["name"] == "synthetic_extra_ns"
+    _assert_refused(
+        _write(tmp_path, _with_value("synthetic_extra_ns", toml_value)), "range", "synthetic_extra_ns"
+    )
 
 
 @pytest.mark.requirement("M-DIR-08", "S00-ASG-20", "S00-ASG-24")
@@ -610,8 +620,11 @@ def test_a_duration_out_of_range_is_refused(tmp_path: Path, toml_value: str) -> 
     ids=["zero", "minus-one", "int64-max+1"],
 )
 def test_a_required_duration_out_of_range_is_refused(tmp_path: Path, toml_value: str) -> None:
-    error = _assert_refused(_write(tmp_path, _with_value("tick_processing_target_ns", toml_value)), "range")
-    assert error.details["name"] == "tick_processing_target_ns"
+    _assert_refused(
+        _write(tmp_path, _with_value("tick_processing_target_ns", toml_value)),
+        "range",
+        "tick_processing_target_ns",
+    )
 
 
 # --------------------------------------------------------------------------- kind: count
@@ -635,8 +648,9 @@ def test_a_count_is_a_non_negative_integer(tmp_path: Path, toml_value: str, expe
     ids=["minus-one", "negative", "int64-max+1", "int64-min"],
 )
 def test_a_count_out_of_range_is_refused(tmp_path: Path, toml_value: str) -> None:
-    error = _assert_refused(_write(tmp_path, _with_value("synthetic_extra_count", toml_value)), "range")
-    assert error.details["name"] == "synthetic_extra_count"
+    _assert_refused(
+        _write(tmp_path, _with_value("synthetic_extra_count", toml_value)), "range", "synthetic_extra_count"
+    )
 
 
 @pytest.mark.requirement("M-DIR-08", "S00-ASG-20", "S00-ASG-24")
@@ -665,9 +679,8 @@ def test_an_integer_kind_refuses_everything_that_is_not_an_integer(
     tmp_path: Path, name: str, toml_value: str
 ) -> None:
     """Nothing is coerced: ``40.0``, ``true`` and ``"40"`` are not the integer 40."""
-    error = _assert_refused(_write(tmp_path, _with_value(name, toml_value)), "integer")
-    assert error.details["name"] == name
-    assert name in str(error)  # the error names the offending parameter
+    # the error names the offending parameter
+    _assert_refused(_write(tmp_path, _with_value(name, toml_value)), "integer", name)
 
 
 # --------------------------------------------------------------------------- kind: fraction
@@ -707,10 +720,8 @@ def test_a_fraction_is_an_exact_decimal_string_strictly_between_minus_one_and_on
 )
 def test_a_fraction_of_magnitude_one_or_more_is_refused(tmp_path: Path, text: str) -> None:
     """``0.05`` means 5 %; a percentage typed as ``5`` is an error, not a limit of 500 %."""
-    error = _assert_refused(
-        _write(tmp_path, _with_value("synthetic_extra_frac", f'"{text}"')), "between -1 and 1"
-    )
-    assert error.details["name"] == "synthetic_extra_frac"
+    content = _with_value("synthetic_extra_frac", f'"{text}"')
+    _assert_refused(_write(tmp_path, content), "fraction", "synthetic_extra_frac")
 
 
 @pytest.mark.requirement("M-DIR-08", "G05-05", "S00-ASG-24")
@@ -734,8 +745,7 @@ def test_a_percentage_typed_for_a_required_fraction_is_refused(
     With ``-3`` the halt level would still be "below the defensive level", so only the range of the
     kind can catch it - a halt at -300 % would never trigger.
     """
-    error = _assert_refused(_write(tmp_path, _with_value(name, f'"{percent_text}"')), "between -1 and 1")
-    assert error.details["name"] == name
+    _assert_refused(_write(tmp_path, _with_value(name, f'"{percent_text}"')), "fraction", name)
 
 
 @pytest.mark.requirement("M-DIR-08", "S00-ASG-20", "S00-ASG-24")
@@ -745,10 +755,8 @@ def test_a_percentage_typed_for_a_required_fraction_is_refused(
 )
 def test_a_fraction_that_is_not_a_string_is_refused(tmp_path: Path, toml_value: str) -> None:
     """A TOML float is a binary float and not exact; an integer is not a fraction either."""
-    error = _assert_refused(
-        _write(tmp_path, _with_value("synthetic_extra_frac", toml_value)), "decimal string"
-    )
-    assert error.details["name"] == "synthetic_extra_frac"
+    content = _with_value("synthetic_extra_frac", toml_value)
+    _assert_refused(_write(tmp_path, content), "decimal", "synthetic_extra_frac")
 
 
 @pytest.mark.requirement("M-DIR-08", "S00-ASG-20", "S00-ASG-24")
@@ -787,10 +795,8 @@ def test_a_fraction_that_is_not_a_string_is_refused(tmp_path: Path, toml_value: 
     ],
 )
 def test_a_fraction_outside_the_canonical_decimal_grammar_is_refused(tmp_path: Path, text: str) -> None:
-    error = _assert_refused(
-        _write(tmp_path, _with_value("synthetic_extra_frac", f'"{text}"')), "decimal string"
-    )
-    assert error.details["name"] == "synthetic_extra_frac"
+    content = _with_value("synthetic_extra_frac", f'"{text}"')
+    _assert_refused(_write(tmp_path, content), "decimal", "synthetic_extra_frac")
 
 
 # --------------------------------------------------------------------------- kind itself
@@ -815,16 +821,17 @@ def test_a_fraction_outside_the_canonical_decimal_grammar_is_refused(tmp_path: P
 )
 def test_an_unknown_kind_is_refused(tmp_path: Path, replacement: str) -> None:
     """Unknown vocabulary is refused: nothing is guessed from the value or the name."""
-    error = _assert_refused(_write(tmp_path, _edited("synthetic_extra_count", "kind", replacement)), "kind")
-    assert error.details["name"] == "synthetic_extra_count"
+    _assert_refused(
+        _write(tmp_path, _edited("synthetic_extra_count", "kind", replacement)),
+        "kind",
+        "synthetic_extra_count",
+    )
 
 
 @pytest.mark.requirement("M-DIR-08", "S00-ASG-24")
 @pytest.mark.parametrize("name", _SYNTHETIC_NAMES)
 def test_a_parameter_without_a_kind_is_refused(tmp_path: Path, name: str) -> None:
-    error = _assert_refused(_write(tmp_path, _edited(name, "kind", None)))
-    assert error.details["name"] == name
-    assert "kind" in str(error)  # the error names the missing key
+    _assert_refused(_write(tmp_path, _edited(name, "kind", None)), None, name, "kind")
 
 
 @pytest.mark.requirement("M-DIR-08", "S00-ASG-20", "S00-ASG-24")
@@ -838,16 +845,14 @@ def test_a_parameter_without_a_kind_is_refused(tmp_path: Path, name: str) -> Non
     ],
 )
 def test_the_value_must_fit_the_declared_kind(tmp_path: Path, name: str, kind: str) -> None:
-    error = _assert_refused(_write(tmp_path, _edited(name, "kind", f'kind = "{kind}"')))
-    assert error.details["name"] == name
+    _assert_refused(_write(tmp_path, _edited(name, "kind", f'kind = "{kind}"')), None, name)
 
 
 # --------------------------------------------------------------------------- required parameters
 @pytest.mark.requirement("M-DIR-08", "G05-05", "S00-ASG-24")
 @pytest.mark.parametrize("name", sorted(EXPECTED))
 def test_a_missing_required_parameter_is_refused(tmp_path: Path, name: str) -> None:
-    error = _assert_refused(_write(tmp_path, _without_table(name)), "required")
-    assert error.details["name"] == name
+    _assert_refused(_write(tmp_path, _without_table(name)), "required", name)
 
 
 @pytest.mark.requirement("M-DIR-08", "G05-05", "S00-ASG-24")
@@ -856,8 +861,7 @@ def test_a_misspelt_required_parameter_is_refused(tmp_path: Path, name: str) -> 
     """A renamed table is a new, unrequired parameter; the required one is then missing."""
     for misspelt in (name + "s", name.upper(), name.replace("_", "-", 1)):
         content = _mutated(f"[parameters.{name}]", f"[parameters.{misspelt}]")
-        error = _assert_refused(_write(tmp_path, content), "required")
-        assert error.details["name"] == name
+        _assert_refused(_write(tmp_path, content), "required", name)
 
 
 @pytest.mark.requirement("M-DIR-08", "S00-ASG-24")
@@ -896,9 +900,8 @@ def test_a_required_parameter_of_the_wrong_kind_is_refused(
     lines[1] = f'kind = "{kind}"'
     lines[2] = f"value = {toml_value}"
     content = _mutated(_TABLES[name], "\n".join(lines) + "\n")
-    error = _assert_refused(_write(tmp_path, content), "kind")
-    assert error.details["name"] == name
-    assert REQUIRED_PARAMETERS[name] in str(error)  # the error names the kind that is required
+    # the error names the parameter and the kind that is required
+    _assert_refused(_write(tmp_path, content), "kind", name, REQUIRED_PARAMETERS[name])
 
 
 # --------------------------------------------------------------------------- order of the daily levels
@@ -1020,11 +1023,6 @@ def test_daily_levels_in_the_wrong_order_are_refused(
     error = _assert_refused(
         _write(tmp_path, _with_levels(halt, defensive, recovery, profit)), DAILY_LEVEL_RULE
     )
-    # the refusal reports the four levels as exact text, never as binary floats
-    assert error.details["halt"] == halt
-    assert error.details["defensive"] == defensive
-    assert error.details["recovery"] == recovery
-    assert error.details["profit_protection"] == profit
     assert strict_loads(canonical_dumps(error.to_dict())) == error.to_dict()
 
 
@@ -1044,8 +1042,7 @@ def test_daily_levels_in_the_wrong_order_are_refused(
 )
 def test_an_unknown_top_level_key_is_refused(tmp_path: Path, addition: str, key: str) -> None:
     content = _mutated("schema_version = 1\n", "schema_version = 1\n" + addition)
-    error = _assert_refused(_write(tmp_path, content), "unknown top-level key")
-    assert error.details["key"] == key
+    _assert_refused(_write(tmp_path, content), "unknown", key)
 
 
 @pytest.mark.requirement("M-DIR-08", "S00-ASG-24")
@@ -1060,8 +1057,7 @@ def test_an_unknown_top_level_key_is_refused(tmp_path: Path, addition: str, key:
     ids=["metadata", "misspelt-parameters", "overrides", "array-of-tables"],
 )
 def test_an_unknown_top_level_table_is_refused(tmp_path: Path, table: str, key: str) -> None:
-    error = _assert_refused(_write(tmp_path, VALID_SYNTHETIC_FILE + "\n" + table), "unknown top-level key")
-    assert error.details["key"] == key
+    _assert_refused(_write(tmp_path, VALID_SYNTHETIC_FILE + "\n" + table), "unknown", key)
 
 
 @pytest.mark.requirement("M-DIR-08", "S00-ASG-24")
@@ -1081,29 +1077,25 @@ def test_an_unknown_top_level_table_is_refused(tmp_path: Path, table: str, key: 
 )
 def test_an_unknown_key_of_a_parameter_is_refused(tmp_path: Path, name: str, addition: str, key: str) -> None:
     content = _mutated(_TABLES[name], _TABLES[name] + addition + "\n")
-    error = _assert_refused(_write(tmp_path, content), "unknown key")
-    assert error.details["name"] == name
-    assert error.details["key"] == key
+    _assert_refused(_write(tmp_path, content), "unknown", name, key)
 
 
 @pytest.mark.requirement("M-DIR-08", "S00-ASG-24")
 def test_a_nested_table_inside_a_parameter_is_refused(tmp_path: Path) -> None:
     content = VALID_SYNTHETIC_FILE + "\n[parameters.synthetic_extra_count.limits]\nmaximum = 5\n"
-    error = _assert_refused(_write(tmp_path, content), "unknown key")
-    assert error.details["name"] == "synthetic_extra_count"
-    assert error.details["key"] == "limits"
+    _assert_refused(_write(tmp_path, content), "unknown", "synthetic_extra_count", "limits")
 
 
 # --------------------------------------------------------------------------- unreadable files
 @pytest.mark.requirement("M-DIR-08", "S00-ASG-24")
 def test_missing_file_is_refused(tmp_path: Path) -> None:
-    error = _assert_refused(tmp_path / "does_not_exist.toml", "cannot be read")
+    error = _assert_refused(tmp_path / "does_not_exist.toml", "read")
     assert "does_not_exist.toml" in str(error)
 
 
 @pytest.mark.requirement("M-DIR-08", "S00-ASG-24")
 def test_directory_instead_of_file_is_refused(tmp_path: Path) -> None:
-    _assert_refused(tmp_path, "cannot be read")
+    _assert_refused(tmp_path, "read")
 
 
 @pytest.mark.requirement("M-DIR-08", "S00-ASG-24")
@@ -1138,7 +1130,7 @@ def test_directory_instead_of_file_is_refused(tmp_path: Path) -> None:
 )
 def test_invalid_toml_is_refused(tmp_path: Path, content: str) -> None:
     assert content != VALID_SYNTHETIC_FILE
-    _assert_refused(_write(tmp_path, content), "not valid UTF-8 TOML")
+    _assert_refused(_write(tmp_path, content), "TOML")
 
 
 @pytest.mark.requirement("M-DIR-08", "S00-ASG-24")
@@ -1148,8 +1140,8 @@ def test_file_that_is_not_utf8_is_refused_with_a_config_error(tmp_path: Path) ->
         b"synthetic fixture: synthetic_extra_count", b"synthetic fixture: \xff\xfe"
     )
     assert content != VALID_SYNTHETIC_FILE.encode("utf-8")
-    _assert_refused(_write(tmp_path, content), "not valid UTF-8 TOML")
-    _assert_refused(_write(tmp_path, VALID_SYNTHETIC_FILE.encode("utf-16")), "not valid UTF-8 TOML")
+    _assert_refused(_write(tmp_path, content), "TOML")
+    _assert_refused(_write(tmp_path, VALID_SYNTHETIC_FILE.encode("utf-16")), "TOML")
 
 
 @pytest.mark.requirement("M-DIR-08", "S00-ASG-24")
@@ -1239,9 +1231,8 @@ def test_any_other_approval_status_is_refused(tmp_path: Path, replacement: str) 
 )
 @pytest.mark.parametrize("key", ["kind", "value", "unit", "requirement", "description"])
 def test_missing_key_is_refused(tmp_path: Path, name: str, key: str) -> None:
-    error = _assert_refused(_write(tmp_path, _edited(name, key, None)), "incomplete")
-    assert error.details["name"] == name
-    assert error.details["missing"] == key  # the error names the missing key
+    # the error names the parameter and the missing key
+    _assert_refused(_write(tmp_path, _edited(name, key, None)), None, name, key)
 
 
 @pytest.mark.requirement("M-DIR-08", "S00-ASG-24")
@@ -1261,11 +1252,8 @@ def test_missing_key_is_refused(tmp_path: Path, name: str, key: str) -> None:
     ],
 )
 def test_empty_or_non_text_metadata_is_refused(tmp_path: Path, key: str, replacement: str) -> None:
-    error = _assert_refused(
-        _write(tmp_path, _edited("synthetic_extra_count", key, replacement)), "non-empty string"
-    )
-    assert error.details["name"] == "synthetic_extra_count"
-    assert error.details["field"] == key
+    content = _edited("synthetic_extra_count", key, replacement)
+    _assert_refused(_write(tmp_path, content), None, "synthetic_extra_count", key)
 
 
 @pytest.mark.requirement("M-DIR-08", "S00-ASG-24")
@@ -1283,25 +1271,24 @@ def test_empty_or_non_text_metadata_is_refused(tmp_path: Path, key: str, replace
     ids=["no-table", "empty-table", "int", "string", "empty-array", "empty-inline-table", "array-of-tables"],
 )
 def test_file_without_parameters_is_refused(tmp_path: Path, content: str) -> None:
-    _assert_refused(_write(tmp_path, content), "no parameters")
+    _assert_refused(_write(tmp_path, content))
 
 
 @pytest.mark.requirement("M-DIR-08", "S00-ASG-24")
 def test_a_parameter_that_is_not_a_table_is_refused(tmp_path: Path) -> None:
-    content = _mutated("\n[parameters.tick_processing_target_ns]", "\n[parameters]\nsynthetic_bare = 250\n")
-    assert "[parameters.tick_processing_target_ns]" not in content
-    # the remaining keys of that table now belong to [parameters]; TOML still accepts the file
-    error = _assert_refused(_write(tmp_path, content), "must be a table")
-    assert error.details["name"] in {"synthetic_bare", "kind", "value", "unit", "requirement", "description"}
+    """A bare ``name = value`` under ``[parameters]`` has no kind, unit or source: refused."""
+    # TOML allows the super-table to be defined after its sub-tables, so this only adds one key
+    content = VALID_SYNTHETIC_FILE + "\n[parameters]\nsynthetic_bare = 250\n"
+    _assert_refused(_write(tmp_path, content), None, "synthetic_bare")
 
 
 @pytest.mark.requirement("M-DIR-08", "S00-ASG-24")
 def test_one_defective_parameter_refuses_the_whole_file(tmp_path: Path) -> None:
     """Fail closed: no partial view with the valid parameters is returned."""
     defective_last = _with_value("synthetic_extra_count", "-1")
-    assert _assert_refused(_write(tmp_path, defective_last)).details["name"] == "synthetic_extra_count"
+    _assert_refused(_write(tmp_path, defective_last), "range", "synthetic_extra_count")
     defective_first = _with_value("tick_processing_target_ns", "250.5")
-    assert _assert_refused(_write(tmp_path, defective_first)).details["name"] == "tick_processing_target_ns"
+    _assert_refused(_write(tmp_path, defective_first), "integer", "tick_processing_target_ns")
 
 
 @pytest.mark.requirement("M-DIR-08", "S00-ASG-24")

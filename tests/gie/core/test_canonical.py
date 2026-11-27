@@ -10,7 +10,9 @@ The expected values come from the standards the module cites, not from its code:
   was written; the tests themselves need no such engine);
 * RFC 8259 for what is and is not JSON;
 * ``specifications/SHARED_CONTRACTS.md`` sections 2, 5 and 7 for the decimal grammar, the exact
-  64-bit integers and the strict-parsing rules.
+  64-bit integers and the strict-parsing rules.  Revision 2 added to the latter: "no number that
+  overflows or underflows a double" - a non-zero literal such as ``1e-400`` must not silently
+  become zero.
 
 Every value used here is a synthetic fixture invented for the test; none is market data.
 """
@@ -21,6 +23,7 @@ import datetime as dt
 import hashlib
 import itertools
 import json
+import math
 import re
 import struct
 from collections import deque
@@ -783,6 +786,151 @@ def test_strict_loads_reads_canonical_integral_doubles_beyond_int64_as_floats(
 def test_strict_loads_rejects_floats_that_overflow_a_double(text: str) -> None:
     with pytest.raises(CanonicalEncodingError):
         strict_loads(text)
+
+
+# --------------------------------------------------------------------------- underflow
+#: Non-zero literals whose nearest double is zero.  The smallest positive double is
+#: 4.94...e-324; anything below half of it rounds to zero.
+_UNDERFLOWING_LITERALS = [
+    "1e-400",
+    "-1e-400",
+    "1E-400",
+    "1.0e-400",
+    "1e-324",
+    "2e-324",
+    "-2e-324",
+    "2.4703282292062327e-324",  # just below half of the smallest positive double
+    "10e-401",
+    "0.1e-399",
+    "123456789e-340",
+    "1e-9999",
+    "1e-9999999999999999999999",
+    "0." + "0" * 400 + "1",  # no exponent at all
+    "0." + "0" * 323 + "2",
+    "-0." + "0" * 500 + "7",
+    "9" * 300 + "e-700",
+    "0.000001e-320",
+]
+
+
+@pytest.mark.requirement("S00-ASG-20", "S00-ASG-24")
+@pytest.mark.parametrize("text", _UNDERFLOWING_LITERALS, ids=lambda text: text[:24])
+def test_strict_loads_rejects_non_zero_literals_that_underflow_to_zero(text: str) -> None:
+    """Section 7: "no number that overflows or underflows a double"."""
+    # positive control: an ordinary parser silently returns zero for this non-zero literal
+    assert json.loads(text) == 0.0
+    assert any(digit in "123456789" for digit in re.split("[eE]", text)[0])
+    documents = (text, f"[{text}]", f'{{"x":{text}}}', f'{{"a":[0.5,{{"b":{text}}}],"c":1}}', f" {text} ")
+    for document in documents:
+        with pytest.raises(CanonicalEncodingError) as excinfo:
+            strict_loads(document)
+        error = excinfo.value
+        assert error.code == "GIE.CONTRACT.ENCODING"
+        assert isinstance(error, ContractError)
+        assert "underflow" in error.message
+        with pytest.raises(CanonicalEncodingError):
+            strict_loads(document.encode("utf-8"))
+
+
+@pytest.mark.requirement("S00-ASG-20", "S00-ASG-24")
+def test_the_underflow_refusal_can_be_journaled_also_for_a_very_long_literal() -> None:
+    literal = "0." + "0" * 5000 + "1"
+    with pytest.raises(CanonicalEncodingError) as excinfo:
+        strict_loads(literal)
+    error = excinfo.value
+    detail = error.details["value"]
+    assert isinstance(detail, str)
+    assert 0 < len(detail) <= 64  # the refusal does not carry kilobytes of input
+    assert literal.startswith(detail)
+    journal_form = error.to_dict()
+    assert strict_loads(canonical_dumps(journal_form)) == journal_form
+
+
+@pytest.mark.requirement("S00-ASG-20")
+@pytest.mark.parametrize(
+    "text",
+    [
+        "0.0",
+        "-0.0",
+        "0e0",
+        "0E0",
+        "0e-400",
+        "-0e-400",
+        "0.0e-999",
+        "0.000",
+        "0.0000e-5",
+        "0e999",
+        "0.0E+999",
+        "0e-9999999999999999999999",
+        "0." + "0" * 600,
+    ],
+    ids=lambda text: text[:24],
+)
+def test_strict_loads_still_accepts_every_spelling_of_zero(text: str) -> None:
+    """Zero does not underflow: the rule is about non-zero literals only."""
+    parsed = strict_loads(text)
+    assert type(parsed) is float
+    assert parsed == 0.0
+    assert math.copysign(1.0, parsed) == (-1.0 if text.startswith("-") else 1.0)
+    assert strict_loads(f'{{"x":[{text}]}}') == {"x": [0.0]}
+    assert canonical_dumps(parsed) == "0"
+
+
+@pytest.mark.requirement("S00-ASG-20")
+@pytest.mark.parametrize(
+    ("text", "bits_hex"),
+    [
+        ("5e-324", "0000000000000001"),  # the smallest positive double (RFC 8785 Appendix B)
+        ("-5e-324", "8000000000000001"),
+        ("4.9406564584124654e-324", "0000000000000001"),  # the same double with 17 digits
+        ("1e-323", "0000000000000002"),
+        ("0." + "0" * 322 + "1", "0000000000000002"),  # 1e-323 without an exponent
+        ("2.225073858507201e-308", "000fffffffffffff"),  # the largest subnormal double
+        ("2.2250738585072014e-308", "0010000000000000"),  # the smallest normal double
+        ("1e-307", "0031fa182c40c60d"),
+    ],
+    ids=["min", "-min", "min-17-digits", "2*min", "2*min-plain", "max-subnormal", "min-normal", "1e-307"],
+)
+def test_strict_loads_still_reads_the_smallest_doubles(text: str, bits_hex: str) -> None:
+    """Subnormal numbers are doubles; only a literal that becomes zero is refused."""
+    expected = _double(bits_hex)
+    assert expected != 0.0
+    parsed = strict_loads(text)
+    assert type(parsed) is float
+    assert struct.pack(">d", parsed) == bytes.fromhex(bits_hex)
+    assert strict_loads(canonical_dumps(parsed)) == expected
+
+
+@pytest.mark.requirement("S00-ASG-20", "S00-ASG-24")
+@PROPERTY
+@example(digit=1, exponent=324)
+@example(digit=2, exponent=324)
+@example(digit=9, exponent=325)
+@example(digit=1, exponent=400)
+@given(digit=st.integers(min_value=1, max_value=9), exponent=st.integers(min_value=325, max_value=10**6))
+def test_any_non_zero_literal_below_the_smallest_double_is_refused(digit: int, exponent: int) -> None:
+    for text in (f"{digit}e-{exponent}", f"-{digit}E-{exponent}", f"0.{digit}e-{exponent}"):
+        with pytest.raises(CanonicalEncodingError) as excinfo:
+            strict_loads(text)
+        assert "underflow" in excinfo.value.message
+    assert strict_loads(f"0e-{exponent}") == 0.0  # the same exponent on a zero is harmless
+
+
+@pytest.mark.requirement("S00-ASG-20")
+@PROPERTY
+@example(mantissa=1, negative=False)
+@example(mantissa=1, negative=True)
+@example(mantissa=2**52 - 1, negative=False)
+@given(mantissa=st.integers(min_value=1, max_value=2**52 - 1), negative=st.booleans())
+def test_every_subnormal_double_survives_canonical_text(mantissa: int, negative: bool) -> None:
+    """The writer never produces a literal that the strict reader refuses as an underflow."""
+    bits = mantissa | (1 << 63 if negative else 0)
+    value: float = struct.unpack(">d", bits.to_bytes(8, "big"))[0]
+    assert value != 0.0
+    text = canonical_dumps(value)
+    parsed = strict_loads(text)
+    assert type(parsed) is float
+    assert struct.pack(">d", parsed) == bits.to_bytes(8, "big")
 
 
 @pytest.mark.requirement("S00-ASG-24")

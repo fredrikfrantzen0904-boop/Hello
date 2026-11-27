@@ -9,6 +9,10 @@ where a decimal part is encoded as ``{"d": "<canonical decimal string>"}``.  The
 payloads below are written by hand and hashed with ``hashlib``; the pinned literals were
 additionally computed outside Python with ``sha256sum``.
 
+Revision 2 of the contracts added the prefix ``opp`` (opportunity: the stable identity of a setup
+in one direction and horizon).  "Adding a prefix is a backwards-compatible (minor) change": the
+register must be exactly the published list, and identifiers of the other prefixes must not move.
+
 Every value used here is a synthetic fixture invented for the test; none is market data.
 """
 
@@ -19,6 +23,7 @@ import itertools
 import json
 import re
 from decimal import Decimal
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -36,10 +41,13 @@ PROPERTY = settings(
     suppress_health_check=[HealthCheck.too_slow],
 )
 
-#: Prefixes listed in specifications/contracts/FIELDS.md, "Identifier prefixes".
+FIELDS_REFERENCE = Path(__file__).resolve().parents[3] / "specifications" / "contracts" / "FIELDS.md"
+
+#: Prefixes listed in specifications/contracts/FIELDS.md, "Identifier prefixes", in that order.
 DOCUMENTED_PREFIXES = (
     "run",
     "mev",
+    "opp",
     "evd",
     "cnd",
     "grp",
@@ -69,6 +77,70 @@ def test_documented_prefixes_are_registered() -> None:
         assert re.fullmatch(r"[a-z]{3}", prefix), prefix
         assert isinstance(meaning, str)
         assert meaning.strip()
+
+
+@pytest.mark.requirement("S00-ASG-22")
+def test_the_register_is_exactly_the_fourteen_documented_prefixes() -> None:
+    """A prefix that is registered but not documented (or the reverse) is a contract change."""
+    assert len(DOCUMENTED_PREFIXES) == len(set(DOCUMENTED_PREFIXES)) == 14
+    assert set(ID_PREFIXES) == set(DOCUMENTED_PREFIXES)
+    assert len(ID_PREFIXES) == 14
+
+
+@pytest.mark.requirement("S00-ASG-22")
+def test_the_register_matches_the_published_field_reference() -> None:
+    """``FIELDS.md`` is the published list of prefixes; it must agree with the code, both ways."""
+    section = FIELDS_REFERENCE.read_text(encoding="utf-8").split("## Identifier prefixes", 1)[1]
+    section = section.split("\n## ", 1)[0]
+    published = dict(re.findall(r"^\| `([a-z]{3})` \| (.+?) \|$", section, flags=re.MULTILINE))
+    assert tuple(published) == DOCUMENTED_PREFIXES
+    assert published == dict(ID_PREFIXES)
+    assert list(published) == list(ID_PREFIXES)  # same order, so generated documents are stable
+
+
+@pytest.mark.requirement("S00-ASG-22")
+def test_the_opportunity_prefix_is_registered() -> None:
+    """Revision 2: ``opp`` identifies an opportunity (setup type, side, horizon, market events)."""
+    assert "opp" in ID_PREFIXES
+    assert "opportunity" in ID_PREFIXES["opp"]
+    assert id_pattern("opp") == "^opp_[0-9a-f]{32}$"
+    identifier = make_id("opp", "SWEEP_REVERSAL", "BUY", "INTRADAY", ["mev_62b73b7dc998a995218ed075f9234c29"])
+    assert identifier == "opp_46a5626a6cf358524c2be6c2f9c89fdc"  # computed with sha256sum
+    assert identifier == _reference_id(
+        "opp", '["opp",["SWEEP_REVERSAL","BUY","INTRADAY",["mev_62b73b7dc998a995218ed075f9234c29"]]]'
+    )
+    assert is_valid_id(identifier) is True
+    assert is_valid_id(identifier, "opp") is True
+    assert require_id(identifier, "opp", path="candidate.opportunity_id") is identifier
+    # an opportunity is not a market event, a candidate or a group, although all four are related
+    for other in ("mev", "cnd", "grp", "pln"):
+        assert is_valid_id(identifier, other) is False
+        with pytest.raises(ContractValidationError) as excinfo:
+            require_id(identifier, other, path="candidate.opportunity_id")
+        assert excinfo.value.details["expected_prefix"] == other
+        assert excinfo.value.details["path"] == "candidate.opportunity_id"
+        assert make_id(other, "synthetic", 1)[4:] != make_id("opp", "synthetic", 1)[4:]
+    with pytest.raises(ContractValidationError):
+        require_id(make_id("mev", "synthetic", 1), "opp")
+
+
+@pytest.mark.requirement("S00-ASG-22")
+def test_an_opportunity_identifier_is_stable_and_sensitive_to_every_identity_part() -> None:
+    """Section 4: ``opportunity_id = f(setup_type, side, horizon, market_event_ids)``."""
+    events = [make_id("mev", "SWEEP", "XAUUSD", "M5", 1764230400000000000)]
+    base = make_id("opp", "SWEEP_REVERSAL", "BUY", "INTRADAY", events)
+    assert make_id("opp", "SWEEP_REVERSAL", "BUY", "INTRADAY", list(events)) == base
+    assert make_id("opp", "SWEEP_REVERSAL", "BUY", "INTRADAY", tuple(events)) == base
+    variants = {
+        base,
+        make_id("opp", "ORB_BREAKOUT", "BUY", "INTRADAY", events),
+        make_id("opp", "SWEEP_REVERSAL", "SELL", "INTRADAY", events),
+        make_id("opp", "SWEEP_REVERSAL", "BUY", "SCALP", events),
+        make_id("opp", "SWEEP_REVERSAL", "BUY", "INTRADAY", []),
+        make_id("opp", "SWEEP_REVERSAL", "BUY", "INTRADAY", [*events, make_id("mev", "synthetic", 2)]),
+        make_id("opp", "SWEEP_REVERSAL", "BUY", "INTRADAY", [make_id("mev", "synthetic", 2)]),
+    }
+    assert len(variants) == 7
 
 
 @pytest.mark.requirement("S00-ASG-22")
@@ -113,8 +185,14 @@ def test_identifier_form(prefix: str) -> None:
             '["evd",["zlato-\u20ac"]]',
             "evd_373f3c461d95041d9391881c2be90775",
         ),
+        (
+            "opp",
+            ("synthetic", 1),
+            '["opp",["synthetic",1]]',
+            "opp_deaf212d2554034d7e65b4a4a1739ab4",
+        ),
     ],
-    ids=["run", "mev", "evd-non-ascii"],
+    ids=["run", "mev", "evd-non-ascii", "opp"],
 )
 def test_pinned_identifiers(prefix: str, parts: tuple[Any, ...], canonical_payload: str, pinned: str) -> None:
     assert _reference_id(prefix, canonical_payload) == pinned  # the fixture itself is consistent
