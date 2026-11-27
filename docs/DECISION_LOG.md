@@ -1,6 +1,6 @@
 # GIE decision log
 
-Persistent record of architectural and procedural decisions (requirements S00-ASG-27, OWN-08).
+Persistent record of architectural and procedural decisions (requirements S00-ASG-27, OWN-17).
 
 * **D-nnn** are decisions. Status: `PROPOSED` (made by the coordinator, awaiting owner approval),
   `APPROVED`, `REJECTED`, `SUPERSEDED`. Nothing marked PROPOSED is binding until the owner approves
@@ -173,7 +173,7 @@ limits it needs as research parameters through the coordinator (D-018).
 
 - Status: PROPOSED
 - Date: 2026-11-27
-- Requirements: G08-03, G08-10, M-AUTH-13, M-AUTH-14, OWN-14, COM-11, M-DIR-07
+- Requirements: G08-03, G08-10, M-AUTH-13, M-AUTH-19, OWN-14, COM-11, M-DIR-07
 
 Four independent layers (`gie/core/routing_lock.py`): no live member in the vocabulary used by the
 contracts; a literal `False` constant that is read from nowhere; a guard that admits only
@@ -254,7 +254,7 @@ neither is ever stored as 0.5 or merged with another engine's record.
 
 - Status: PROPOSED
 - Date: 2026-11-27
-- Requirements: OWN-08, M-AUTH-16, M-AUTH-17, M-GATE-01, M-GATE-03
+- Requirements: OWN-08, OWN-16, OWN-17, OWN-18, M-AUTH-16, M-AUTH-17, M-AUTH-26, M-GATE-01, M-GATE-03
 
 Tests carry `requirement` / `acceptance` markers; `pytest --gie-evidence` writes a JSON file with
 every test outcome; `tools/gie_registers.py` derives the acceptance register status from that file,
@@ -437,7 +437,7 @@ weekend / rollover rules, and which other systems trade the same account.
 ## U-05 - Definitions behind the quoted baseline figures
 
 - Status: OPEN
-- Requirements: G09-02, G09-07, G09-08
+- Requirements: G09-02, G09-11, G09-12, G09-13, G09-07, G09-08
 
 Is "+0.462R" the mean per trade or the total? What is the denominator of "18% day coverage" and
 of the daily-breach statistics? How was "4.9% drawdown at 0.5% risk" computed?
@@ -467,7 +467,7 @@ the same machine that runs the existing bots (resource isolation, G07-08).
 ## U-09 - Authorised market data
 
 - Status: OPEN
-- Requirements: S01-ASG-10, G06-06, G09-06, G09-10
+- Requirements: S01-ASG-10, G06-06, G06-10, G06-11, G06-12, G06-13, G06-14, G06-15, G06-16, G06-17, G09-06, G09-10
 
 Which tick history and which external feeds (XAGUSD, DXY, GC, yields, S&P 500, VIX, USDJPY, news)
 are licensed and available? Round 2 did not store raw ticks.
@@ -489,8 +489,8 @@ Nine further shared types are needed before later sessions can start (candle, br
 tick usability policy, instrument specification, account snapshot, observations and news, market
 conditions, the decision stream record, outcome labels): CR-003 and CR-005 name the proposing
 session and the gate for each. Confirm that they are added through the coordinator with the same
-framework rather than defined locally, and that a session may not start before the types it needs
-exist (start gate in `specifications/dependency_graph.yaml`).
+framework rather than defined locally, and that a session writes no code against a type before it
+is integrated (extension gate in `specifications/dependency_graph.yaml`).
 
 ## U-12 - Confirm the two interpretations in D-012
 

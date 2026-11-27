@@ -64,7 +64,7 @@ Specification: V1.0 (27 Nov 2026).
 
 | id | requirement | sessions | status | review | contributions/notes |
 |---|---|---|---|---|---|
-| G01-01 | XAUUSD exclusively. | S00, S01, S05, S07, S08 | not_started | unverified |  |
+| G01-01 | XAUUSD exclusively. | S00, S01, S05, S07, S08 | not_started | unverified | Note: Same rule: G06-07. |
 | G01-02 | Hybrid scalping and intraday. | S05, S06, S10 | not_started | unverified |  |
 | G01-03 | Continuous monitoring during actual broker sessions. | S01, S06, S07 | not_started | unverified |  |
 | G01-04 | Cautious Asian-session selection. | S05, S08, S10 | not_started | unverified |  |
@@ -127,8 +127,8 @@ Specification: V1.0 (27 Nov 2026).
 | G04-12 | Hard protective stops. | S05, S06, S07, S00 | not_started | unverified |  |
 | G04-13 | Profit ratchet based on executable net P&L. | S06, S00 | not_started | unverified |  |
 | G04-14 | Compare against fixed exits. | S06, S10 | not_started | unverified | Note: The comparison is of the profit ratchet / dynamic protection against fixed exits. |
-| G04-15 | Profit ratchet is monotonic. | S06, S00 | not_started | unverified | Note: Split from 'fast monotonic profit ratchet based on executable net P&L'. |
-| G04-16 | Profit ratchet is fast. | S06 | not_started | unverified | Note: Split from 'fast monotonic profit ratchet based on executable net P&L'. |
+| G04-15 | Monotonic profit ratchet. | S06, S00 | not_started | unverified | Note: Split from 'fast monotonic profit ratchet based on executable net P&L'. |
+| G04-16 | Fast profit ratchet. | S06 | not_started | unverified | Note: Split from 'fast monotonic profit ratchet based on executable net P&L'. |
 
 ## MASTER.pdf - G05 | Daily states
 
@@ -138,7 +138,7 @@ Specification: V1.0 (27 Nov 2026).
 | G05-02 | Defensive at -2%. | S08 | not_started | unverified |  |
 | G05-03 | Proposed recovery at -1.75%. | S08 | not_started | unverified | Note: Meaning of 'recovery' is open item U-03. Configurability: G05-05. |
 | G05-04 | Emergency halt at -3%. | S08 | not_started | unverified | Note: 'Proposed' and configurable: G05-05. |
-| G05-05 | Recovery and emergency halt: configurable and subject to validation. | S08, S00 | not_started | unverified | Note: The source attaches 'configurable and subject to validation' to the recovery and emergency-halt levels only. Whether -2% and +5% are also adjustable is open item U-14; under M-DIR-08 every numerical setting is a research parameter, not an approved limit. |
+| G05-05 | Recovery and emergency halt: configurable and subject to validation. | S08, S00 | not_started | unverified | Note: The source attaches 'configurable and subject to validation' to the recovery and emergency-halt levels only. Whether -2% and +5% are also adjustable is open item U-14; M-DIR-08 says 'Proposed numerical settings are research parameters, not approved production limits'. |
 | G05-06 | Above +5% protect a nondecreasing daily profit floor. | S08, S06 | not_started | unverified |  |
 | G05-07 | Above +5%: exceptional setups only with surplus risk budget after costs and open exposure. | S08, S05 | not_started | unverified |  |
 | G05-08 | At exactly the floor no new risk. | S08 | not_started | unverified |  |
@@ -210,7 +210,7 @@ Specification: V1.0 (27 Nov 2026).
 | id | requirement | sessions | status | review | contributions/notes |
 |---|---|---|---|---|---|
 | G09-01 | Round 2: 23,481 setups. | S10, S00 | not_started | unverified | Note: Existing evidence quoted by the specification; unverified here (specifications/baselines/claims.yaml). |
-| G09-02 | Round 2: GCE-B 134 trades. | S10, S00, S02 | not_started | unverified | Note: Existing evidence quoted by the specification; unverified here. |
+| G09-02 | Round 2: GCE-B 134 trades. | S10, S00, S02 | not_started | unverified | Note: Existing evidence quoted by the specification; unverified here. The figures that follow in the same source sentence are separate requirements: G09-11 (+0.462R), G09-12 (18% day coverage), G09-13 (4.9% drawdown at 0.5% risk). |
 | G09-03 | Round 2: no corrected statistical significance. | S10 | not_started | unverified | Note: A statement about the existing Round 2 results. |
 | G09-04 | Learned score 96% coverage but negative recent period. | S10, S04 | not_started | unverified |  |
 | G09-05 | Existing history is research only. | all (S00-S12) | not_started | unverified |  |
@@ -250,7 +250,7 @@ Specification: V1.0 (27 Nov 2026).
 
 | id | requirement | sessions | status | review | contributions/notes |
 |---|---|---|---|---|---|
-| M-DIR-01 | Start with session 00 only. | S00 | not_started | unverified |  |
+| M-DIR-01 | Start with session 00 only. | S00 | not_started | unverified | Note: Same rule from the owner's directive: OWN-07. |
 | M-DIR-02 | Owner approves contracts before parallel work. | S00 | not_started | unverified |  |
 | M-DIR-03 | Wave 2: 01, 02, 07, 08. | S00 | not_started | unverified |  |
 | M-DIR-04 | Wave 3: 03, 04, 05, 06 as dependencies become ready. | S00 | not_started | unverified |  |
@@ -280,7 +280,7 @@ Specification: V1.0 (27 Nov 2026).
 
 | id | requirement | sessions | status | review | contributions/notes |
 |---|---|---|---|---|---|
-| M-DOC-01 | GIE / ENGINEERING SPECIFICATION / V1.0; every page is labelled 'GIE \| 27 Nov 2026 \| Paper / research only'. | all (S00-S12) | not_started | unverified | Note: Header and footer of the master specification and of every brief. Specification version V1.0. |
+| M-DOC-01 | GIE / ENGINEERING SPECIFICATION / V1.0 ... GIE \| 27 Nov 2026 \| Paper / research only | all (S00-S12) | not_started | unverified | Note: Header (before '...') and footer (after '...') printed on every page of the master specification and of every brief; the '...' joins the two and is not part of the source. Specification version V1.0; label 'Paper / research only'. |
 
 ## 00-12 briefs (identical text in every session brief) - Common brief clauses
 
@@ -324,7 +324,7 @@ Specification: V1.0 (27 Nov 2026).
 | OWN-19 | Do not substitute placeholders. | all (S00-S12) | not_started | unverified |  |
 | OWN-20 | Do not omit requirements. | all (S00-S12) | not_started | unverified |  |
 | OWN-21 | Do not declare incomplete components finished. | all (S00-S12) | not_started | unverified |  |
-| OWN-22 | Treat the owner as the project owner with final authority. | all (S00-S12) | not_started | unverified | Note: Split from OWN-04. |
+| OWN-22 | Treat me as the project owner with final authority. | all (S00-S12) | not_started | unverified | Note: 'me' is the project owner who wrote the directive. Split from OWN-04. |
 | OWN-23 | Submit the foundation review PDF. | S00 | not_started | unverified | Note: Split from OWN-11. |
 | OWN-24 | Submit the shared contracts. | S00 | not_started | unverified | Note: Split from OWN-11. |
 | OWN-25 | Submit the source files. | S00 | not_started | unverified | Note: Split from OWN-11. |
@@ -461,7 +461,7 @@ Specification: V1.0 (27 Nov 2026).
 | S02-ASG-05 | Evidence with levels. | S02 | not_started | unverified |  |
 | S02-ASG-06 | Evidence with stages. | S02 | not_started | unverified |  |
 | S02-ASG-07 | Evidence with invalidation. | S02 | not_started | unverified |  |
-| S02-ASG-08 | Evidence with missing/contra states. | S02 | not_started | unverified |  |
+| S02-ASG-08 | Evidence with missing/contra states. | S02 | not_started | unverified | Note: Two states (missing; contra); the status is the minimum over both. |
 | S02-ASG-09 | Expose Cavemen pending limit at breakout close. | S02 | not_started | unverified |  |
 | S02-ASG-10 | Deduplicate shared sweep/FVG/breakout evidence. | S02 | not_started | unverified |  |
 | S02-ASG-11 | Keep original engines unchanged. | S02 | not_started | unverified |  |
@@ -655,7 +655,7 @@ Specification: V1.0 (27 Nov 2026).
 | S06-ACC-03 | Stale tick. | S06 | not_started | unverified |  |
 | S06-ACC-04 | Slow-model isolation. | S06 | not_started | unverified |  |
 | S06-ACC-05 | No stop widening. | S06 | not_started | unverified |  |
-| S06-ACC-06 | p99/max latency. | S06 | not_started | unverified | Note: Two measures (p99; max): both must be reported. |
+| S06-ACC-06 | p99/max latency. | S06 | not_started | unverified | Note: Two measures (p99; max): each needs its own marked test and both must be reported; the status is the worse of the two. |
 | S06-ACC-07 | Profit giveback comparisons. | S06 | not_started | unverified | Note: An evaluation: 'passing' means the comparison ran reproducibly and was recorded, not that the result was favourable. |
 | S06-ACC-08 | Premature-exit comparisons. | S06 | not_started | unverified | Note: An evaluation: 'passing' means the comparison ran reproducibly and was recorded, not that the result was favourable. |
 
@@ -921,12 +921,12 @@ Specification: V1.0 (27 Nov 2026).
 | id | requirement | sessions | status | review | contributions/notes |
 |---|---|---|---|---|---|
 | S12-ASG-01 | Independently verify requirements. | S12 | not_started | unverified |  |
-| S12-ASG-02 | Inspect code and tests. | S12 | not_started | unverified |  |
-| S12-ASG-03 | Run mutation/failure injection. | S12 | not_started | unverified |  |
-| S12-ASG-04 | Stress concurrency and latency. | S12 | not_started | unverified |  |
+| S12-ASG-02 | Inspect code and tests. | S12 | not_started | unverified | Note: Two objects (code; tests); the status is the minimum over both. |
+| S12-ASG-03 | Run mutation/failure injection. | S12 | not_started | unverified | Note: Two techniques (mutation; failure injection); the status is the minimum over both. |
+| S12-ASG-04 | Stress concurrency and latency. | S12 | not_started | unverified | Note: Two properties (concurrency; latency); the status is the minimum over both. |
 | S12-ASG-05 | Check data leakage. | S12 | not_started | unverified |  |
 | S12-ASG-06 | Check live lock. | S12 | not_started | unverified |  |
-| S12-ASG-07 | Verify reports against raw exports and commits. | S12 | not_started | unverified |  |
+| S12-ASG-07 | Verify reports against raw exports and commits. | S12 | not_started | unverified | Note: Two references (raw exports; commits); the status is the minimum over both. |
 | S12-ASG-08 | Do not approve own implementation. | S12 | not_started | unverified |  |
 | S12-ASG-09 | Do not silently fix other branches. | S12 | not_started | unverified |  |
 

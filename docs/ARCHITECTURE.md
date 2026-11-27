@@ -108,12 +108,13 @@ wave 4:  09 Learning (00, 04, 05, 10)   10 Backtesting (00; harness early, modul
          11 Dashboard (00; read-only contracts of all)     12 QA (00; scaffolding early, ongoing)
 ```
 
-Two gates (defined in the dependency graph, procedure in `docs/WORKTREES.md`): a session *starts*
-when the owner has approved the contracts, opened its wave, and the shared types it needs exist;
-it is *integrated* when its dependencies and its own review package are approved. Nine shared
-types that later sessions need are deliberately not defined yet (`contract_extensions` in the
-graph, change requests CR-003 and CR-005): each is proposed by the session that owns the knowledge
-and added to `gie.contracts` by the coordinator.
+Three gates (defined once in the dependency graph, summarised in `docs/WORKTREES.md`): a session
+*starts* with its wave once the owner has approved the contracts and opened the wave; a shared type
+that does not exist yet is the first deliverable of the session that proposes it, and a consuming
+session writes no code against it before the coordinator has integrated it (*extension gate*); a
+session is *integrated* when its dependencies, the extensions it consumes and its own review
+package are approved. Nine shared types are deliberately not defined yet (`contract_extensions` in
+the graph, change requests CR-003 and CR-005).
 
 ## 6. Routing lock (G08-03, G08-10)
 

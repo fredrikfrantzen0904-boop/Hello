@@ -3235,3 +3235,63 @@ def test_sync_on_a_copy_of_the_real_register_changes_only_the_intended_entries(t
     assert {
         entry_id for entry_id, block in blocks_before.items() if blocks_after[entry_id] != block
     } == intended
+
+
+# --------------------------------------------------------------------------- validate: owner's words only
+@pytest.mark.requirement("OWN-03", "OWN-20", "S00-ASG-28")
+@pytest.mark.parametrize(
+    ("text", "reported"),
+    [
+        ("Build the widget (into risk).", ["into", "risk"]),
+        ("Build the widget quickly.", ["quickly"]),
+        ("Thresholds configurable.", ["configurable", "thresholds"]),
+    ],
+)
+def test_a_gloss_in_the_requirement_text_is_a_problem(tmp_path: Path, text: str, reported: list[str]) -> None:
+    root = make_repo(tmp_path)
+    clause = "SYNTHETIC FIXTURE clause: Build the widget; test widgets under load."
+    edit_requirement(root, "FIX-ASG-02", lambda entry: entry.update(text=text, source_clause=clause))
+    problem = only_problem(root)
+    assert "FIX-ASG-02" in problem
+    assert "not in its source_clause" in problem
+    assert f": {', '.join(reported)} (" in problem
+
+
+@pytest.mark.requirement("OWN-03", "S00-ASG-28")
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Build the widget.",  # a fragment
+        "BUILD WIDGETS.",  # case and plural ending do not matter
+        "Test a widget.",  # singular of a plural in the clause; function word
+        "Widget is under load.",  # function words may connect the owner's words
+        "Bid tests and ask tests at -1.75%.",  # '/' separates words; signed percentages are words
+    ],
+)
+def test_fragments_of_the_source_clause_are_accepted(tmp_path: Path, text: str) -> None:
+    root = make_repo(tmp_path)
+    clause = "SYNTHETIC FIXTURE clause: Build the widget; test widgets under load; bid/ask tests at -1.75%."
+    edit_requirement(root, "FIX-ASG-02", lambda entry: entry.update(text=text, source_clause=clause))
+    assert problems(root) == []
+
+
+@pytest.mark.requirement("OWN-03", "S00-ASG-28")
+def test_words_not_in_clause_is_exact_about_what_it_reports() -> None:
+    clause = "Aggregate gross/net and correlated risk, pending orders, margin, costs and gap stress."
+    assert gr.words_not_in_clause("Aggregate margin.", clause) == []
+    assert gr.words_not_in_clause("Aggregate margin (into exposure).", clause) == ["exposure", "into"]
+    assert gr.words_not_in_clause("Aggregate net risk.", clause) == []
+    assert gr.words_not_in_clause("Limit - orders.", "pending orders") == ["limit"]
+    assert set(gr.TEXT_GLUE_WORDS) >= {"a", "the", "of", "and", "is"}
+    assert "not" in gr.TEXT_GLUE_WORDS  # negations can only reuse the owner's own 'no' / 'not'
+
+
+@pytest.mark.requirement("OWN-03", "OWN-20", "S00-ASG-28")
+def test_every_real_requirement_text_comes_from_its_source_clause() -> None:
+    document = yaml.safe_load((gr.REPO_ROOT / gr.MATRIX_FILE).read_text(encoding="utf-8"))
+    offenders = {
+        entry["id"]: added
+        for entry in document["requirements"]
+        if (added := gr.words_not_in_clause(entry["text"], entry["source_clause"]))
+    }
+    assert offenders == {}

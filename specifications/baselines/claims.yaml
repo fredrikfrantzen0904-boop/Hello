@@ -25,7 +25,7 @@ claims:
     reconcile_in: [S10, S02]
     open_questions: []
   - id: BL-GCEB-R
-    requirement: G09-02
+    requirement: G09-11
     quote: "+0.462R"
     value: "0.462"
     unit: R
@@ -33,7 +33,7 @@ claims:
     reconcile_in: [S10]
     open_questions: ["Mean net R per trade, or total? Gross or net of costs? (open item U-05)"]
   - id: BL-GCEB-COVERAGE
-    requirement: G09-02
+    requirement: G09-12
     quote: "18% day coverage"
     value: "0.18"
     unit: fraction of days
@@ -41,7 +41,7 @@ claims:
     reconcile_in: [S10]
     open_questions: ["What is the denominator (eligible days)? (open items U-05, U-07)"]
   - id: BL-GCEB-DRAWDOWN
-    requirement: G09-02
+    requirement: G09-13
     quote: "4.9% drawdown at 0.5% risk"
     value: "0.049"
     unit: fraction of equity at 0.5 % risk per trade

@@ -84,11 +84,11 @@ None.
 | U-02 | open item | OPEN | Where will GIE finally live? | COM-03, S11-ACC-05 |
 | U-03 | open item | OPEN | Meaning of "proposed recovery at -1.75%" | G05-03, S08-ASG-11, S08-ACC-02 |
 | U-04 | open item | OPEN | Actual account rules | G05-10, G05-11, S08-ASG-08, S08-ASG-09, S08-ASG-10, G06-05 |
-| U-05 | open item | OPEN | Definitions behind the quoted baseline figures | G09-02, G09-07, G09-08 |
+| U-05 | open item | OPEN | Definitions behind the quoted baseline figures | G09-02, G09-11, G09-12, G09-13, G09-07, G09-08 |
 | U-06 | open item | OPEN | Confirm that "paper" excludes broker demo accounts | M-AUTH-13, G08-10 |
 | U-07 | open item | OPEN | Definition of an "eligible day" | G01-07, G10-08, S10-ACC-06 |
 | U-08 | open item | OPEN | Runtime environment | S00-ASG-06, G03-07 |
-| U-09 | open item | OPEN | Authorised market data | S01-ASG-10, G06-06, G09-06, G09-10 |
+| U-09 | open item | OPEN | Authorised market data | S01-ASG-10, G06-06, G06-10, G06-11, G06-12, G06-13, G06-14, G06-15, G06-16, G06-17, G09-06, G09-10 |
 | U-10 | open item | OPEN | Instrument specification of XAUUSD at the broker | S07-ASG-15, S08-ASG-02 |
 | U-11 | open item | OPEN | Further shared contracts proposed by later sessions | COM-06, S02-DEP-01, S08-DEP-01, S11-DEP-01 |
 | U-12 | open item | OPEN | Confirm the two interpretations in D-012 | G04-10, G04-11 |
@@ -118,11 +118,11 @@ None.
 | D-008 | PROPOSED | Canonical JSON and deterministic identifiers | S00-ASG-22, S00-ACC-01, G08-07, G02-02 |
 | D-009 | SUPERSEDED | Total order by availability time | S00-ASG-25, S10-ACC-02, S10-ACC-03 |
 | D-010 | PROPOSED | Freshness fails closed at the boundary | S00-ASG-23, G03-12, G06-04 |
-| D-011 | PROPOSED | Paper-only routing lock; "paper" means in-process simulation | G08-03, G08-10, M-AUTH-13, M-AUTH-14, OWN-14, COM-11, M-DIR-07 |
+| D-011 | PROPOSED | Paper-only routing lock; "paper" means in-process simulation | G08-03, G08-10, M-AUTH-13, M-AUTH-19, OWN-14, COM-11, M-DIR-07 |
 | D-012 | PROPOSED | Master-specification safety rules are structural contract invariants | G04-09, G04-10, G04-11, G04-12, G04-13, G05-04, G05-08, G07-09, G07-10 |
 | D-013 | PROPOSED | Trading day is the Europe/Prague calendar date | G05-10, S08-ASG-08 |
 | D-014 | PROPOSED | Provisional vocabularies pending the audit | S02-ASG-06, S02-ASG-08, S01-ASG-06 |
-| D-015 | PROPOSED | Requirement traceability and evidence are generated, never typed | OWN-08, M-AUTH-16, M-AUTH-17, M-GATE-01, M-GATE-03 |
+| D-015 | PROPOSED | Requirement traceability and evidence are generated, never typed | OWN-08, OWN-16, OWN-17, OWN-18, M-AUTH-16, M-AUTH-17, M-AUTH-26, M-GATE-01, M-GATE-03 |
 | D-016 | PROPOSED | Branching | M-AUTH-09, M-AUTH-10, M-AUTH-11, M-DIR-06 |
 | D-017 | PROPOSED | Baselines are frozen by hash; quoted results are unverified claims | G02-08, G02-09, G09-01, G09-02, G09-07, S00-ACC-05 |
 | D-018 | PROPOSED | Research parameters live in one labelled file | M-DIR-08, G05-05, G01-11 |

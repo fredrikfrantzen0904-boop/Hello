@@ -2,7 +2,7 @@
 
 Persistent record of everything that prevents a requirement from being completed (**B-nnn**) and
 of every proposed deviation from, or addition to, the specification (**CR-nnn**).
-Requirements M-AUTH-05, M-GATE-07, OWN-10, COM-10. Entries are never deleted.
+Requirements M-AUTH-05, M-GATE-07, M-GATE-11, OWN-10, COM-10, COM-12. Entries are never deleted.
 
 Status values: `OPEN`, `RESOLVED`, `APPROVED`, `REJECTED`.
 The heading and `- Status:` format is parsed by `tools/gie_registers.py`.
@@ -92,26 +92,27 @@ each consuming session which shared types are still missing. They were **not** d
 Session 00: their content depends on the audit of the existing system (B-001) and on broker and
 account facts (U-04, U-09, U-10); defining them now would mean inventing data.
 
-Proposal: each type is proposed by the named session as its **first deliverable**, integrated into
-`gie/contracts/` by the coordinator with the Session 00 framework (field declarations, registry,
-schema lock, golden messages, independent tests), and must exist before the listed sessions start.
-The machine-readable form of this table is `contract_extensions` in
-`specifications/dependency_graph.yaml`; the start gate there refers to it.
+Proposal (the rule is `gates.extension_gate` in `specifications/dependency_graph.yaml`; the
+machine-readable form of the table is `contract_extensions` there): each type is the **first
+deliverable** of the session that owns the knowledge. The coordinator integrates it into
+`gie/contracts/` with the Session 00 framework (field declarations, registry, schema lock, golden
+messages, independent tests); it stays PROPOSED until the owner approves it at that session's
+review gate. A consuming session starts with its wave but writes no code against the type before it
+is integrated, never defines a local stand-in (COM-06), and cannot be integrated itself before the
+types it consumes are.
 
-| id | shared type | proposed by | needed before the start of | why it cannot be defined now |
+| id | shared type | proposed by | consumed by | why it cannot be defined now |
 |---|---|---|---|---|
 | CX-01 | `Candle` (completed bar with its construction rule) | 01 | 02, 03, 04 | candle construction and timeframes of the six engines are unknown (B-001) |
 | CX-02 | Broker calendar and session classifier | 01 | 02, 06, 08 | broker trading hours, rollover and the Prague reset are account facts (U-04) |
 | CX-04 | `InstrumentSpec` (contract size, digits, volume step, stop distance, margin, swap) | 07 | 06, 08 | broker data (U-10) |
-| CX-05 | `AccountSnapshot` (equity, margin, account-wide positions including other systems) | 08 | 05, 06 | account currency, reference equity and the other systems on the account are unknown (U-04) |
-| CX-06 | Single-valued observations with release vintage; news and calendar events | 01 and 03 | 03 | licensed feeds are unknown (U-09) |
-| CX-07 | Market condition / trading restriction record | 03 | 05 | news and rollover restrictions are account rules (U-04) |
-| CX-08 | `Decision` (the unified decision stream of session 05) | 05 | 09, 11 | its content is the design task of session 05 |
-| CX-09 | Outcome / label record | 04 and 09 | 09 | label definitions are a research deliverable of session 04 |
+| CX-05 | `AccountSnapshot` (equity, margin, account-wide positions including other systems) | 08 | 05, 06, 07 | account currency, reference equity and the other systems on the account are unknown (U-04) |
+| CX-06 | Single-valued observations with release vintage; news and calendar events | 01 | 03 | licensed feeds are unknown (U-09) |
+| CX-07 | Market condition / trading restriction record | 03 | 05, 08 | news and rollover restrictions are account rules (U-04) |
+| CX-08 | `Decision` (the unified decision stream of session 05) | 05 | 09, 10, 11 | its content is the design task of session 05 |
+| CX-09 | Outcome / label record | 04 | 09, 10 | label definitions are a research deliverable of session 04 |
 
-(CX-03 is CR-005.) Until a type exists, a session that needs it works on explicitly labelled test
-fixtures and may not claim integration complete (COM-07, COM-08). Open item U-11 asks the owner to
-confirm this procedure.
+(CX-03 is CR-005.) Open item U-11 asks the owner to confirm this procedure.
 
 ## CR-004 - Interpretations built into the contracts need confirmation
 

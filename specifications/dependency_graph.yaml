@@ -11,19 +11,28 @@ gates:
   start_gate:
     description: >-
       A session may START when (1) the owner has approved the Session 00 review package and the
-      shared contracts (M-DIR-02), (2) the owner has opened the session's wave, and (3) every
-      entry of contract_extensions whose required_before_start_of lists the session has been
-      integrated by the coordinator.  A depends_on session that is not integrated yet does not
+      shared contracts (M-DIR-02) and (2) the owner has opened the session's wave.  Sessions of
+      the same wave start together.  A depends_on session that is not integrated yet does not
       block the start: it is replaced by explicitly labelled test fixtures (COM-07) and the
       session may then not claim integration complete (COM-08).  contract_only dependencies
       never delay a start.
     requirements: [M-DIR-01, M-DIR-02, M-DIR-03, M-DIR-04, M-DIR-05, M-DIR-09, COM-07, COM-08]
+  extension_gate:
+    description: >-
+      A shared type listed under contract_extensions is the FIRST deliverable of the session
+      named in proposed_by; the coordinator integrates it into gie.contracts (status PROPOSED
+      until the owner approves it at that session's review gate).  A session named in
+      consumed_by starts with its wave, but it may not write code that consumes the type before
+      the coordinator has integrated it, and it never defines a local stand-in (COM-06); until
+      then it does the work that does not need the type.  Its own review package cannot pass
+      the integration gate while a type it consumes is not integrated.
+    requirements: [COM-06, M-AUTH-05, M-DIR-06]
   integration_gate:
     description: >-
       The coordinator merges a session branch only when (1) the review packages of all its
-      depends_on sessions are approved and integrated, (2) its own review package is approved by
-      the owner, and (3) the full CI passes on the merge result.  Nothing is merged without owner
-      approval.
+      depends_on sessions are approved and integrated, (2) every contract extension it consumes
+      is integrated, (3) its own review package is approved by the owner, and (4) the full CI
+      passes on the merge result.  Nothing is merged without owner approval.
     requirements: [M-DIR-06, M-GATE-09, M-AUTH-11, COM-09]
 
 # ---------------------------------------------------------------------------------------------
@@ -79,35 +88,34 @@ sessions:
 # ---------------------------------------------------------------------------------------------
 # Shared contract types that later sessions need and that Session 00 deliberately did NOT define
 # (docs/CHANGE_REQUESTS.md CR-003, CR-005): their content depends on the audit of the existing
-# system (B-001) and on broker / account facts (U-04, U-09, U-10).  Each is proposed by the
-# named session as its first deliverable, integrated into gie.contracts by the coordinator with
-# the framework, registry, schema lock, golden messages and tests of Session 00, and must exist
-# before the listed sessions start (start gate).
+# system (B-001) and on broker / account facts (U-04, U-09, U-10).  Rule: gates.extension_gate.
+#   proposed_by - the session whose first deliverable is the proposal (it owns the knowledge)
+#   consumed_by - sessions that build on the type and wait for its integration before doing so
 # ---------------------------------------------------------------------------------------------
 contract_extensions:
-  - {id: CX-01, name: Candle, proposed_by: [S01], required_before_start_of: [S02, S03, S04],
+  - {id: CX-01, name: Candle, proposed_by: [S01], consumed_by: [S02, S03, S04],
      change_request: CR-003, requirements: [S01-ASG-04, S02-DEP-01]}
   - {id: CX-02, name: BrokerCalendar and session classifier, proposed_by: [S01],
-     required_before_start_of: [S02, S06, S08], change_request: CR-003,
+     consumed_by: [S02, S06, S08], change_request: CR-003,
      requirements: [S01-ASG-05, S08-ASG-08, S08-ASG-10]}
   - {id: CX-03, name: Tick usability policy per quality flag, proposed_by: [S01],
-     required_before_start_of: [S02, S06, S07], change_request: CR-005,
+     consumed_by: [S02, S06, S07, S08], change_request: CR-005,
      requirements: [S01-ASG-06, S01-ASG-08, G03-12]}
   - {id: CX-04, name: InstrumentSpec (broker constraints of the instrument), proposed_by: [S07],
-     required_before_start_of: [S06, S08], change_request: CR-003,
+     consumed_by: [S06, S08], change_request: CR-003,
      requirements: [S07-ASG-15, S08-ASG-02]}
   - {id: CX-05, name: AccountSnapshot (account-wide state including other systems' positions),
-     proposed_by: [S08], required_before_start_of: [S05, S06], change_request: CR-003,
+     proposed_by: [S08], consumed_by: [S05, S06, S07], change_request: CR-003,
      requirements: [S08-ASG-01, S08-ASG-02, S08-ACC-08, S08-DEP-01]}
   - {id: CX-06, name: Observation with release vintage / news and calendar events,
-     proposed_by: [S01, S03], required_before_start_of: [S03], change_request: CR-003,
+     proposed_by: [S01], consumed_by: [S03], change_request: CR-003,
      requirements: [S01-ASG-12]}
   - {id: CX-07, name: MarketCondition / TradingRestriction, proposed_by: [S03],
-     required_before_start_of: [S05], change_request: CR-003, requirements: [S08-ASG-10]}
+     consumed_by: [S05, S08], change_request: CR-003, requirements: [S08-ASG-10]}
   - {id: CX-08, name: Decision (unified decision stream), proposed_by: [S05],
-     required_before_start_of: [S09, S11], change_request: CR-003, requirements: [S11-DEP-01]}
-  - {id: CX-09, name: Outcome / label record, proposed_by: [S04, S09],
-     required_before_start_of: [S09], change_request: CR-003, requirements: [S09-DEP-01]}
+     consumed_by: [S09, S10, S11], change_request: CR-003, requirements: [S11-DEP-01]}
+  - {id: CX-09, name: Outcome / label record, proposed_by: [S04],
+     consumed_by: [S09, S10], change_request: CR-003, requirements: [S09-DEP-01]}
 
 # ---------------------------------------------------------------------------------------------
 # Brief path -> repository path (COM-03: "paths are proposed until coordinator approves").

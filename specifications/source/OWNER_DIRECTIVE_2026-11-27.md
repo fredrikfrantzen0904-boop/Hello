@@ -2,7 +2,7 @@
 
 Source: project owner, chat message of 2026-11-27 that accompanied `GIE_Project_PDFs.zip` and
 `MASTER_1.pdf`. Recorded verbatim so that it survives context compaction. Atomised as
-requirements `OWN-01` .. `OWN-14` in `specifications/requirements_matrix.yaml`.
+requirements `OWN-01` .. `OWN-27` in `specifications/requirements_matrix.yaml`.
 
 > The ZIP contains the complete Gold Intelligence Engine project specification and all 13 specialist
 > development briefs.

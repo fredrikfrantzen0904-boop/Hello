@@ -13,18 +13,26 @@ M-AUTH-11, M-DIR-06, D-001, D-016.
 
 Rules:
 
-1. Two gates, as defined in `specifications/dependency_graph.yaml`:
+1. Three gates, defined once in `specifications/dependency_graph.yaml` (`gates`); this is a summary:
    * **Start gate.** A session branch is created from the development branch once the owner has
      approved the Session 00 contracts and has opened the session's wave. Sessions of the same wave
      start together; a dependency that is not integrated yet is replaced by explicitly labelled test
      fixtures (COM-07) and the session may then not claim integration complete (COM-08).
      `contract_only` dependencies never delay a start.
+   * **Extension gate.** A shared type that does not exist yet (`contract_extensions`) is the first
+     deliverable of the session that proposes it; the coordinator integrates it. A session that
+     consumes the type starts with its wave but writes no code against the type before it is
+     integrated and never defines a local stand-in (COM-06).
    * **Integration gate.** A session branch is merged only when the review packages of all its
-     `depends_on` sessions are approved and its own package is approved.
-2. A session edits only the paths it owns (`owns` in the dependency graph). Shared files
-   (`gie/core`, `gie/contracts`, `specifications/`, `docs/`, `CLAUDE.md`, `pyproject.toml`,
-   `tools/`) are changed only by the coordinator; a session that needs a change files a change
-   request in `docs/CHANGE_REQUESTS.md`.
+     `depends_on` sessions are approved, every contract extension it consumes is integrated, its own
+     package is approved and the full CI passes on the result.
+2. A session edits only the paths it owns (`owns` in the dependency graph). Shared files are changed
+   only by the coordinator: `gie/core`, `gie/contracts`, `gie/__init__.py`, `gie/app`,
+   `specifications/`, `docs/`, `tools/`, `.github/`, `CLAUDE.md`, `README.md`, `pyproject.toml`,
+   `.gitignore`, `.gitattributes`, and the shared test files `tests/conftest.py`,
+   `tests/gie/samples.py`, `tests/gie/golden/`, `tests/gie/core/`, `tests/gie/contracts/`,
+   `tests/gie/tools/`. A session that needs a change files a change request in
+   `docs/CHANGE_REQUESTS.md`.
 3. A session ends by committing its review package under `reviews/session_NN/` and stopping.
 4. The coordinator merges a session branch into the development branch only after the owner has
    approved that review package ("Do not merge without owner approval"). Merges are

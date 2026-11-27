@@ -302,7 +302,7 @@ def validate_position_transition(previous: Position | None, snapshot: Position) 
 
     For GIE-owned positions it enforces the monotonic rules of the master
     specification: the stop never widens and is never removed (G04-11), the
-    executable net P&L peak never decreases (G04-13) and the position is never
+    executable net P&L peak never decreases (G04-13, G04-15) and the position is never
     increased (G04-10).  For EXTERNAL positions, which GIE only observes, it
     checks identity and time order and accepts whatever the other system did.
     """

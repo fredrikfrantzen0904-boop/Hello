@@ -34,6 +34,9 @@ Exit status: 0 success, 1 problems were reported, 2 command line error.
 Rules worth knowing (the complete list is the code of :func:`check_registers`):
 
 * a requirement is never deleted: the count may not drop below ``minimum_requirement_count``;
+* the ``text`` of a requirement holds the owner's words only: every word of it must occur in its
+  ``source_clause`` (ignoring case and a plural ending) or be one of a few function words
+  (:data:`TEXT_GLUE_WORDS`); explanations and interpretations belong in ``notes``;
 * the SHA-256 of every extracted specification text must equal the recorded value - a changed
   specification is noticed and the matrix must be re-verified against it;
 * ``verified`` needs a contribution with an existing evidence path; ``blocked`` needs a blocker id
@@ -91,6 +94,37 @@ GENERATED_NOTICE = "GENERATED - do not edit"
 
 SESSIONS = tuple(f"S{number:02d}" for number in range(13))
 REQUIREMENT_ID_RE = re.compile(r"^[A-Z][A-Z0-9]*(-[A-Z]+)?-[0-9]{2,3}$")
+
+#: Function words that may connect the owner's words in an atomised requirement ``text``.
+TEXT_GLUE_WORDS = frozenset(
+    [
+        "a",
+        "an",
+        "the",
+        "is",
+        "are",
+        "of",
+        "for",
+        "and",
+        "to",
+        "in",
+        "at",
+        "with",
+        "be",
+        "not",
+        "do",
+        "no",
+        "as",
+        "by",
+        "on",
+        "or",
+        "it",
+        "its",
+        "that",
+        "this",
+    ]
+)
+_WORD_RE = re.compile(r"[a-z0-9%+&-]+(?:\.[0-9]+%?)?")
 
 #: Requirement statuses whose meaning the rules below depend on; the matrix must declare them.
 REQUIRED_STATUSES = ("not_started", "in_progress", "partial", "implemented", "verified", "blocked")
@@ -630,6 +664,33 @@ def _check_contribution(
     return True
 
 
+def _words(text: str) -> list[str]:
+    """Lower-case words of *text*; ``/`` and apostrophes separate words (``bid/ask`` is two words)."""
+    normalised = text.lower().replace("'", " ").replace("\u2019", " ").replace("/", " ")
+    words = (word.strip(".-") for word in _WORD_RE.findall(normalised))
+    return [word for word in words if any(character.isalnum() for character in word)]
+
+
+def _stem(word: str) -> str:
+    for ending in ("ies", "es", "s"):
+        if word.endswith(ending) and len(word) > len(ending) + 2:
+            return word[: -len(ending)]
+    return word
+
+
+def words_not_in_clause(text: str, source_clause: str) -> list[str]:
+    """Words of *text* that do not come from *source_clause* (see :data:`TEXT_GLUE_WORDS`)."""
+    clause_words = set(_words(source_clause))
+    clause_stems = {_stem(word) for word in clause_words}
+    return sorted(
+        {
+            word
+            for word in _words(text)
+            if word not in clause_words and _stem(word) not in clause_stems and word not in TEXT_GLUE_WORDS
+        }
+    )
+
+
 def _check_requirement(
     registers: Registers, entry: object, index: int, info: _MatrixInfo, report: Report
 ) -> None:
@@ -694,6 +755,12 @@ def _check_requirement(
 
     # From here on the entry has the right shape; the remaining rules are about its content.
     info.sound.setdefault(entry_id, entry)
+    added_words = words_not_in_clause(entry["text"], entry["source_clause"])
+    if entry["source_clause"].strip() and added_words:
+        report.problem(
+            f"{where}: text contains words that are not in its source_clause: {', '.join(added_words)} "
+            "(text holds the owner's words only; explanations belong in 'notes')"
+        )
     references = [*blockers, *(item for c in contributions for item in c.get("blockers", []))]
     for reference in references:
         _check_reference(reference, where, registers.logs, report)

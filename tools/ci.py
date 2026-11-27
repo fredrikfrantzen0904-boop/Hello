@@ -75,7 +75,7 @@ def build_steps(evidence_dir: Path) -> list[Step]:
         Step(
             "paper-only routing lock (static scan)",
             (py, "-m", "tools.check_live_lock"),
-            ("S00-ACC-04", "G08-03", "G08-10", "OWN-14"),
+            ("S00-ACC-04", "G08-03", "G08-10", "M-AUTH-19", "M-DIR-07", "COM-11", "OWN-14"),
         ),
         Step(
             "architecture and dependency rules",

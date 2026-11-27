@@ -524,7 +524,7 @@ requirements:
   status: not_started
   review_status: unverified
   contributions: []
-  notes: ''
+  notes: 'Same rule: G06-07.'
 - id: G01-02
   source: MASTER.pdf
   section: G01 | Objective
@@ -1189,7 +1189,7 @@ requirements:
   source: MASTER.pdf
   section: G04 | Risk
   kind: system
-  text: Profit ratchet is monotonic.
+  text: Monotonic profit ratchet.
   source_clause: No arbitrary position count; aggregate gross/net and correlated risk, pending orders, margin, costs
     and gap stress. Adaptive sizing only from validated quality; no martingale, averaging down or widening protective
     stops. Hard protective stops; fast monotonic profit ratchet based on executable net P&L. Compare against fixed
@@ -1203,7 +1203,7 @@ requirements:
   source: MASTER.pdf
   section: G04 | Risk
   kind: system
-  text: Profit ratchet is fast.
+  text: Fast profit ratchet.
   source_clause: No arbitrary position count; aggregate gross/net and correlated risk, pending orders, margin, costs
     and gap stress. Adaptive sizing only from validated quality; no martingale, averaging down or widening protective
     stops. Hard protective stops; fast monotonic profit ratchet based on executable net P&L. Compare against fixed
@@ -1288,8 +1288,8 @@ requirements:
   review_status: unverified
   contributions: []
   notes: The source attaches 'configurable and subject to validation' to the recovery and emergency-halt levels
-    only. Whether -2% and +5% are also adjustable is open item U-14; under M-DIR-08 every numerical setting is a
-    research parameter, not an approved limit.
+    only. Whether -2% and +5% are also adjustable is open item U-14; M-DIR-08 says 'Proposed numerical settings
+    are research parameters, not approved production limits'.
 - id: G05-06
   source: MASTER.pdf
   section: G05 | Daily states
@@ -2017,7 +2017,9 @@ requirements:
   status: not_started
   review_status: unverified
   contributions: []
-  notes: Existing evidence quoted by the specification; unverified here.
+  notes: 'Existing evidence quoted by the specification; unverified here. The figures that follow in the same source
+    sentence are separate requirements: G09-11 (+0.462R), G09-12 (18% day coverage), G09-13 (4.9% drawdown at 0.5%
+    risk).'
 - id: G09-03
   source: MASTER.pdf
   section: G09 | Evidence
@@ -2419,7 +2421,7 @@ requirements:
   status: not_started
   review_status: unverified
   contributions: []
-  notes: ''
+  notes: 'Same rule from the owner''s directive: OWN-07.'
 - id: M-DIR-02
   source: MASTER.pdf
   section: Implementation directive
@@ -2679,13 +2681,15 @@ requirements:
   source: MASTER.pdf
   section: Document header and footer
   kind: informational
-  text: GIE / ENGINEERING SPECIFICATION / V1.0; every page is labelled 'GIE | 27 Nov 2026 | Paper / research only'.
+  text: GIE / ENGINEERING SPECIFICATION / V1.0 ... GIE | 27 Nov 2026 | Paper / research only
   source_clause: GIE / ENGINEERING SPECIFICATION / V1.0 ... GIE | 27 Nov 2026 | Paper / research only
   sessions: [S00, S01, S02, S03, S04, S05, S06, S07, S08, S09, S10, S11, S12]
   status: not_started
   review_status: unverified
   contributions: []
-  notes: Header and footer of the master specification and of every brief. Specification version V1.0.
+  notes: Header (before '...') and footer (after '...') printed on every page of the master specification and of
+    every brief; the '...' joins the two and is not part of the source. Specification version V1.0; label 'Paper
+    / research only'.
 - id: COM-01
   source: 00-12 briefs (identical text in every session brief)
   section: Common brief clauses
@@ -2728,14 +2732,15 @@ requirements:
   section: Common brief clauses
   kind: governance
   text: Integrated prompt - paste or attach to Claude.
-  source_clause: You are a specialist implementation engineer for Gold Intelligence Engine (GIE). The owner approves
-    material changes; ChatGPT provides architecture and independent review recommendations. Read the approved master
-    specification, CLAUDE.md, contracts and decision log before editing. Raise conflicts or missing dependencies
-    as change requests; never silently simplify, invent data, or mark placeholders complete. Use a dedicated Git
-    branch/worktree; do not overwrite other sessions, merge without owner approval, or modify existing Gold Bot,
-    AI trader, breakout bot or GCE baselines. Paper/replay only; build execution interfaces but keep real order
-    routing disabled. Do not expose credentials. Record exact commit, files, tests, commands, results, limitations
-    and requirement IDs. Submit a PDF review plus machine-readable evidence; stop at the review gate.
+  source_clause: Integrated prompt - paste or attach to Claude You are a specialist implementation engineer for
+    Gold Intelligence Engine (GIE). The owner approves material changes; ChatGPT provides architecture and independent
+    review recommendations. Read the approved master specification, CLAUDE.md, contracts and decision log before
+    editing. Raise conflicts or missing dependencies as change requests; never silently simplify, invent data, or
+    mark placeholders complete. Use a dedicated Git branch/worktree; do not overwrite other sessions, merge without
+    owner approval, or modify existing Gold Bot, AI trader, breakout bot or GCE baselines. Paper/replay only; build
+    execution interfaces but keep real order routing disabled. Do not expose credentials. Record exact commit, files,
+    tests, commands, results, limitations and requirement IDs. Submit a PDF review plus machine-readable evidence;
+    stop at the review gate.
   sessions: [S00, S01, S02, S03, S04, S05, S06, S07, S08, S09, S10, S11, S12]
   status: not_started
   review_status: unverified
@@ -3333,7 +3338,7 @@ requirements:
   source: specifications/source/OWNER_DIRECTIVE_2026-11-27.md
   section: Owner launch instructions
   kind: governance
-  text: Treat the owner as the project owner with final authority.
+  text: Treat me as the project owner with final authority.
   source_clause: The ZIP contains the complete Gold Intelligence Engine project specification and all 13 specialist
     development briefs. You will coordinate and implement the entire project within this session. Read every PDF
     in full before beginning. Extract and preserve all requirements in permanent project documentation so nothing
@@ -3351,7 +3356,7 @@ requirements:
   status: not_started
   review_status: unverified
   contributions: []
-  notes: Split from OWN-04.
+  notes: '''me'' is the project owner who wrote the directive. Split from OWN-04.'
 - id: OWN-23
   source: specifications/source/OWNER_DIRECTIVE_2026-11-27.md
   section: Owner launch instructions
@@ -4556,7 +4561,7 @@ requirements:
   status: not_started
   review_status: unverified
   contributions: []
-  notes: ''
+  notes: Two states (missing; contra); the status is the minimum over both.
 - id: S02-ASG-09
   source: 02_Strategy_Intelligence.pdf
   section: Your assignment
@@ -5917,7 +5922,8 @@ requirements:
   status: not_started
   review_status: unverified
   contributions: []
-  notes: 'Two measures (p99; max): both must be reported.'
+  notes: 'Two measures (p99; max): each needs its own marked test and both must be reported; the status is the worse
+    of the two.'
 - id: S06-ACC-07
   source: 06_Reflex_Engine.pdf
   section: Acceptance tests
@@ -7817,7 +7823,7 @@ requirements:
   status: not_started
   review_status: unverified
   contributions: []
-  notes: ''
+  notes: Two objects (code; tests); the status is the minimum over both.
 - id: S12-ASG-03
   source: 12_Quality_Assurance.pdf
   section: Your assignment
@@ -7830,7 +7836,7 @@ requirements:
   status: not_started
   review_status: unverified
   contributions: []
-  notes: ''
+  notes: Two techniques (mutation; failure injection); the status is the minimum over both.
 - id: S12-ASG-04
   source: 12_Quality_Assurance.pdf
   section: Your assignment
@@ -7843,7 +7849,7 @@ requirements:
   status: not_started
   review_status: unverified
   contributions: []
-  notes: ''
+  notes: Two properties (concurrency; latency); the status is the minimum over both.
 - id: S12-ASG-05
   source: 12_Quality_Assurance.pdf
   section: Your assignment
@@ -7882,7 +7888,7 @@ requirements:
   status: not_started
   review_status: unverified
   contributions: []
-  notes: ''
+  notes: Two references (raw exports; commits); the status is the minimum over both.
 - id: S12-ASG-08
   source: 12_Quality_Assurance.pdf
   section: Your assignment

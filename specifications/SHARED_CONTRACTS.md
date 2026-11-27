@@ -105,7 +105,7 @@ Rules:
   learned downstream (G06-08, G06-09: never assume fixed correlations).
 * The only tradable symbol is `XAUUSD` (G01-01, G06-07).  `Candidate`, `TradePlan` and `OrderEvent`
   can only carry `XAUUSD`; so can a `Position` owned by GIE.  `Tick` and `Evidence` may describe other
-  observed instruments (G06-06).  Broker symbol names are mapped to canonical symbols by market data.
+  observed instruments (G06-06, G06-10 .. G06-17).  Broker symbol names are mapped to canonical symbols by market data.
 
 ## 3. Time
 
@@ -480,7 +480,7 @@ that breaks one is refused before it becomes part of a run's history.
 | An order follows its state machine; terminal states are final | `validate_order_transition`, `ORDER_TRANSITIONS` | S07-ASG-01 |
 | No replacement or reconciliation can add risk: volume never grows; an entry's prices and attached stop are fixed and its expiry only shortens; a protective stop only tightens and never gains an expiry | `validate_order_transition` | G04-09, G04-10, G04-11, S07-ASG-04 |
 | At most one plan of an alternative group is ever executed | `LifecycleLedger` | S05-ACC-04 |
-| A GIE position's stop never widens and is never removed; its volume never grows; its executable net P&L peak never decreases | `validate_position_transition` | G04-10, G04-11, G04-13 |
+| A GIE position's stop never widens and is never removed; its volume never grows; its executable net P&L peak never decreases | `validate_position_transition` | G04-10, G04-11, G04-13, G04-15 |
 | A plan's stop never moves away from the entry between revisions; final statuses are final | `validate_plan_transition` | G04-11 |
 | The identity of a market event never changes between evidence revisions | `validate_evidence_transition` | G02-02 |
 | A model reaches ACTIVE only through SHADOW; a re-activation names the rolled-back version and needs a new approval; one ACTIVE version per model family | `validate_model_transition`, `validate_registry_history` | G07-09, G07-10, G07-11 |

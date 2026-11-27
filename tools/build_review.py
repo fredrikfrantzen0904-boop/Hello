@@ -776,19 +776,17 @@ def build(evidence_dir: Path, out: Path, reviewed_commit: str) -> None:
     story.append(p("Provisional elements and shared types still missing", H2))
     story.append(
         p(
-            "Because the six engines could not be inspected (B-001), engine-specific vocabularies are open strings or small provisional enumerations (EvidenceStage, MarketSession, TickFlag, ModelKind, reason codes). The following shared types are needed by later sessions and were deliberately <b>not</b> defined in Session 00, because their content depends on the audit and on broker and account facts (change requests CR-003 and CR-005). Each is proposed by the named session as its first deliverable and added to the shared contracts by the coordinator; a session may not start before the types it needs exist."
+            "Because the six engines could not be inspected (B-001), engine-specific vocabularies are open strings or small provisional enumerations (EvidenceStage, MarketSession, TickFlag, ModelKind, reason codes). The following shared types are needed by later sessions and were deliberately <b>not</b> defined in Session 00, because their content depends on the audit and on broker and account facts (change requests CR-003 and CR-005). Each is the first deliverable of the session that proposes it and is added to the shared contracts by the coordinator; a consuming session writes no code against a type before it is integrated (extension gate)."
         )
     )
-    extension_rows: list[list[Any]] = [
-        ["id", "shared type", "proposed by", "needed before the start of", "CR"]
-    ]
+    extension_rows: list[list[Any]] = [["id", "shared type", "proposed by", "consumed by", "CR"]]
     for item in graph.get("contract_extensions", []):
         extension_rows.append(
             [
                 esc(item["id"]),
                 esc(item["name"]),
                 ", ".join(item["proposed_by"]),
-                ", ".join(item["required_before_start_of"]),
+                ", ".join(item["consumed_by"]),
                 esc(item["change_request"]),
             ]
         )
