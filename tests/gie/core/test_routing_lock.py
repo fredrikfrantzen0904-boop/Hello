@@ -1309,7 +1309,7 @@ def test_no_contract_record_can_be_decoded_with_a_live_run_mode() -> None:
                 _from_wire(tampered)
             assert caught.value.details.get("path") == "mode", name
         checked.append(name)
-    # Every run-scoped contract was exercised (the Tick carries no run mode).
+    # Every contract that carries a run mode was exercised (Tick and ModelVersion carry none).
     assert "OrderEvent" in checked
     assert len(checked) >= 6
 

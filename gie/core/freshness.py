@@ -18,10 +18,15 @@ from __future__ import annotations
 
 from gie.core.errors import ContractValidationError, FutureDataError, StaleDataError
 
+_INT64_MIN = -(2**63)
+_INT64_MAX = 2**63 - 1
+
 
 def _require_int(value: int, what: str) -> None:
     if isinstance(value, bool) or not isinstance(value, int):
         raise ContractValidationError(f"{what} must be an int of nanoseconds", value=repr(value)[:64])
+    if not _INT64_MIN <= value <= _INT64_MAX:
+        raise ContractValidationError(f"{what} is outside the signed 64-bit range", value=str(value)[:64])
 
 
 def age_ns(*, now_ns: int, reference_ns: int, future_tolerance_ns: int = 0) -> int:

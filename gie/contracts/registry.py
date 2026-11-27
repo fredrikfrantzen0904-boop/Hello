@@ -27,7 +27,7 @@ class SemVer:
 def parse_semver(text: object) -> SemVer:
     if not isinstance(text, str):
         raise ContractVersionError("schema_version must be a string", value=repr(text)[:64])
-    match = _SEMVER_RE.match(text)
+    match = _SEMVER_RE.fullmatch(text)
     if match is None:
         raise ContractVersionError("schema_version must be MAJOR.MINOR.PATCH", value=text[:64])
     return SemVer(int(match[1]), int(match[2]), int(match[3]))

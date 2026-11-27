@@ -17,9 +17,32 @@ Rules that every GIE component follows:
 
 from __future__ import annotations
 
+import math
 from typing import ClassVar, Final
 
 DetailValue = str | int | float | bool | None
+
+
+_INT64_MIN: Final[int] = -(2**63)
+_INT64_MAX: Final[int] = 2**63 - 1
+
+
+def _journalable(value: object) -> DetailValue:
+    """Make a detail value safe for canonical JSON.
+
+    Errors are data (they are journaled), so a detail must never be the reason an
+    error cannot be written: integers outside 64 bits, non-finite floats and
+    values of any other type are carried as (truncated) text.
+    """
+    if value is None or isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return value if _INT64_MIN <= value <= _INT64_MAX else str(value)[:80]
+    if isinstance(value, float):
+        return value if math.isfinite(value) else repr(value)
+    if isinstance(value, str):
+        return value.encode("utf-8", errors="backslashreplace").decode("utf-8")[:500]
+    return repr(value)[:200]
 
 
 class GieError(Exception):
@@ -30,7 +53,9 @@ class GieError(Exception):
     def __init__(self, message: str, **details: DetailValue) -> None:
         super().__init__(message)
         self.message: Final[str] = message
-        self.details: Final[dict[str, DetailValue]] = dict(details)
+        self.details: Final[dict[str, DetailValue]] = {
+            key: _journalable(value) for key, value in details.items()
+        }
 
     def to_dict(self) -> dict[str, object]:
         """JSON-serialisable form used in journals and evidence files."""

@@ -56,7 +56,12 @@ def time_ns_from_datetime(moment: _dt.datetime) -> int:
     if moment.tzinfo is None or moment.utcoffset() is None:
         raise ContractValidationError("naive datetime has no defined instant")
     delta = moment - _dt.datetime(1970, 1, 1, tzinfo=_UTC)
-    return (delta.days * 86_400 + delta.seconds) * NS_PER_SECOND + delta.microseconds * NS_PER_US
+    time_ns = (delta.days * 86_400 + delta.seconds) * NS_PER_SECOND + delta.microseconds * NS_PER_US
+    if not 0 <= time_ns <= MAX_TIME_NS:
+        raise ContractValidationError(
+            "datetime outside the supported instant range (1970 .. 2262)", value=moment.isoformat()
+        )
+    return time_ns
 
 
 def iso_utc(time_ns: int) -> str:
@@ -76,7 +81,7 @@ def trading_day(time_ns: int) -> str:
 
 def parse_trading_day(day: str) -> _dt.date:
     """Validate and parse a ``YYYY-MM-DD`` trading-day label."""
-    if not isinstance(day, str) or not _DAY_RE.match(day):
+    if not isinstance(day, str) or not _DAY_RE.fullmatch(day):
         raise ContractValidationError("trading day must be YYYY-MM-DD", value=repr(day)[:32])
     try:
         return _dt.date.fromisoformat(day)
@@ -91,7 +96,10 @@ def trading_day_bounds_ns(day: str) -> tuple[int, int]:
     ``start_ns <= t < end_ns``.  Days are 23 h or 25 h long on DST changes.
     """
     date = parse_trading_day(day)
-    start = _dt.datetime(date.year, date.month, date.day, tzinfo=_PRAGUE)
-    next_date = date + _dt.timedelta(days=1)
-    end = _dt.datetime(next_date.year, next_date.month, next_date.day, tzinfo=_PRAGUE)
+    try:
+        start = _dt.datetime(date.year, date.month, date.day, tzinfo=_PRAGUE)
+        next_date = date + _dt.timedelta(days=1)
+        end = _dt.datetime(next_date.year, next_date.month, next_date.day, tzinfo=_PRAGUE)
+    except (OverflowError, ValueError) as exc:
+        raise ContractValidationError("trading day outside the supported range", value=day) from exc
     return time_ns_from_datetime(start), time_ns_from_datetime(end)

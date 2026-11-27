@@ -18,6 +18,7 @@ import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
+from fractions import Fraction
 
 from gie.core.errors import ContractValidationError
 
@@ -43,9 +44,12 @@ def nearest_rank(sorted_samples: list[int], percentile: float) -> int:
     """Nearest-rank percentile of an ascending, non-empty list (0 < percentile <= 100)."""
     if not sorted_samples:
         raise ContractValidationError("percentile of an empty sample is undefined")
-    if not 0 < percentile <= 100:
+    if isinstance(percentile, bool) or not isinstance(percentile, (int, float)):
+        raise ContractValidationError("percentile must be a number", actual_type=type(percentile).__name__)
+    if not 0 < percentile <= 100:  # also refuses NaN
         raise ContractValidationError("percentile must be in (0, 100]", value=percentile)
-    rank = math.ceil(percentile / 100 * len(sorted_samples))
+    # Exact rational arithmetic: binary floating point would turn 7 % of 100 samples into rank 8.
+    rank = math.ceil(Fraction(str(percentile)) * len(sorted_samples) / 100)
     return sorted_samples[max(rank, 1) - 1]
 
 
@@ -65,6 +69,10 @@ class LatencyRecorder:
         self._max: int | None = None
 
     def record(self, duration_ns: int) -> None:
+        if isinstance(duration_ns, bool) or not isinstance(duration_ns, int):
+            raise ContractValidationError(
+                "duration must be an int of nanoseconds", actual_type=type(duration_ns).__name__
+            )
         if duration_ns < 0:
             raise ContractValidationError("duration must be >= 0", value=duration_ns)
         self._count += 1

@@ -994,7 +994,8 @@ def _drive(start_ns: int, script: _Script) -> list[tuple[Any, ...]]:
             while never_issued in handles:
                 never_issued += 1
             clock.cancel(never_issued)
-            clock.cancel(-1 - amount)
+            if -1 - amount not in handles:
+                clock.cancel(-1 - amount)
         else:
             trace.append(("advanced", clock.advance_by(amount)))
         trace.append(

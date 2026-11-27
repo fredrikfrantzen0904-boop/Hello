@@ -94,9 +94,10 @@ def load_research_parameters(path: Path | None = None) -> ResearchParameters:
             document = tomllib.load(handle)
     except OSError as exc:
         raise ConfigError("research parameter file cannot be read", path=str(source)) from exc
-    except tomllib.TOMLDecodeError as exc:
-        raise ConfigError("research parameter file is not valid TOML", path=str(source)) from exc
-    if document.get("schema_version") != 1:
+    except (tomllib.TOMLDecodeError, UnicodeDecodeError) as exc:
+        raise ConfigError("research parameter file is not valid UTF-8 TOML", path=str(source)) from exc
+    schema_version = document.get("schema_version")
+    if type(schema_version) is not int or schema_version != 1:
         raise ConfigError("unsupported research parameter schema_version", path=str(source))
     status = document.get("approval_status")
     if status != EXPECTED_STATUS:

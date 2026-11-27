@@ -95,7 +95,7 @@ def make_id(prefix: str, *parts: IdPart) -> str:
 
 def is_valid_id(value: object, prefix: str | None = None) -> bool:
     """True when *value* is a well-formed identifier (optionally of a given prefix)."""
-    if not isinstance(value, str) or not _ID_RE.match(value):
+    if not isinstance(value, str) or not _ID_RE.fullmatch(value):
         return False
     found = value[:3]
     if found not in ID_PREFIXES:

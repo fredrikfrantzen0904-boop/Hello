@@ -67,14 +67,23 @@ def assert_live_routing_locked() -> None:
     """Start-up self-check: raise unless every static layer of the lock is intact."""
     if LIVE_ROUTING_PERMITTED is not False:
         raise LiveRoutingLockedError("LIVE_ROUTING_PERMITTED has been tampered with")
-    if {mode.value for mode in RunMode} != {"REPLAY", "PAPER"}:
-        raise LiveRoutingLockedError("RunMode vocabulary has been extended")
-    if {venue.value for venue in ExecutionVenue} != {"SIMULATED"}:
-        raise LiveRoutingLockedError("ExecutionVenue vocabulary has been extended")
+    # __members__ includes aliases: a member named LIVE that aliases PAPER must be caught too.
+    run_modes = {name: member.value for name, member in RunMode.__members__.items()}
+    if run_modes != {"REPLAY": "REPLAY", "PAPER": "PAPER"}:
+        raise LiveRoutingLockedError("RunMode vocabulary has been changed")
+    venues = {name: member.value for name, member in ExecutionVenue.__members__.items()}
+    if venues != {"SIMULATED": "SIMULATED"}:
+        raise LiveRoutingLockedError("ExecutionVenue vocabulary has been changed")
 
 
 _registry_lock = threading.Lock()
+#: Admitted adapter classes.  Membership is decided by object identity (``is``), never by
+#: ``==`` / ``hash``, which a metaclass could override to impersonate an admitted class.
 _SIMULATED_ADAPTER_TYPES: set[type] = set()
+
+
+def _is_admitted(adapter_type: type) -> bool:
+    return any(admitted is adapter_type for admitted in _SIMULATED_ADAPTER_TYPES)
 
 
 def _declared_venue(adapter_type: type) -> object:
@@ -98,11 +107,13 @@ def register_simulated_adapter(adapter_type: type) -> type:
             "adapter must declare sends_real_orders = False", adapter=adapter_type.__qualname__
         )
     with _registry_lock:
-        _SIMULATED_ADAPTER_TYPES.add(adapter_type)
+        if not _is_admitted(adapter_type):
+            _SIMULATED_ADAPTER_TYPES.add(adapter_type)
     return adapter_type
 
 
 def registered_adapter_types() -> frozenset[type]:
+    """Immutable snapshot of the admitted adapter classes."""
     with _registry_lock:
         return frozenset(_SIMULATED_ADAPTER_TYPES)
 
@@ -127,7 +138,7 @@ class RoutingGuard:
         assert_live_routing_locked()
         adapter_type = type(adapter)
         with _registry_lock:
-            admitted = adapter_type in _SIMULATED_ADAPTER_TYPES
+            admitted = _is_admitted(adapter_type)
         if not admitted:
             raise LiveRoutingLockedError(
                 "execution adapter type is not a registered simulated adapter",
