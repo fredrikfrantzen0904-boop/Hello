@@ -1,0 +1,1 @@
+{"ask":"2650.35","ask_volume":null,"bid":"2650.1","bid_volume":null,"contract":"Tick","event_time_ns":1795685400000000000,"flags":["EVENT_AFTER_RECEIVE"],"origin":"SYNTHETIC_FIXTURE","receive_time_ns":1795685399999000000,"schema_version":"1.0.0","seq":3,"source":"fixture","symbol":"XAUUSD"}
