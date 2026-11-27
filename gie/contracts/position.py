@@ -10,6 +10,7 @@ from gie.contracts._spec import Dec, EnumOf, Id, Int, Opt, Str, TimeNs, fld, inv
 from gie.contracts.common import GOLD_SYMBOL, PRICE, ZERO, Produced, Side, symbol_field
 from gie.contracts.registry import contract
 from gie.contracts.risk_decision import CURRENCY_PATTERN
+from gie.core.canonical import EXACT
 from gie.core.errors import IllegalTransitionError
 
 
@@ -179,7 +180,9 @@ class Position(Produced):
         inv(
             "POS-5",
             "peak_net_pnl_amount >= realized_net_pnl_amount + unrealized_net_pnl_amount",
-            lambda r: r.peak_net_pnl_amount >= r.realized_net_pnl_amount + r.unrealized_net_pnl_amount,
+            lambda r: (
+                r.peak_net_pnl_amount >= EXACT.add(r.realized_net_pnl_amount, r.unrealized_net_pnl_amount)
+            ),
         ),
         inv(
             "POS-6",
@@ -199,14 +202,17 @@ class Position(Produced):
     @property
     def net_pnl_amount(self) -> Decimal:
         """Executable net P&L: realised plus unrealised."""
-        return self.realized_net_pnl_amount + self.unrealized_net_pnl_amount
+        return EXACT.add(self.realized_net_pnl_amount, self.unrealized_net_pnl_amount)
 
     @property
-    def net_r(self) -> Decimal | None:
-        """Executable net P&L in multiples of the initial risk (null for external positions)."""
+    def net_r(self) -> float | None:
+        """Executable net P&L in multiples of the initial risk (``None`` for external positions).
+
+        An R multiple is a statistical quantity, so it is a float; the money amounts stay exact.
+        """
         if self.initial_risk_amount is None:
             return None
-        return self.net_pnl_amount / self.initial_risk_amount
+        return float(self.net_pnl_amount) / float(self.initial_risk_amount)
 
 
 _POSITION_IMMUTABLE = (

@@ -63,10 +63,12 @@ class ExecutionAdapter(Protocol):
     """Order endpoint as seen by the execution engine (implemented by 07).
 
     Only simulated adapters exist in this project phase: ``venue`` is
-    ``ExecutionVenue.SIMULATED`` and ``sends_real_orders`` is ``False``; the
+    ``ExecutionVenue.SIMULATED`` and ``sends_real_orders`` is ``False``, and the
     class must be admitted with
-    :func:`gie.core.routing_lock.register_simulated_adapter`, and every call must
-    be preceded by :meth:`gie.core.routing_lock.RoutingGuard.authorize`.
+    :func:`gie.core.routing_lock.register_simulated_adapter`.  An execution
+    engine never calls an adapter directly: it wraps it in
+    :class:`gie.contracts.guarded.GuardedExecutionAdapter`, which authorises the
+    adapter with the routing guard before every call.
 
     ``submit`` takes the ``SUBMIT_REQUESTED`` event of a new order, ``cancel``
     and ``replace`` the corresponding ``*_REQUESTED`` event.  All three are

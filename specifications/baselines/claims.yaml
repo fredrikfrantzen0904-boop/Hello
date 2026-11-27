@@ -1,0 +1,90 @@
+# Baseline claims quoted by the master specification (G02, G09).
+#
+# These are statements made in the owner's specification about the EXISTING system. They have NOT
+# been verified in this repository: the underlying artifacts are not accessible (blocker B-001) and
+# raw ticks were not stored in Round 2. They are recorded so that sessions 02 and 10 can reconcile
+# them. No code may treat any of these numbers as a verified result or as a target to fit.
+schema_version: 1
+status: UNVERIFIED_CLAIMS
+source: specifications/extracted/MASTER.txt
+claims:
+  - id: BL-R2-SETUPS
+    requirement: G09-01
+    quote: "Round 2: 23,481 setups"
+    value: 23481
+    unit: setups
+    verified: false
+    reconcile_in: [S10]
+    open_questions: ["Which engines, period and filters produced this count?"]
+  - id: BL-GCEB-TRADES
+    requirement: G09-02
+    quote: "GCE-B 134 trades"
+    value: 134
+    unit: trades
+    verified: false
+    reconcile_in: [S10, S02]
+    open_questions: []
+  - id: BL-GCEB-R
+    requirement: G09-02
+    quote: "+0.462R"
+    value: "0.462"
+    unit: R
+    verified: false
+    reconcile_in: [S10]
+    open_questions: ["Mean net R per trade, or total? Gross or net of costs? (open item U-05)"]
+  - id: BL-GCEB-COVERAGE
+    requirement: G09-02
+    quote: "18% day coverage"
+    value: "0.18"
+    unit: fraction of days
+    verified: false
+    reconcile_in: [S10]
+    open_questions: ["What is the denominator (eligible days)? (open items U-05, U-07)"]
+  - id: BL-GCEB-DRAWDOWN
+    requirement: G09-02
+    quote: "4.9% drawdown at 0.5% risk"
+    value: "0.049"
+    unit: fraction of equity at 0.5 % risk per trade
+    verified: false
+    reconcile_in: [S10]
+    open_questions: ["Peak-to-trough on closed trades or on equity? Compounded or additive?"]
+  - id: BL-SIGNIFICANCE
+    requirement: G09-03
+    quote: "no corrected statistical significance"
+    value: null
+    unit: null
+    verified: false
+    reconcile_in: [S10]
+    open_questions: []
+  - id: BL-LEARNED-COVERAGE
+    requirement: G09-04
+    quote: "Learned score 96% coverage but negative recent period"
+    value: "0.96"
+    unit: fraction of days
+    verified: false
+    reconcile_in: [S10, S04]
+    open_questions: ["Which period is 'recent', and how negative?"]
+  - id: BL-CAVEMEN-TRADES
+    requirement: G09-07
+    quote: "Reconcile 429 vs 473 Cavemen trades"
+    value: [429, 473]
+    unit: trades
+    verified: false
+    reconcile_in: [S02, S10]
+    open_questions: ["Which two sources report 429 and 473, and why do they differ?"]
+  - id: BL-BREACH-DENOMINATORS
+    requirement: G09-08
+    quote: "Reconcile ... daily breach denominators"
+    value: null
+    unit: null
+    verified: false
+    reconcile_in: [S10, S08]
+    open_questions: []
+  - id: BL-LIVE-DELAY
+    requirement: G09-09
+    quote: "Reconcile ... live delay"
+    value: null
+    unit: null
+    verified: false
+    reconcile_in: [S02, S10, S01]
+    open_questions: ["Is this the five-minute notification delay named in brief 02?"]

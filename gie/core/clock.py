@@ -84,6 +84,7 @@ class ReplayClock:
         self._start_ns: Final[int] = start_ns
         self._now_ns: int = start_ns
         self._timers: list[tuple[int, int, TimerCallback]] = []
+        self._pending: set[int] = set()
         self._cancelled: set[int] = set()
         self._next_handle: int = 0
         self._firing: bool = False
@@ -112,12 +113,19 @@ class ReplayClock:
             raise ClockRegressionError("timer scheduled in the past", due_ns=due_ns, now_ns=self._now_ns)
         handle = self._next_handle
         self._next_handle += 1
+        self._pending.add(handle)
         heapq.heappush(self._timers, (due_ns, handle, callback))
         return handle
 
     def cancel(self, handle: int) -> None:
-        """Cancel a pending timer.  Unknown or already fired handles are ignored."""
-        self._cancelled.add(handle)
+        """Cancel a pending timer.
+
+        A handle that was never issued, has already fired or was already cancelled
+        is ignored and has no effect on any other timer, now or later.
+        """
+        if handle in self._pending:
+            self._pending.discard(handle)
+            self._cancelled.add(handle)
 
     def next_timer_ns(self) -> int | None:
         """Due time of the earliest pending timer, or ``None``."""
@@ -125,7 +133,8 @@ class ReplayClock:
         return self._timers[0][0] if self._timers else None
 
     def pending_timers(self) -> int:
-        return sum(1 for _, handle, _ in self._timers if handle not in self._cancelled)
+        """Number of timers that are scheduled and neither fired nor cancelled."""
+        return len(self._pending)
 
     def _drop_cancelled_head(self) -> None:
         while self._timers and self._timers[0][1] in self._cancelled:
@@ -147,7 +156,8 @@ class ReplayClock:
                 self._drop_cancelled_head()
                 if not self._timers or self._timers[0][0] > target_ns:
                     break
-                due_ns, _, callback = heapq.heappop(self._timers)
+                due_ns, handle, callback = heapq.heappop(self._timers)
+                self._pending.discard(handle)
                 self._now_ns = due_ns
                 callback(due_ns)
         finally:

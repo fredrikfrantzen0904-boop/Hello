@@ -29,7 +29,7 @@ import json
 import math
 import re
 from collections.abc import Mapping, Sequence
-from decimal import Decimal, InvalidOperation
+from decimal import Context, Decimal, DivisionByZero, Inexact, InvalidOperation, Overflow
 from typing import Any, Final
 
 from gie.core.errors import CanonicalEncodingError
@@ -41,6 +41,13 @@ INT64_MAX: Final[int] = 2**63 - 1
 #: no leading zeros, at most 18 integer and 12 fractional digits.
 DECIMAL_PATTERN: Final[str] = r"^-?(0|[1-9][0-9]{0,17})(\.[0-9]{1,12})?$"
 _DECIMAL_RE: Final[re.Pattern[str]] = re.compile(DECIMAL_PATTERN)
+
+#: Arithmetic context for contract decimals.  64 significant digits cover every sum, difference
+#: and product of wire decimals (at most 30 digits each) exactly, and a result that would need
+#: rounding raises ``decimal.Inexact`` instead of being rounded silently.  Python's default
+#: context (28 digits, silent rounding) must not be used for prices, volumes, money or risk
+#: fractions.
+EXACT: Final[Context] = Context(prec=64, traps=[InvalidOperation, DivisionByZero, Overflow, Inexact])
 
 JsonValue = Any  # None | bool | int | float | str | list[JsonValue] | dict[str, JsonValue]
 
@@ -57,7 +64,9 @@ def decimal_to_str(value: Decimal) -> str:
         raise CanonicalEncodingError("non-finite Decimal cannot be encoded", value=str(value))
     if value == 0:
         return "0"
-    text = format(value.normalize(), "f")
+    # normalize() rounds to the precision of its context; the default context (28 digits) would
+    # silently drop digits of a 30-digit value, so the exact context is passed explicitly.
+    text = format(value.normalize(EXACT), "f")
     if not _DECIMAL_RE.match(text):
         raise CanonicalEncodingError(
             "Decimal outside the supported range (18 integer / 12 fractional digits)", value=text

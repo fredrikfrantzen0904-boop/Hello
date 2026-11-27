@@ -107,6 +107,8 @@ class Str(FieldType):
             raise _fail(path, "must be a string", actual_type=type(value).__name__)
         if not self.min_len <= len(value) <= self.max_len:
             raise _fail(path, f"length must be {self.min_len}..{self.max_len}", length=len(value))
+        if not value.isprintable():
+            raise _fail(path, "must be printable text (no control characters or lone surrogates)")
         if self._re is not None and not self._re.fullmatch(value):
             raise _fail(path, f"must match {self.pattern}", value=value[:64])
         if self.choices is not None and value not in self.choices:
@@ -306,9 +308,12 @@ class Float(FieldType):
         if isinstance(raw, bool) or not isinstance(raw, (int, float)):
             raise _fail(path, "must be a JSON number", actual_type=type(raw).__name__)
         try:
-            return float(raw)
+            number = float(raw)
         except OverflowError as exc:
             raise _fail(path, "must be a finite number") from exc
+        if isinstance(raw, int) and number != raw:
+            raise _fail(path, "integer is not exactly representable as a double", value=str(raw)[:32])
+        return number
 
     def schema(self, defs: dict[str, Any]) -> dict[str, Any]:
         out: dict[str, Any] = {"type": "number"}
@@ -576,7 +581,19 @@ class Record:
             if normalised is not value:
                 object.__setattr__(self, spec.name, normalised)
         for rule in cls.ALL_INVARIANTS:
-            if not rule.check(self):
+            try:
+                holds = bool(rule.check(self))
+            except (TypeError, ValueError, ArithmeticError) as exc:
+                # A rule that cannot even be evaluated (for example a comparison with a
+                # missing value) is treated as violated: fail closed, with a contract error.
+                raise ContractValidationError(
+                    f"{cls.__name__} invariant {rule.id} could not be evaluated: {rule.text}",
+                    contract=cls.__name__,
+                    invariant=rule.id,
+                    rule=rule.text,
+                    cause=type(exc).__name__,
+                ) from exc
+            if not holds:
                 raise ContractValidationError(
                     f"{cls.__name__} invariant {rule.id} violated: {rule.text}",
                     contract=cls.__name__,

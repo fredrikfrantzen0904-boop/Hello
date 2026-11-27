@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 from dataclasses import dataclass
 from decimal import Decimal
 from enum import Enum
@@ -36,6 +37,7 @@ from gie.contracts.common import (
     symbol_field,
 )
 from gie.contracts.registry import contract
+from gie.core.canonical import EXACT
 
 
 class EntryStyle(str, Enum):
@@ -223,7 +225,9 @@ class TradePlan(Produced):
         inv(
             "PLN-7",
             "the target close fractions sum to at most 1",
-            lambda r: sum((target.close_frac for target in r.targets), start=Decimal(0)) <= ONE,
+            lambda r: (
+                functools.reduce(EXACT.add, (target.close_frac for target in r.targets), Decimal(0)) <= ONE
+            ),
         ),
         inv(
             "PLN-8",
@@ -254,4 +258,4 @@ class TradePlan(Produced):
     @property
     def risk_per_unit(self) -> Decimal:
         """Price distance between entry and hard stop (always positive)."""
-        return abs(_entry(self) - self.stop_price)
+        return abs(EXACT.subtract(_entry(self), self.stop_price))

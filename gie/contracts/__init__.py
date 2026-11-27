@@ -37,6 +37,7 @@ from gie.contracts.evidence import (
     PriceLevel,
     ProducerClass,
 )
+from gie.contracts.guarded import GuardedExecutionAdapter
 from gie.contracts.model_version import (
     MODEL_STATUS_TRANSITIONS,
     ContractRef,
@@ -94,6 +95,7 @@ __all__ = [
     "EvidenceStage",
     "EvidenceState",
     "ExecutionVenue",
+    "GuardedExecutionAdapter",
     "Horizon",
     "Invalidation",
     "MarketSession",

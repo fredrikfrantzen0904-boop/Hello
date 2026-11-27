@@ -3,7 +3,9 @@ name = "gie"
 version = "0.1.0"
 description = "Gold Intelligence Engine - paper/replay research system for XAUUSD (real order routing locked)"
 requires-python = ">=3.11"
-dependencies = []
+# Runtime: Python standard library only. The single exception is the IANA time-zone *data*
+# package on Windows, where the operating system ships none (needed for the Prague trading day).
+dependencies = ["tzdata; platform_system == 'Windows'"]
 
 [project.optional-dependencies]
 # Everything needed to run the integration CI locally.
@@ -37,7 +39,7 @@ addopts = "-ra --strict-markers --strict-config"
 xfail_strict = true
 markers = [
     "requirement(*ids): requirement ids from specifications/requirements_matrix.yaml covered by the test",
-    "acceptance(id): acceptance-test id from specifications/acceptance_tests.yaml",
+    "acceptance(id): requirement id of the acceptance test, e.g. S00-ACC-01 (register entry AT-S00-ACC-01)",
     "benchmark: measures performance and records it as evidence (no hard pass/fail threshold)",
 ]
 filterwarnings = ["error"]
@@ -61,12 +63,17 @@ ignore = [
 "tests/**" = ["S", "PLC0415", "DTZ"]
 "tools/**" = ["T20", "S603", "S607"]
 "gie/contracts/schema_gen.py" = ["T20"]
+"tools/build_review.py" = ["E501", "T20", "PLR0917"]  # report prose
 
 [tool.mypy]
 python_version = "3.11"
 strict = true
 warn_unreachable = true
 files = ["gie"]
+
+[[tool.mypy.overrides]]
+module = ["reportlab.*"]
+ignore_missing_imports = true
 
 [tool.coverage.run]
 branch = true

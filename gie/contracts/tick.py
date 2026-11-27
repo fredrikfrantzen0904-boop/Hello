@@ -9,6 +9,7 @@ from enum import Enum
 from gie.contracts._spec import Dec, EnumOf, Int, ListOf, Opt, Record, Str, TimeNs, fld, inv
 from gie.contracts.common import PRICE, DataOrigin, symbol_field
 from gie.contracts.registry import contract
+from gie.core.canonical import EXACT
 
 SOURCE_PATTERN = r"^[a-z0-9][a-z0-9_.:-]{0,63}$"
 
@@ -106,11 +107,11 @@ class Tick(Record):
 
     @property
     def mid(self) -> Decimal:
-        return (self.bid + self.ask) / 2
+        return EXACT.divide(EXACT.add(self.bid, self.ask), Decimal(2))
 
     @property
     def spread(self) -> Decimal:
-        return self.ask - self.bid
+        return EXACT.subtract(self.ask, self.bid)
 
     @property
     def stream(self) -> str:

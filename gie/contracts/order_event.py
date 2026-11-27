@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from decimal import Decimal
 from enum import Enum
@@ -411,3 +412,35 @@ def validate_order_transition(previous: OrderEvent | None, event: OrderEvent) ->
         raise fail("cumulative_filled_lots may only change with a fill or RECONCILED event")
     if event.volume_lots < event.cumulative_filled_lots:
         raise fail("volume_lots may not be reduced below the filled quantity")
+    if event.event_type is _E.REPLACED:
+        _check_replacement(previous, event, fail)
+
+
+def _check_replacement(
+    previous: OrderEvent, event: OrderEvent, fail: Callable[[str], IllegalTransitionError]
+) -> None:
+    """Rules for what a REPLACED event may change (a replacement can never add risk).
+
+    * No order may grow: ``volume_lots`` never increases.
+    * An ENTRY order is bound to the plan and stop that risk approved, so its
+      prices and attached protection are fixed; only its volume (down) and its
+      expiry may change.  A different entry or stop is a new plan and needs a
+      new risk decision and a new order.
+    * A PROTECTIVE_STOP may only be tightened: the trigger of a SELL stop
+      (protecting a long position) may only rise, that of a BUY stop only fall.
+    """
+    if event.volume_lots > previous.volume_lots:
+        raise fail("a replacement may not increase volume_lots")
+    if event.order_type is not previous.order_type:
+        raise fail("order_type may not change")
+    if event.intent is OrderIntent.ENTRY:
+        for name in ("limit_price", "trigger_price", "attached_stop_price", "attached_take_profit_price"):
+            if getattr(previous, name) != getattr(event, name):
+                raise fail(f"{name} of an ENTRY order may not be replaced (it is bound to the approved plan)")
+    if event.intent is OrderIntent.PROTECTIVE_STOP:
+        before, after = previous.trigger_price, event.trigger_price
+        if before is None or after is None:
+            raise fail("a protective stop must keep a trigger price")
+        widened = after < before if event.side is Side.SELL else after > before
+        if widened:
+            raise fail("a protective stop may only be tightened, never widened")

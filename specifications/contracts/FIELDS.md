@@ -683,7 +683,7 @@ Values: `TICK`, `S1`, `M1`, `M5`, `M15`, `M30`, `H1`, `H4`, `D1`
 | RESEARCH | REJECTED, SHADOW |
 | SHADOW | ACTIVE, REJECTED |
 | ACTIVE | RETIRED, ROLLED_BACK |
-| RETIRED | (terminal) |
+| RETIRED | ACTIVE |
 | ROLLED_BACK | (terminal) |
 | REJECTED | (terminal) |
 

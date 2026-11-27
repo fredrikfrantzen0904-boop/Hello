@@ -69,6 +69,9 @@ Rules:
   (`risk_frac`, `daily_pnl_frac`, `profit_floor_frac`, `close_frac`) are exact decimals
   (`decimal.Decimal` in Python).  Binary floats MUST NOT be used for them, so that boundary rules such
   as "at exactly the floor no new risk" (G05-08) are decided exactly.
+* Arithmetic on these exact decimals MUST use the context `gie.core.canonical.EXACT` (64 significant
+  digits; a result that would need rounding raises instead of being rounded).  Python's default
+  decimal context rounds silently at 28 digits and MUST NOT be used for them.
 * Statistical quantities (scores, probabilities, R estimates, model metrics) are IEEE-754 doubles.
   NaN and infinities are invalid everywhere.
 * A value that is unknown or not applicable is `null`.  `0` always means the number zero.  In
@@ -313,11 +316,14 @@ These are structural: a record that violates them cannot be constructed or decod
 | Emergency halt never approves | RSK-5 | G05-04 |
 | At or below the daily profit floor nothing is approved | RSK-7 | G05-08 |
 | A stop is never wider than the initial stop and never removed | POS-4, `validate_position_transition` | G04-11 |
+| A protective stop order may only be tightened when replaced | `validate_order_transition` (REPLACED rules) | G04-11 |
+| No replacement can add risk: an order's volume never grows, and an entry order's prices and attached stop are fixed to what risk approved | `validate_order_transition` (REPLACED rules) | G04-09, G04-10, S07-ASG-04 |
+| An execution adapter is only reachable through the routing guard | `GuardedExecutionAdapter` | G08-03 |
 | A position is never increased | POS-2, `validate_position_transition` | G04-09, G04-10 |
 | The executable net P&L peak never decreases | POS-5, `validate_position_transition` | G04-13 |
 | A record cannot depend on data received after it was created | CAUSAL-1 | G10, S10-ACC-02 |
 | Missing evidence has null scores; inactive evidence has zero scores | EVD-2, EVD-5 | S02-ACC-03 |
-| A model can be ACTIVE only after SHADOW and only with a recorded owner approval | MDL-2, `MODEL_STATUS_TRANSITIONS` | G07-09, G07-10 |
+| A model can be ACTIVE only after SHADOW and only with a recorded owner approval; rollback re-activates the retired parent, again only with a recorded approval | MDL-2, MDL-6, `MODEL_STATUS_TRANSITIONS` | G07-09, G07-10, G07-11 |
 | Every record names its run, mode and the origin of its data (fixtures are labelled) | `RunScoped` header, `Tick.origin` | COM-07, M-AUTH-07 |
 
 The paper-only routing lock itself is specified in `gie/core/routing_lock.py` and
@@ -327,7 +333,10 @@ The paper-only routing lock itself is specified in `gie/core/routing_lock.py` an
 
 `gie.contracts.interfaces` defines the `Protocol` classes through which subsystems call each
 other: `TickSink`, `RecordSink`, `RiskGate`, `ExecutionAdapter` and `ModelRegistry`.  They are part
-of the shared contract surface and change under the same rules.  All calls are synchronous and
+of the shared contract surface and change under the same rules.  An execution engine never holds
+a raw `ExecutionAdapter`; it holds a `gie.contracts.guarded.GuardedExecutionAdapter`, which
+authorises the adapter with the routing guard before every call and checks every request and
+every returned event.  All calls are synchronous and
 MUST NOT wait for the network, a model in training or the dashboard (G03-05, G03-06, S06-ASG-07).
 
 ## 11. Provisional elements

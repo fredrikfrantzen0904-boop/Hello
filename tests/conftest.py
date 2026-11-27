@@ -5,6 +5,10 @@ Tests declare what they verify with markers::
     @pytest.mark.requirement("S00-ASG-22", "G08-07")
     @pytest.mark.acceptance("S00-ACC-01")
 
+Marker ids must exist in ``specifications/requirements_matrix.yaml`` (and acceptance
+ids must be ``-ACC-`` requirements); an unknown id aborts the run, so a typo can
+never silently detach a test from its requirement.
+
 When ``--gie-evidence=<path>`` is given, a JSON file is written with the outcome
 of every test together with its requirement and acceptance ids.  The registers
 (`tools/gie_registers.py`) and the review package are built from that file, so
@@ -21,6 +25,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 
 _RESULTS: dict[str, dict[str, Any]] = {}
 _STARTED = time.time()
@@ -42,7 +47,28 @@ def _marker_ids(item: pytest.Item, name: str) -> list[str]:
     return sorted(set(ids))
 
 
+def _known_requirement_ids() -> set[str]:
+    matrix = Path(__file__).resolve().parents[1] / "specifications" / "requirements_matrix.yaml"
+    document = yaml.safe_load(matrix.read_text(encoding="utf-8"))
+    return {entry["id"] for entry in document["requirements"]}
+
+
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    known = _known_requirement_ids()
+    unknown: list[str] = []
+    for item in items:
+        for name in ("requirement", "acceptance"):
+            for marker_id in _marker_ids(item, name):
+                if marker_id not in known:
+                    unknown.append(f"{item.nodeid}: @{name}({marker_id!r}) is not in the requirements matrix")
+                elif name == "acceptance" and "-ACC-" not in marker_id:
+                    unknown.append(
+                        f"{item.nodeid}: @acceptance({marker_id!r}) is not an acceptance requirement"
+                    )
+    if unknown:
+        raise pytest.UsageError(
+            "tests reference unknown requirement ids (traceability would be lost):\n  " + "\n  ".join(unknown)
+        )
     for item in items:
         _RESULTS[item.nodeid] = {
             "nodeid": item.nodeid,

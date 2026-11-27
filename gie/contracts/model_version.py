@@ -53,14 +53,19 @@ class ModelStatus(str, Enum):
 
 
 #: ``status before -> statuses allowed after``.  ``None`` is "not registered yet".
-#: ACTIVE is reachable only from SHADOW (shadow validation is mandatory), and a
-#: ROLLED_BACK or REJECTED version can never be reactivated.
+#:
+#: * ACTIVE is first reached only from SHADOW: shadow validation is mandatory (G07-09).
+#: * Promotion of a successor moves the previous ACTIVE version to RETIRED.
+#: * Rollback (G07-11) moves the faulty ACTIVE version to ROLLED_BACK and re-activates its
+#:   RETIRED parent; that is the only way a RETIRED version becomes ACTIVE again, and like
+#:   every activation it needs a recorded owner approval (MDL-2).
+#: * A ROLLED_BACK or REJECTED version can never be activated again.
 MODEL_STATUS_TRANSITIONS: Final[dict[ModelStatus | None, frozenset[ModelStatus]]] = {
     None: frozenset({ModelStatus.RESEARCH}),
     ModelStatus.RESEARCH: frozenset({ModelStatus.SHADOW, ModelStatus.REJECTED}),
     ModelStatus.SHADOW: frozenset({ModelStatus.ACTIVE, ModelStatus.REJECTED}),
     ModelStatus.ACTIVE: frozenset({ModelStatus.RETIRED, ModelStatus.ROLLED_BACK}),
-    ModelStatus.RETIRED: frozenset(),
+    ModelStatus.RETIRED: frozenset({ModelStatus.ACTIVE}),
     ModelStatus.ROLLED_BACK: frozenset(),
     ModelStatus.REJECTED: frozenset(),
 }

@@ -3,7 +3,9 @@ title: GIE acceptance test register
 description: 'One entry per acceptance requirement of the session briefs. ''status'' is maintained by tools/gie_registers.py
   from recorded pytest evidence: planned (no tests yet), passing (all marked tests passed), failing (any marked
   test failed or errored), blocked (cannot be executed; see blockers), partial (tests pass but part of the scope
-  is blocked or skipped). It is never set by hand to passing.'
+  is blocked or skipped). It is never set by hand to passing. For acceptance tests that are evaluations (a comparison
+  or a measurement), ''passing'' means the evaluation ran reproducibly and its result was recorded as evidence -
+  never that the result was favourable.'
 status_values:
 - planned
 - passing
@@ -52,6 +54,7 @@ acceptance_tests:
   test_modules:
   - tests/gie/core/test_routing_lock.py
   - tests/gie/tools/test_check_live_lock.py
+  - tests/gie/contracts/test_guarded_adapter.py
   status: planned
   blockers: []
   notes: ''
@@ -62,9 +65,8 @@ acceptance_tests:
   verification: pytest tests marked @pytest.mark.acceptance("S00-ACC-05")
   test_modules:
   - tests/gie/baseline/test_baseline_regression.py
-  - tests/gie/tools/test_baseline_freeze.py
   status: planned
-  blockers: []
+  blockers: [B-001]
   notes: ''
 - id: AT-S00-ACC-06
   requirement: S00-ACC-06
@@ -75,7 +77,7 @@ acceptance_tests:
   - tests/gie/tools/test_protected_paths.py
   - tests/gie/tools/test_baseline_audit.py
   status: planned
-  blockers: []
+  blockers: [B-001]
   notes: ''
 - id: AT-S01-ACC-01
   requirement: S01-ACC-01
@@ -256,7 +258,8 @@ acceptance_tests:
   test_modules: []
   status: planned
   blockers: []
-  notes: ''
+  notes: 'An evaluation: ''passing'' means the comparison ran reproducibly and was recorded, not that the result
+    was favourable.'
 - id: AT-S04-ACC-01
   requirement: S04-ACC-01
   session: S04
@@ -364,7 +367,7 @@ acceptance_tests:
   test_modules: []
   status: planned
   blockers: []
-  notes: ''
+  notes: 'An evaluation: ''passing'' means coverage was measured reproducibly and recorded.'
 - id: AT-S05-ACC-07
   requirement: S05-ACC-07
   session: S05
@@ -391,7 +394,7 @@ acceptance_tests:
   test_modules: []
   status: planned
   blockers: []
-  notes: ''
+  notes: 'Two scenarios (gap; slippage): each needs its own marked test; the status is the worse of the two.'
 - id: AT-S06-ACC-03
   requirement: S06-ACC-03
   session: S06
@@ -427,7 +430,7 @@ acceptance_tests:
   test_modules: []
   status: planned
   blockers: []
-  notes: ''
+  notes: 'Two measures (p99; max): both must be reported.'
 - id: AT-S06-ACC-07
   requirement: S06-ACC-07
   session: S06
@@ -436,7 +439,8 @@ acceptance_tests:
   test_modules: []
   status: planned
   blockers: []
-  notes: ''
+  notes: 'An evaluation: ''passing'' means the comparison ran reproducibly and was recorded, not that the result
+    was favourable.'
 - id: AT-S06-ACC-08
   requirement: S06-ACC-08
   session: S06
@@ -445,7 +449,8 @@ acceptance_tests:
   test_modules: []
   status: planned
   blockers: []
-  notes: ''
+  notes: 'An evaluation: ''passing'' means the comparison ran reproducibly and was recorded, not that the result
+    was favourable.'
 - id: AT-S07-ACC-01
   requirement: S07-ACC-01
   session: S07
@@ -526,7 +531,7 @@ acceptance_tests:
   test_modules: []
   status: planned
   blockers: []
-  notes: ''
+  notes: Tests read the threshold from specifications/research_parameters.toml.
 - id: AT-S08-ACC-02
   requirement: S08-ACC-02
   session: S08
@@ -535,7 +540,7 @@ acceptance_tests:
   test_modules: []
   status: planned
   blockers: []
-  notes: ''
+  notes: The meaning of the -1.75% level is open item U-03; tests read thresholds from specifications/research_parameters.toml.
 - id: AT-S08-ACC-03
   requirement: S08-ACC-03
   session: S08
@@ -544,7 +549,7 @@ acceptance_tests:
   test_modules: []
   status: planned
   blockers: []
-  notes: ''
+  notes: The -3% level is proposed and configurable (G05-05); tests read it from specifications/research_parameters.toml.
 - id: AT-S08-ACC-04
   requirement: S08-ACC-04
   session: S08
@@ -553,7 +558,7 @@ acceptance_tests:
   test_modules: []
   status: planned
   blockers: []
-  notes: ''
+  notes: Tests read the threshold from specifications/research_parameters.toml.
 - id: AT-S08-ACC-05
   requirement: S08-ACC-05
   session: S08
@@ -742,7 +747,7 @@ acceptance_tests:
   test_modules: []
   status: planned
   blockers: []
-  notes: ''
+  notes: 'Two states (stale; disconnect): each needs its own marked test; the status is the worse of the two.'
 - id: AT-S11-ACC-03
   requirement: S11-ACC-03
   session: S11
@@ -787,7 +792,7 @@ acceptance_tests:
   test_modules: []
   status: planned
   blockers: []
-  notes: ''
+  notes: 'Two scenarios (restart; disconnect): each needs its own marked test; the status is the worse of the two.'
 - id: AT-S12-ACC-03
   requirement: S12-ACC-03
   session: S12

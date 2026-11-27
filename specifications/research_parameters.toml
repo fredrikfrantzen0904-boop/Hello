@@ -1,8 +1,10 @@
 # GIE research parameters
 #
 # Every number here is a PROPOSED RESEARCH PARAMETER taken from the master specification.
-# None of them is an approved production limit (requirement M-DIR-08), none is established
-# performance (G01-11) and all are "configurable and subject to validation" (G05-05).
+# None of them is an approved production limit (requirement M-DIR-08) and none is established
+# performance (G01-11). The specification calls the recovery and emergency-halt levels explicitly
+# "configurable and subject to validation" (G05-05); whether -2 % and +5 % may be tuned as well is
+# open item U-14.
 # Code reads them through gie.core.params; it never hard-codes them.
 
 schema_version = 1
