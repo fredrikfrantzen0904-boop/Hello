@@ -10,12 +10,21 @@ Implementations:
 * :class:`ReplayClock` - virtual time driven by the replay harness.  It only
   moves when told to, never backwards, and fires timers deterministically.  It
   is both the :class:`Clock` and the :class:`Scheduler` of a replay run.
-* :class:`SystemClock` - UTC wall clock for paper mode.  It never returns a
-  smaller value than it returned before, even if the operating-system clock is
-  stepped backwards.
-* :class:`PollingScheduler` - the :class:`Scheduler` of a paper run.  The event
+* :class:`SystemClock` - UTC wall clock.  It never returns a smaller value
+  than it returned before, even if the operating-system clock is stepped
+  backwards.
+* :class:`PaperClock` - the clock of a paper run as components see it: the
+  instant of the input being processed ("step time"), moved only by the run loop.
+* :class:`PollingScheduler` - the :class:`Scheduler` of a paper run.  The run
   loop calls :meth:`PollingScheduler.run_due` between inputs; there are no timer
   threads, so callbacks run on the same thread and in the same order as in replay.
+* :class:`ClockView` / :class:`SchedulerView` - what a component is handed: it
+  can read time and schedule timers, it cannot move time or fire timers.
+
+**Step time.**  In replay and in paper alike, ``now_ns`` is the instant at which
+the input being processed became available, and it does not move while that
+input is processed.  Processing time is measured with ``monotonic_ns`` and is
+evidence only; it never enters a record.
 
 ``now_ns`` is the instant used for freshness and ordering decisions.
 ``monotonic_ns`` is only for measuring elapsed time.
@@ -35,7 +44,7 @@ from collections.abc import Callable
 from enum import Enum
 from typing import Final, Protocol, runtime_checkable
 
-from gie.core.errors import ClockRegressionError, ContractValidationError, describe
+from gie.core.errors import ClockRegressionError, ContractValidationError, FutureDataError, describe
 from gie.core.timeutil import MAX_TIME_NS
 
 
@@ -339,40 +348,107 @@ class SystemClock:
             return self._read_monotonic()
 
 
-class PollingScheduler:
-    """Scheduler of a paper run: timers fire when the event loop polls.
+class PaperClock:
+    """Clock of a paper run as components see it: the instant of the input being processed.
 
-    The loop that delivers inputs calls ``run_due(limit_ns=<receive time of the
-    next input>)`` before it delivers that input, and plain ``run_due()`` when it
-    is idle.  Timers therefore run on the loop thread, in ``(due time,
-    registration order)``, never early, and a timer due at instant *t* fires
-    before an input that became available at *t* - exactly as in replay.  A timer
-    can fire late by at most the poll interval.  The callback receives its *due*
-    time; code that needs the actual time reads the clock.
+    Replay and paper follow the same rule - **step time**: while one input (a
+    tick, a broker report, a timer) is processed, ``now_ns`` is the instant at
+    which that input became available and does not move.  Only the run loop
+    moves it, with :meth:`begin_step`.  Records written during a step therefore
+    carry the same decision time in paper as in a replay of the same inputs, and
+    measured processing time never enters a record (it is measured with
+    ``monotonic_ns`` and reported separately).
 
-    Differences from :class:`ReplayClock`, both unavoidable in real time: a due
-    time that is already in the past is not an error (it fires at the next
-    poll), and the clock keeps moving while callbacks run.  Use
-    :meth:`call_after` for code that must behave identically in both modes.
-    A callback may schedule further timers (those already due fire in the same
-    poll) and may not start a nested poll.  The class is not thread-safe by
-    design: all calls come from the loop thread.
+    ``wall_ns`` is the underlying system clock; only the run loop reads it, to
+    stamp the receive time of inputs and to decide when timers are due.
     """
 
-    def __init__(self, clock: Clock) -> None:
-        self._clock: Final[Clock] = clock
+    __slots__ = ("_step_ns", "_system")
+
+    def __init__(self, system: Clock | None = None) -> None:
+        source: Clock = SystemClock() if system is None else system
+        if getattr(source, "mode", None) is not ClockMode.SYSTEM:
+            raise ContractValidationError("a paper clock runs on a system clock")
+        self._system: Final[Clock] = source
+        self._step_ns: int = source.now_ns()
+
+    @property
+    def mode(self) -> ClockMode:
+        return ClockMode.SYSTEM
+
+    @property
+    def regressions_observed(self) -> int:
+        return self._system.regressions_observed
+
+    def now_ns(self) -> int:
+        return self._step_ns
+
+    def monotonic_ns(self) -> int:
+        return self._system.monotonic_ns()
+
+    def wall_ns(self) -> int:
+        """Current reading of the system clock (run loop only; components use ``now_ns``)."""
+        return self._system.now_ns()
+
+    def begin_step(self, time_ns: int) -> int:
+        """Start processing an input that became available at *time_ns* (run loop only).
+
+        Step time never moves backwards and never ahead of the system clock.
+        Beginning a step at the current step instant is allowed (several inputs
+        share an instant).
+        """
+        _require_instant(time_ns, "time_ns")
+        if time_ns < self._step_ns:
+            raise ClockRegressionError(
+                "step time cannot move backwards", time_ns=time_ns, step_ns=self._step_ns
+            )
+        wall_ns = self._system.now_ns()
+        if time_ns > wall_ns:
+            raise FutureDataError(
+                "a step cannot begin at an instant the system clock has not reached",
+                time_ns=time_ns,
+                wall_ns=wall_ns,
+            )
+        self._step_ns = time_ns
+        return time_ns
+
+
+class PollingScheduler:
+    """Scheduler of a paper run: timers fire when the run loop polls.
+
+    The loop calls ``run_due(limit_ns=<receive time of the next input>)`` before
+    it delivers that input, and plain ``run_due()`` when it is idle.  Timers run
+    on the loop thread, in ``(due time, registration order)``, never early, and
+    a timer due at instant *t* fires before an input that became available at
+    *t* - exactly as in replay.  While a timer runs, step time (``now_ns`` of the
+    :class:`PaperClock`) equals its due time, also as in replay; a timer can
+    fire late in real time by at most the poll interval, which is measured, not
+    recorded.
+
+    The rules are those of :class:`ReplayClock`: a timer cannot be scheduled
+    before the current step instant, ``call_after`` is relative to the step
+    instant, a callback may schedule further timers (those already due fire in
+    the same poll) and may not start a nested poll.  The class is not
+    thread-safe by design: all calls come from the loop thread.
+    """
+
+    def __init__(self, clock: PaperClock) -> None:
+        if type(clock) is not PaperClock:
+            raise ContractValidationError("the polling scheduler runs on the paper clock of the run")
+        self._clock: Final[PaperClock] = clock
         self._timers: Final[_TimerQueue] = _TimerQueue()
         self._firing: bool = False
 
     def call_at(self, due_ns: int, callback: TimerCallback) -> int:
         _require_instant(due_ns, "due_ns")
+        now_ns = self._clock.now_ns()
+        if due_ns < now_ns:
+            raise ClockRegressionError("timer scheduled in the past", due_ns=due_ns, now_ns=now_ns)
         return self._timers.add(due_ns, callback)
 
     def call_after(self, delay_ns: int, callback: TimerCallback) -> int:
         _require_delay(delay_ns)
-        due_ns = self._clock.now_ns() + delay_ns
-        _require_instant(due_ns, "due_ns")  # refused like in replay, never moved to another instant
-        return self._timers.add(due_ns, callback)
+        return self.call_at(self._clock.now_ns() + delay_ns, callback)
 
     def cancel(self, handle: int) -> None:
         self._timers.cancel(handle)
@@ -384,10 +460,11 @@ class PollingScheduler:
         return self._timers.pending()
 
     def run_due(self, limit_ns: int | None = None) -> int:
-        """Fire every timer due at or before *limit_ns* (default: now); returns how many fired.
+        """Fire every timer due at or before *limit_ns* (default: the system clock); returns how many fired.
 
-        *limit_ns* is never allowed to exceed the current time: a timer does not
-        fire before its instant has been reached.
+        *limit_ns* is never allowed to exceed the system clock: a timer does not
+        fire before its instant has been reached.  Step time is moved to each
+        timer's due instant before its callback runs.
         """
         if self._firing:
             raise ClockRegressionError("a timer callback may not start a nested poll")
@@ -397,13 +474,67 @@ class PollingScheduler:
         self._firing = True
         try:
             while True:
-                now_ns = self._clock.now_ns()
-                due = self._timers.pop_due(now_ns if limit_ns is None else min(limit_ns, now_ns))
+                wall_ns = self._clock.wall_ns()
+                due = self._timers.pop_due(wall_ns if limit_ns is None else min(limit_ns, wall_ns))
                 if due is None:
                     break
                 due_ns, callback = due
                 fired += 1
+                self._clock.begin_step(due_ns)
                 callback(due_ns)
         finally:
             self._firing = False
         return fired
+
+
+class ClockView:
+    """Read-only view of the run clock, as handed to components.
+
+    A component can read time; it cannot advance a replay clock, begin a paper
+    step or reach the object that can.  Only the run loop holds the clock itself.
+    """
+
+    __slots__ = ("_clock",)
+
+    def __init__(self, clock: Clock) -> None:
+        if type(clock) is ClockView:
+            clock = clock._clock
+        if not isinstance(clock, Clock):
+            raise ContractValidationError("a clock view needs a clock")
+        self._clock: Final[Clock] = clock
+
+    @property
+    def mode(self) -> ClockMode:
+        return self._clock.mode
+
+    @property
+    def regressions_observed(self) -> int:
+        return self._clock.regressions_observed
+
+    def now_ns(self) -> int:
+        return self._clock.now_ns()
+
+    def monotonic_ns(self) -> int:
+        return self._clock.monotonic_ns()
+
+
+class SchedulerView:
+    """What a component may do with timers: schedule and cancel them - never fire, poll or advance."""
+
+    __slots__ = ("_scheduler",)
+
+    def __init__(self, scheduler: Scheduler) -> None:
+        if type(scheduler) is SchedulerView:
+            scheduler = scheduler._scheduler
+        if not isinstance(scheduler, Scheduler):
+            raise ContractValidationError("a scheduler view needs a scheduler")
+        self._scheduler: Final[Scheduler] = scheduler
+
+    def call_at(self, due_ns: int, callback: TimerCallback) -> int:
+        return self._scheduler.call_at(due_ns, callback)
+
+    def call_after(self, delay_ns: int, callback: TimerCallback) -> int:
+        return self._scheduler.call_after(delay_ns, callback)
+
+    def cancel(self, handle: int) -> None:
+        self._scheduler.cancel(handle)

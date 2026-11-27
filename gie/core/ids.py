@@ -113,3 +113,19 @@ def require_id(value: object, prefix: str, *, path: str = "id") -> str:
         )
     assert isinstance(value, str)
     return value
+
+
+def derive_seed(run_seed: int, purpose: str) -> int:
+    """Seed for one named pseudo-random element of a run, derived from the run seed.
+
+    A run has one seed (``RunManifest.seed``).  Every component that needs
+    randomness derives its own generator seed with a stable *purpose* text
+    (for example ``"backtesting.bootstrap"``), so that adding a consumer never
+    changes the numbers another consumer draws.  The result is in ``0 .. 2**63-1``.
+    """
+    if isinstance(run_seed, bool) or not isinstance(run_seed, int) or not 0 <= run_seed <= 2**63 - 1:
+        raise ContractValidationError("run_seed must be an int in 0 .. 2**63-1")
+    if not isinstance(purpose, str) or not purpose or not purpose.isprintable() or len(purpose) > 120:
+        raise ContractValidationError("purpose must be printable text of 1..120 characters")
+    digest = hashlib.sha256(canonical_bytes(["seed", run_seed, purpose])).digest()
+    return int.from_bytes(digest[:8], "big") >> 1

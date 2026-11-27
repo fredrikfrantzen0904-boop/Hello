@@ -35,7 +35,16 @@ import json
 import math
 import re
 from collections.abc import Mapping
-from decimal import Context, Decimal, DivisionByZero, Inexact, InvalidOperation, Overflow
+from decimal import (
+    ROUND_CEILING,
+    ROUND_FLOOR,
+    Context,
+    Decimal,
+    DivisionByZero,
+    Inexact,
+    InvalidOperation,
+    Overflow,
+)
 from typing import Any, Final
 
 from gie.core.errors import CanonicalEncodingError
@@ -147,6 +156,37 @@ def _es_number(value: float) -> str:
     if k == 1:
         return sign + digits + "e" + exp_text
     return sign + digits[0] + "." + digits[1:] + "e" + exp_text
+
+
+#: Fractional digits of every fraction field (risk fractions, daily result, profit floor).
+FRACTION_DIGITS: Final[int] = 12
+_FRACTION_QUANTUM: Final[Decimal] = Decimal(1).scaleb(-FRACTION_DIGITS)
+_DIVISION: Final[Context] = Context(prec=64, traps=[InvalidOperation, DivisionByZero, Overflow])
+
+
+def fraction_of(amount: Decimal, base: Decimal, *, round_up: bool) -> Decimal:
+    """``amount / base`` as a fraction with :data:`FRACTION_DIGITS` digits, rounded in a stated direction.
+
+    An amount divided by an arbitrary equity is rarely an exact decimal, so the
+    direction of rounding is part of the contract:
+
+    * ``round_up=False`` rounds towards minus infinity - use it for a result such
+      as the daily P&L, so that the fraction never looks better than the amounts;
+    * ``round_up=True`` rounds towards plus infinity - use it for a floor or a
+      risk, so that the fraction never looks smaller than it is.
+
+    Decisions at a boundary (for example "at exactly the floor no new risk") are
+    taken on the exact amounts; a fraction is a derived value for reporting.
+    """
+    for name, value in (("amount", amount), ("base", base)):
+        if not isinstance(value, Decimal) or not value.is_finite():
+            raise CanonicalEncodingError(f"{name} must be a finite Decimal")
+    if base <= 0:
+        raise CanonicalEncodingError("base must be greater than zero")
+    quotient = _DIVISION.divide(amount, base)
+    return quotient.quantize(
+        _FRACTION_QUANTUM, rounding=ROUND_CEILING if round_up else ROUND_FLOOR, context=_DIVISION
+    )
 
 
 def _utf16_key(key: object) -> bytes:

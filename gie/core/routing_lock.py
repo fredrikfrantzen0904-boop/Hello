@@ -106,6 +106,9 @@ def _vocabulary_matches(enum_type: type[Enum], genuine: tuple[Enum, ...]) -> boo
         return False
     if list(getattr(enum_type, "_member_names_", ())) != [member.name for member in genuine]:
         return False
+    # A plain attribute such as ``RunMode.LIVE = RunMode.PAPER`` is an alias the enum tables do not show.
+    if any(isinstance(value, enum_type) and name not in names for name, value in vars(enum_type).items()):
+        return False
     if len(list(enum_type)) != len(genuine):
         return False
     value_map = getattr(enum_type, "_value2member_map_", {})
