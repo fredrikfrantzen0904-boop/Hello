@@ -1,0 +1,4 @@
+# No end-of-line conversion anywhere.  Schema hashes, golden contract messages, canonical JSON,
+# generated registers and the protected pre-existing file are compared byte for byte; a checkout
+# that rewrote line endings (the default on Windows) would make those checks fail.
+* -text

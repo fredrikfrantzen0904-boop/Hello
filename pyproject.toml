@@ -69,7 +69,7 @@ ignore = [
 python_version = "3.11"
 strict = true
 warn_unreachable = true
-files = ["gie"]
+files = ["gie", "tools"]
 
 [[tool.mypy.overrides]]
 module = ["reportlab.*"]

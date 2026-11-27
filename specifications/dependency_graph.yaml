@@ -45,7 +45,7 @@ sessions:
                .github/, tests/__init__.py, tests/conftest.py, tests/gie/__init__.py,
                tests/gie/samples.py, tests/gie/benchmark_adapter.py, tests/gie/golden/, tests/gie/core/, tests/gie/contracts/,
                tests/gie/tools/, tests/gie/baseline/, reviews/session_00/, CLAUDE.md, README.md,
-               pyproject.toml, .gitignore]}
+               pyproject.toml, .gitignore, .gitattributes]}
   S01: {name: Market Data, wave: 2, depends_on: [S00], contract_only: [], optional: [],
         owns: [gie/market_data/, tests/gie/market_data/, reviews/session_01/]}
   S02: {name: Strategy Intelligence, wave: 2, depends_on: [S00], contract_only: [S01], optional: [],
