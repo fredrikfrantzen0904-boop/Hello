@@ -35,7 +35,7 @@ from collections.abc import Callable
 from enum import Enum
 from typing import Final, Protocol, runtime_checkable
 
-from gie.core.errors import ClockRegressionError, ContractValidationError
+from gie.core.errors import ClockRegressionError, ContractValidationError, describe
 from gie.core.timeutil import MAX_TIME_NS
 
 
@@ -106,14 +106,14 @@ class Scheduler(Protocol):
 
 def _require_instant(value: int, what: str) -> None:
     if isinstance(value, bool) or not isinstance(value, int):
-        raise ContractValidationError(f"{what} must be an int of nanoseconds", value=repr(value)[:64])
+        raise ContractValidationError(f"{what} must be an int of nanoseconds", value=describe(value, 64))
     if not 0 <= value <= MAX_TIME_NS:
         raise ContractValidationError(f"{what} outside the supported range", value=value)
 
 
 def _require_delay(delay_ns: int) -> None:
     if isinstance(delay_ns, bool) or not isinstance(delay_ns, int):
-        raise ContractValidationError("delay_ns must be an int of nanoseconds", value=repr(delay_ns)[:64])
+        raise ContractValidationError("delay_ns must be an int of nanoseconds", value=describe(delay_ns, 64))
     if delay_ns < 0:
         raise ClockRegressionError("a timer cannot be scheduled with a negative delay", delay_ns=delay_ns)
 
@@ -262,7 +262,7 @@ class ReplayClock:
     def advance_by(self, delta_ns: int) -> int:
         """Move forward by a non-negative duration."""
         if isinstance(delta_ns, bool) or not isinstance(delta_ns, int):
-            raise ContractValidationError("delta_ns must be an int", value=repr(delta_ns)[:64])
+            raise ContractValidationError("delta_ns must be an int", value=describe(delta_ns, 64))
         if delta_ns < 0:
             raise ClockRegressionError("replay clock cannot move backwards", delta_ns=delta_ns)
         return self.advance_to(self._now_ns + delta_ns)
@@ -275,8 +275,10 @@ class SystemClock:
     steps the wall clock backwards, time continues from the last reading at the
     pace of the monotonic source until the wall clock has caught up.  Freshness
     and expiry therefore keep failing closed during a clock step instead of
-    freezing.  Each backward step is counted once in ``regressions_observed`` so
-    that health monitoring can stop creating risk on an unstable clock.
+    freezing.  Every backward step of the wall source - also a further one while
+    the clock is still running ahead of it - is counted once in
+    ``regressions_observed`` so that health monitoring can stop creating risk on
+    an unstable clock.
 
     Resolution is that of the operating system.  On Windows with Python older
     than 3.13 ``time.time_ns`` advances in steps of about 15.6 ms; paper runs
@@ -293,9 +295,9 @@ class SystemClock:
         self._monotonic_source = monotonic_source
         self._lock = threading.Lock()
         self._last_now_ns: int = 0
+        self._last_wall_ns: int | None = None
         self._last_monotonic_ns: int = 0
         self._monotonic_at_last_now: int | None = None
-        self._behind: bool = False
         self._regressions: int = 0
 
     @property
@@ -318,13 +320,12 @@ class SystemClock:
         with self._lock:
             wall = self._wall_source()
             monotonic = self._read_monotonic()
+            if self._last_wall_ns is not None and wall < self._last_wall_ns:
+                self._regressions += 1  # the wall source itself stepped backwards
+            self._last_wall_ns = wall
             if wall >= self._last_now_ns:
-                self._behind = False
                 result = wall
             else:
-                if not self._behind:
-                    self._behind = True
-                    self._regressions += 1
                 elapsed = (
                     0 if self._monotonic_at_last_now is None else monotonic - self._monotonic_at_last_now
                 )
@@ -369,7 +370,9 @@ class PollingScheduler:
 
     def call_after(self, delay_ns: int, callback: TimerCallback) -> int:
         _require_delay(delay_ns)
-        return self._timers.add(min(self._clock.now_ns() + delay_ns, MAX_TIME_NS), callback)
+        due_ns = self._clock.now_ns() + delay_ns
+        _require_instant(due_ns, "due_ns")  # refused like in replay, never moved to another instant
+        return self._timers.add(due_ns, callback)
 
     def cancel(self, handle: int) -> None:
         self._timers.cancel(handle)

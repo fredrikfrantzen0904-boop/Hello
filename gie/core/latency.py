@@ -20,7 +20,7 @@ from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from fractions import Fraction
 
-from gie.core.errors import ContractValidationError
+from gie.core.errors import ContractValidationError, describe
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,6 +57,8 @@ class LatencyRecorder:
     """Collects durations in nanoseconds for one named measurement point."""
 
     def __init__(self, name: str, capacity: int = 1_000_000) -> None:
+        if isinstance(capacity, bool) or not isinstance(capacity, int):
+            raise ContractValidationError("capacity must be an int", value=describe(capacity, 64))
         if capacity < 1:
             raise ContractValidationError("capacity must be >= 1", value=capacity)
         self.name = name

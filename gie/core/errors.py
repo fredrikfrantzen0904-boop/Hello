@@ -27,22 +27,55 @@ _INT64_MIN: Final[int] = -(2**63)
 _INT64_MAX: Final[int] = 2**63 - 1
 
 
+#: Integers with more bits than this are described, not printed (CPython refuses to convert
+#: integers of several thousand digits to text).
+_PRINTABLE_INT_BITS: Final[int] = 4096
+
+
+def safe_text(text: object, limit: int = 500) -> str:
+    """*text* as a string that canonical JSON can always carry (lone surrogates escaped)."""
+    if not isinstance(text, str):
+        text = describe(text)
+    return text.encode("utf-8", errors="backslashreplace").decode("utf-8")[:limit]
+
+
+def describe(value: object, limit: int = 200) -> str:
+    """Short text form of any value for an error detail; never raises.
+
+    A value whose ``repr`` fails, an integer too large to print and text that is
+    not valid Unicode are all described instead of being allowed to replace the
+    error that is being reported.
+    """
+    if isinstance(value, int) and not isinstance(value, bool) and value.bit_length() > _PRINTABLE_INT_BITS:
+        sign = "-" if value < 0 else ""
+        return f"<{sign}integer of {value.bit_length()} bits>"
+    try:
+        text: object = repr(value)
+    except Exception:  # a broken __repr__ must not hide the error being reported
+        text = None
+    if not isinstance(text, str):
+        return f"<unprintable {type(value).__name__}>"
+    return safe_text(text, limit)
+
+
 def _journalable(value: object) -> DetailValue:
     """Make a detail value safe for canonical JSON.
 
     Errors are data (they are journaled), so a detail must never be the reason an
-    error cannot be written: integers outside 64 bits, non-finite floats and
-    values of any other type are carried as (truncated) text.
+    error cannot be created or written: integers outside 64 bits, non-finite
+    floats and values of any other type are carried as (truncated) text.
     """
     if value is None or isinstance(value, bool):
         return value
     if isinstance(value, int):
-        return value if _INT64_MIN <= value <= _INT64_MAX else str(value)[:80]
+        if _INT64_MIN <= value <= _INT64_MAX:
+            return value
+        return describe(value, 80) if value.bit_length() > _PRINTABLE_INT_BITS else str(value)[:80]
     if isinstance(value, float):
         return value if math.isfinite(value) else repr(value)
     if isinstance(value, str):
-        return value.encode("utf-8", errors="backslashreplace").decode("utf-8")[:500]
-    return repr(value)[:200]
+        return safe_text(value)
+    return describe(value)
 
 
 class GieError(Exception):
@@ -51,10 +84,11 @@ class GieError(Exception):
     code: ClassVar[str] = "GIE.ERROR"
 
     def __init__(self, message: str, **details: DetailValue) -> None:
+        message = safe_text(message, 2000)
         super().__init__(message)
         self.message: Final[str] = message
         self.details: Final[dict[str, DetailValue]] = {
-            key: _journalable(value) for key, value in details.items()
+            safe_text(key, 120): _journalable(value) for key, value in details.items()
         }
 
     def to_dict(self) -> dict[str, object]:

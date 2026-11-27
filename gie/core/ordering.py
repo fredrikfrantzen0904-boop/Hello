@@ -199,22 +199,36 @@ class SequenceTracker:
         if time_ns is not None and (isinstance(time_ns, bool) or not isinstance(time_ns, int) or time_ns < 0):
             raise ContractValidationError("time_ns must be None or a non-negative int", stream=stream)
 
-    def restore(self, stream: str, last_seq: int, recent: dict[int, str] | None = None) -> None:
-        """Re-establish a stream after a restart: its last journaled ``seq`` and recent fingerprints."""
-        self._check_arguments(stream, last_seq, "restore", None)
+    def restore(
+        self,
+        stream: str,
+        last_seq: int,
+        recent: dict[int, str] | None = None,
+        last_time_ns: int | None = None,
+    ) -> None:
+        """Re-establish a stream after a restart.
+
+        *last_seq* is its last journaled sequence number, *recent* the fingerprints
+        of its newest records (so that a re-sent record is recognised as a
+        duplicate) and *last_time_ns* the ordering time of the last journaled
+        record, so that the rule "the ordering time of a stream never decreases"
+        also holds for the first arrival after the restart.
+        """
+        self._check_arguments(stream, last_seq, "restore", last_time_ns)
         if stream in self._last:
             raise SequenceConflictError("stream is already tracked and cannot be restored", stream=stream)
-        kept: OrderedDict[int, str] = OrderedDict()
-        for seq in sorted(recent or {}):
-            fingerprint = (recent or {})[seq]
+        entries = dict(recent or {})
+        for seq, fingerprint in entries.items():
             self._check_arguments(stream, seq, fingerprint, None)
             if seq > last_seq:
                 raise ContractValidationError("recent fingerprints lie beyond last_seq", stream=stream)
-            kept[seq] = fingerprint
+        kept: OrderedDict[int, str] = OrderedDict((seq, entries[seq]) for seq in sorted(entries))
         while len(kept) > self._window:
             kept.popitem(last=False)
         self._last[stream] = last_seq
         self._recent[stream] = kept
+        if last_time_ns is not None:
+            self._last_time[stream] = last_time_ns
 
     def observe(self, stream: str, seq: int, fingerprint: str, time_ns: int | None = None) -> SeqResult:
         """Classify one arrival.  ``time_ns`` is the record's ordering time, if the caller has it."""

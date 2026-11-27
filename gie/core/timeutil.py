@@ -94,9 +94,14 @@ def trading_day_bounds_ns(day: str) -> tuple[int, int]:
 
     The interval is half open: an instant belongs to the day iff
     ``start_ns <= t < end_ns``.  Days are 23 h or 25 h long on DST changes.
-    The bounds of the first (1970-01-01) and last (2262-04-12) representable day
-    are clamped to the instant range, so every day returned by
-    :func:`trading_day` has bounds.
+
+    Both bounds are always instants.  Two days touch the limits of the instant
+    range and are the only ones whose bounds are cut to it: the first
+    (1970-01-01, whose Prague midnight lies before instant 0) starts at 0, and
+    the last (2262-04-12) ends at ``MAX_TIME_NS``.  For that last day alone the
+    upper bound is inclusive - ``MAX_TIME_NS`` itself belongs to it, because no
+    later instant exists.  A day that lies entirely outside the instant range
+    has no bounds and is refused.
     """
     date = parse_trading_day(day)
     try:
@@ -105,15 +110,13 @@ def trading_day_bounds_ns(day: str) -> tuple[int, int]:
         end = _dt.datetime(next_date.year, next_date.month, next_date.day, tzinfo=_PRAGUE)
     except (OverflowError, ValueError) as exc:
         raise ContractValidationError("trading day outside the supported range", value=day) from exc
-    return _clamped_ns(start), _clamped_ns(end)
+    start_ns, end_ns = _epoch_ns(start), _epoch_ns(end)
+    if end_ns <= 0 or start_ns > MAX_TIME_NS:
+        raise ContractValidationError("trading day outside the supported range", value=day)
+    return max(start_ns, 0), min(end_ns, MAX_TIME_NS)
 
 
-def _clamped_ns(moment: _dt.datetime) -> int:
-    """Instant of *moment*, clamped to the representable range ``[0, MAX_TIME_NS]``.
-
-    Only the first and the last representable trading day are affected: their
-    Prague midnight lies outside the range, so the bound is the range limit.
-    """
+def _epoch_ns(moment: _dt.datetime) -> int:
+    """Nanoseconds from the Unix epoch to *moment* (may lie outside the instant range)."""
     delta = moment - _dt.datetime(1970, 1, 1, tzinfo=_UTC)
-    time_ns = (delta.days * 86_400 + delta.seconds) * NS_PER_SECOND + delta.microseconds * NS_PER_US
-    return min(max(time_ns, 0), MAX_TIME_NS)
+    return (delta.days * 86_400 + delta.seconds) * NS_PER_SECOND + delta.microseconds * NS_PER_US

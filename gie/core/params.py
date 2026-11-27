@@ -22,6 +22,7 @@ import tomllib
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
+from types import MappingProxyType
 from typing import Final
 
 from gie.core.canonical import content_hash, decimal_from_str, decimal_to_str
@@ -67,24 +68,46 @@ class ResearchParameter:
 
 
 class ResearchParameters:
-    """Immutable, validated view of the research-parameter file."""
+    """Immutable, validated view of the research-parameter file.
+
+    The view cannot be relabelled or re-hashed after it was built: assigning or
+    deleting an attribute raises :class:`ConfigError`.  ``parameters_sha256``
+    therefore always identifies the values this object returns.
+    """
+
+    __slots__ = ("_parameters", "approval_status", "parameters_sha256")
+
+    _parameters: MappingProxyType[str, ResearchParameter]
+    approval_status: str
+    parameters_sha256: str
 
     def __init__(self, parameters: dict[str, ResearchParameter], approval_status: str) -> None:
-        self._parameters: Final[dict[str, ResearchParameter]] = dict(parameters)
-        self.approval_status: Final[str] = approval_status
-        self.parameters_sha256: Final[str] = content_hash(
-            {
-                name: {
-                    "kind": parameter.kind,
-                    "value": (
-                        decimal_to_str(parameter.value)
-                        if isinstance(parameter.value, Decimal)
-                        else parameter.value
-                    ),
+        frozen = MappingProxyType(dict(parameters))
+        object.__setattr__(self, "_parameters", frozen)
+        object.__setattr__(self, "approval_status", approval_status)
+        object.__setattr__(
+            self,
+            "parameters_sha256",
+            content_hash(
+                {
+                    name: {
+                        "kind": parameter.kind,
+                        "value": (
+                            decimal_to_str(parameter.value)
+                            if isinstance(parameter.value, Decimal)
+                            else parameter.value
+                        ),
+                    }
+                    for name, parameter in frozen.items()
                 }
-                for name, parameter in self._parameters.items()
-            }
+            ),
         )
+
+    def __setattr__(self, name: str, value: object) -> None:
+        raise ConfigError("research parameters are immutable", attribute=name)
+
+    def __delattr__(self, name: str) -> None:
+        raise ConfigError("research parameters are immutable", attribute=name)
 
     def get(self, name: str) -> ResearchParameter:
         try:
@@ -159,7 +182,8 @@ def load_research_parameters(path: Path | None = None) -> ResearchParameters:
             document = tomllib.load(handle)
     except OSError as exc:
         raise ConfigError("research parameter file cannot be read", path=str(source)) from exc
-    except (tomllib.TOMLDecodeError, UnicodeDecodeError) as exc:
+    except (tomllib.TOMLDecodeError, UnicodeDecodeError, ValueError) as exc:
+        # ValueError: tomllib leaks it for an integer literal too long to convert.
         raise ConfigError("research parameter file is not valid UTF-8 TOML", path=str(source)) from exc
     unknown = sorted(set(document) - _TOP_LEVEL_KEYS)
     if unknown:

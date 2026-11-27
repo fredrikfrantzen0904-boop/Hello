@@ -809,16 +809,23 @@ def test_every_instant_lies_within_the_half_open_bounds_of_its_trading_day(time_
 
 
 @pytest.mark.requirement("G05-10", "S00-ASG-21")
-def test_the_last_instant_lies_within_the_half_open_bounds_of_its_trading_day() -> None:
-    """ "An instant belongs to the day iff ``start_ns <= t < end_ns``" - for every instant.
+def test_the_last_instant_belongs_to_the_last_day_whose_upper_bound_is_inclusive() -> None:
+    """The one documented exception to the half-open rule.
 
-    ``trading_day(2**63-1)`` is 2262-04-12, so that instant must satisfy the documented membership
-    rule for the bounds of 2262-04-12 like any other instant of that day.
+    ``trading_day(2**63-1)`` is 2262-04-12.  Its bounds stay instants, so its end is
+    ``MAX_TIME_NS`` itself, and the documentation states that for this day alone the upper
+    bound is inclusive: the last instant belongs to it and no instant is without a trading day.
     """
     day = trading_day(MAX_TIME_NS)
     assert day == LAST_DAY
     start, end = trading_day_bounds_ns(day)
-    assert start <= MAX_TIME_NS < end
+    assert end == MAX_TIME_NS
+    assert start <= MAX_TIME_NS <= end
+    # every other day keeps the half-open rule: its end instant belongs to the next day
+    _, previous_end = trading_day_bounds_ns("2262-04-11")
+    assert previous_end == start
+    assert trading_day(previous_end) == LAST_DAY
+    assert trading_day(previous_end - 1) == "2262-04-11"
 
 
 @pytest.mark.requirement("G05-10", "S00-ASG-21")

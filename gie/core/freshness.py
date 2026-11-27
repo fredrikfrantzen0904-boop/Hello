@@ -26,7 +26,7 @@ from __future__ import annotations
 from typing import Final
 
 from gie.core.clock import Clock, ClockMode
-from gie.core.errors import ContractValidationError, FutureDataError, StaleDataError
+from gie.core.errors import ContractValidationError, FutureDataError, StaleDataError, describe
 from gie.core.timeutil import MAX_TIME_NS, NS_PER_SECOND
 
 #: Largest tolerance for a reference instant in the future (cross-host clock skew, paper only).
@@ -35,9 +35,9 @@ MAX_FUTURE_TOLERANCE_NS: Final[int] = NS_PER_SECOND
 
 def _require_int(value: int, what: str) -> None:
     if isinstance(value, bool) or not isinstance(value, int):
-        raise ContractValidationError(f"{what} must be an int of nanoseconds", value=repr(value)[:64])
+        raise ContractValidationError(f"{what} must be an int of nanoseconds", value=describe(value, 64))
     if not -MAX_TIME_NS <= value <= MAX_TIME_NS:
-        raise ContractValidationError(f"{what} is outside the supported range", value=str(value)[:64])
+        raise ContractValidationError(f"{what} is outside the supported range", value=describe(value, 64))
 
 
 def _require_instant(value: int, what: str) -> None:
@@ -120,9 +120,12 @@ def require_not_expired(*, now_ns: int, valid_until_ns: int, what: str) -> int:
 # --------------------------------------------------------------------------- clock-based forms
 def _clock_tolerance(clock: Clock, future_tolerance_ns: int) -> int:
     _require_tolerance(future_tolerance_ns)
-    if clock.mode is ClockMode.REPLAY and future_tolerance_ns != 0:
+    # Fail closed: only the genuine system clock of a paper run may be granted a tolerance.  In
+    # replay it would be look-ahead, and a clock of any other or unknown kind gets none either.
+    if future_tolerance_ns != 0 and clock.mode is not ClockMode.SYSTEM:
         raise ContractValidationError(
-            "a future tolerance is look-ahead in replay and must be 0", value=future_tolerance_ns
+            "a future tolerance exists for the system clock only; in replay it is look-ahead and must be 0",
+            value=future_tolerance_ns,
         )
     return future_tolerance_ns
 
