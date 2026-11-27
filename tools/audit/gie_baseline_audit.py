@@ -46,7 +46,7 @@ found differences, 2 arguments refused, 3 the read-only guard blocked something 
 
 # The repository lints for Python 3.11, but this one file must also run on the owner's Python 3.8:
 # the typing aliases (List, Dict, Optional, ...) and ``datetime.timezone.utc`` are deliberate.
-# ruff: noqa: UP006, UP007, UP017, UP035, UP045
+# ruff: noqa: UP006, UP017, UP035, UP045
 
 from __future__ import annotations
 
@@ -130,6 +130,9 @@ _LARGEST_FILES = 50
 
 _DEFAULT_MAX_LINE_COUNT_BYTES = 64 << 20
 _DEFAULT_MAX_SCAN_BYTES = 8 << 20
+#: configuration-like text (.json, .txt, .xml, .yaml ...) is scanned up to this size only: real
+#: configuration files are small, large ones are data
+_CONFIG_SCAN_BYTES = 1 << 20
 _DEFAULT_MAX_LIST_ENTRIES = 5000
 _DEFAULT_MAX_HITS_PER_FILE = 100
 _DEFAULT_PROGRESS_EVERY = 500
@@ -323,7 +326,7 @@ class _Guard:
         self.installed = False
         self.active = False
         self.prefixes: Tuple[str, ...] = ()
-        self.allowed_commands: Set[Tuple[str, ...]] = set()
+        self.allowed_commands: Set[str] = set()
         self.read_opens = 0
         self.write_violations: List[str] = []
         self.other_violations: List[str] = []
@@ -358,10 +361,15 @@ class _Guard:
                 self.write_violations.append(event)
                 raise ReadOnlyViolation("blocked: " + event + " on a path under the audited root")
         elif event == "subprocess.Popen":
-            command = tuple(str(part) for part in args[1]) if len(args) > 1 and args[1] else ()
+            # the interpreter reports the command as a list on POSIX and as one string on Windows
+            command = args[1] if len(args) > 1 else None
+            if not isinstance(command, str):
+                command = subprocess.list2cmdline([os.fsdecode(part) for part in command or ()])
             if command not in self.allowed_commands:
                 self.other_violations.append(event)
-                raise ReadOnlyViolation("blocked: process start that is not one of the fixed read-only queries")
+                raise ReadOnlyViolation(
+                    "blocked: process start that is not one of the fixed read-only queries"
+                )
         elif event in _GUARD_EXEC_EVENTS or (
             event.startswith(_GUARD_NETWORK_PREFIXES) and event not in _GUARD_LOCAL_EVENTS
         ):
@@ -427,6 +435,8 @@ if sys.platform == "win32":
         _KERNEL32.CreateFileW.restype = wintypes.HANDLE
         _KERNEL32.CloseHandle.argtypes = [wintypes.HANDLE]
         _KERNEL32.CloseHandle.restype = wintypes.BOOL
+        _KERNEL32.GlobalMemoryStatusEx.argtypes = [ctypes.c_void_p]
+        _KERNEL32.GlobalMemoryStatusEx.restype = wintypes.BOOL
     _INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
     _GENERIC_READ = 0x80000000
     _SHARE_READ_WRITE_DELETE = 0x1 | 0x2 | 0x4
@@ -481,16 +491,17 @@ def _readonly_opener(path: str, flags: int) -> int:
             return _open_shared_windows(path, flags)
         except OSError:
             return os.open(path, flags)
-    # POSIX: never follow a link that replaced the file after it was listed, never block on a
-    # FIFO, and do not update the access time when the system allows that (O_NOATIME needs
-    # ownership of the file; without it the plain read-only open is used).
-    base = flags | _O_NOFOLLOW | _O_NONBLOCK
-    if _O_NOATIME:
-        try:
-            return os.open(path, base | _O_NOATIME)
-        except PermissionError:
-            return os.open(path, base)
-    return os.open(path, base)
+    else:
+        # POSIX: never follow a link that replaced the file after it was listed, never block on
+        # a FIFO, and do not update the access time when the system allows that (O_NOATIME needs
+        # ownership of the file; without it the plain read-only open is used).
+        base = flags | _O_NOFOLLOW | _O_NONBLOCK
+        if _O_NOATIME:
+            try:
+                return os.open(path, base | _O_NOATIME)
+            except PermissionError:
+                return os.open(path, base)
+        return os.open(path, base)
 
 
 def _open_readonly(path: str) -> IO[bytes]:
@@ -529,7 +540,9 @@ def _text_kind(first_chunk: bytes) -> str:
     return "bytes"
 
 
-def _read_file(path: str, listed: os.stat_result, want_hash: bool, want_full: bool, head_limit: int) -> _ReadResult:
+def _read_file(
+    path: str, listed: os.stat_result, want_hash: bool, want_full: bool, head_limit: int
+) -> _ReadResult:
     """Stream one regular file once: SHA-256, newline count and the first ``head_limit`` bytes."""
     result = _ReadResult()
     digest = hashlib.sha256() if want_hash else None
@@ -545,7 +558,9 @@ def _read_file(path: str, listed: os.stat_result, want_hash: bool, want_full: bo
                 result.error = "NotARegularFile"
                 return result
             while to_end or head_size < head_limit:
-                chunk = handle.read(_CHUNK_BYTES if to_end else min(_CHUNK_BYTES, head_limit - head_size))
+                # the first block always covers the binary probe, whatever the chunk size is
+                size = _CHUNK_BYTES if result.bytes_read else max(_CHUNK_BYTES, _BINARY_PROBE_BYTES)
+                chunk = handle.read(size if to_end else min(size, head_limit - head_size))
                 if not chunk:
                     result.complete = True
                     break
@@ -563,15 +578,19 @@ def _read_file(path: str, listed: os.stat_result, want_hash: bool, want_full: bo
                     head.append(piece)
                     head_size += len(piece)
                 if to_end and result.text_kind != "binary":
-                    joined = carry + chunk
-                    result.newlines += joined.count(newline)
-                    carry = joined[-1:] if len(newline) == 2 and not joined.endswith(newline) else b""
+                    if len(newline) == 1:
+                        result.newlines += chunk.count(newline)
+                    else:  # UTF-16: count line feeds on whole 2-byte units only
+                        joined = carry + chunk
+                        usable = len(joined) - len(joined) % 2
+                        result.newlines += joined[:usable].decode(result.text_kind, "replace").count("\n")
+                        carry = joined[usable:]
                     tail = (tail + chunk)[-2:]
             after = os.fstat(handle.fileno())
     except OSError as exc:
         return _ReadResult(error=type(exc).__name__, errno=exc.errno)
     result.head = b"".join(head)
-    result.ends_with_newline = tail.endswith(newline)
+    result.ends_with_newline = tail.endswith(newline) and result.bytes_read % len(newline) == 0
     if digest is not None and result.complete:
         result.sha256 = digest.hexdigest()
     result.changed = (
@@ -695,8 +714,8 @@ _DELIMITED_EXTENSIONS = {".csv": ",", ".tsv": "\t"}
 
 MODEL_EXTENSIONS = frozenset(
     {
-        ".pkl", ".pickle", ".joblib", ".onnx", ".pt", ".pth", ".h5", ".keras", ".bin", ".ckpt", ".safetensors",
-        ".pb", ".tflite", ".cbm", ".xgb", ".ubj", ".model", ".sav", ".pmml",
+        ".pkl", ".pickle", ".joblib", ".onnx", ".pt", ".pth", ".h5", ".keras", ".bin", ".ckpt",
+        ".safetensors", ".pb", ".tflite", ".cbm", ".xgb", ".ubj", ".model", ".sav", ".pmml",
     }
 )  # fmt: skip
 _MODEL_TEXT_NAME = re.compile(r"lgb|lightgbm|booster|xgb|catboost|model", re.IGNORECASE)
@@ -724,7 +743,15 @@ _TERMINAL_DIRECTORY_HINTS = frozenset({"mql4", "mql5"})
 _LAUNCHER_EXTENSIONS = frozenset({".bat", ".cmd", ".ps1", ".sh", ".vbs", ".lnk"})
 _TEST_DIRECTORY_NAMES = frozenset({"tests", "test"})
 _TEST_CONFIG_NAMES = frozenset({"pytest.ini", "tox.ini", "noxfile.py", ".coveragerc"})
-_OTHER_TEST_GLOBS = ("*.test.js", "*.test.ts", "*.spec.js", "*.spec.ts", "*_test.go", "test*.mq5", "test*.mq4")
+_OTHER_TEST_GLOBS = (
+    "*.test.js",
+    "*.test.ts",
+    "*.spec.js",
+    "*.spec.ts",
+    "*_test.go",
+    "test*.mq5",
+    "test*.mq4",
+)
 _LISTED_ONLY_MANIFESTS = frozenset(
     {
         "setup.py", "poetry.lock", "pipfile.lock", "package-lock.json", "yarn.lock", "pnpm-lock.yaml",
@@ -767,7 +794,8 @@ def _container_kind(lowered: str) -> Optional[str]:
 def _dependency_kind(lowered: str, parents: Sequence[str]) -> Optional[str]:
     extension = os.path.splitext(lowered)[1]
     if extension in (".txt", ".in") and (
-        lowered.startswith(("requirements", "constraints")) or (parents and parents[-1].lower() == "requirements")
+        lowered.startswith(("requirements", "constraints"))
+        or (parents and parents[-1].lower() == "requirements")
     ):
         return "requirements"
     if lowered == "pyproject.toml":
@@ -788,14 +816,65 @@ def _dependency_kind(lowered: str, parents: Sequence[str]) -> Optional[str]:
 # --------------------------------------------------------------------------------------------
 
 
+_CREDENTIAL_TRIGGERS = (
+    "password", "passwd", "pwd", "secret", "token", "api_key", "apikey", "api-key", "login", "account",
+)  # fmt: skip
+
+#: rule name -> lower-case literals of which at least one occurs in every text the rule can match.
+#: A rule is only run on a file that contains one of its triggers (a cheap substring test), which
+#: keeps the scan of large data-like text files fast.  Rules match ASCII case-insensitively, so a
+#: lower-cased copy of the text is an exact pre-filter.
+_TRIGGERS: Dict[str, Tuple[str, ...]] = {
+    "metatrader5_import": ("metatrader5",),
+    "metatrader5_reference": ("metatrader5",),
+    "mt5_initialize": ("initialize",),
+    "mt5_login": ("login",),
+    "order_send": ("order_send",),
+    "order_check": ("order_check",),
+    "positions_get": ("positions_get",),
+    "copy_ticks": ("copy_ticks",),
+    "copy_rates": ("copy_rates",),
+    "symbol_info_tick": ("symbol_info_tick",),
+    "mql_OrderSend": ("ordersend",),
+    "mql_CTrade": ("ctrade",),
+    "zeromq": ("zmq", "zeromq"),
+    "socket_usage": ("socket", "wsastartup"),
+    "dwx": ("dwx", "darwinex"),
+    "ctrader": ("ctrader", "calgo"),
+    "fix_protocol": ("fix",),
+    "oanda": ("oanda",),
+    "ccxt": ("ccxt",),
+    "ib_insync": ("ib_insync", "ib_async", "ibapi"),
+    "http_client": ("requests", "httpx", "aiohttp", "urllib", "webrequest"),
+    "websocket": ("websocket", "ws://", "wss://"),
+    "telegram": ("telegram", "telebot"),
+    "smtplib": ("smtp", "sendmail"),
+    "discord": ("discord",),
+    "credential_assignment_literal": _CREDENTIAL_TRIGGERS,
+    "credential_assignment_number": ("login", "account"),
+    "mt5_login_or_initialize_literal_arguments": ("login", "initialize"),
+    "private_key_header": ("private key",),
+    "connection_string_with_credentials": ("://",),
+    "authorization_header_literal": ("authorization",),
+    "credential_config_value": _CREDENTIAL_TRIGGERS,
+    "python_main_guard": ("__main__",),
+    "test_function": ("test",),
+    "unittest_usage": ("unittest",),
+    "pytest_usage": ("pytest",),
+    "windows_scheduled_task_xml": ("schemas.microsoft.com",),
+    "windows_service_wrapper_xml": ("<executable>",),
+}
+
+
 @dataclass(frozen=True)
 class _Rule:
     name: str
     pattern: re.Pattern[str]
+    triggers: Tuple[str, ...]
 
 
 def _rule(name: str, pattern: str, flags: int = 0) -> _Rule:
-    return _Rule(name, re.compile(pattern, flags))
+    return _Rule(name, re.compile(pattern, flags | re.ASCII), _TRIGGERS[name])
 
 
 _I = re.IGNORECASE
@@ -803,10 +882,14 @@ _M = re.MULTILINE
 _LINE_START = r"^[ \t\"']*"
 
 BROKER_RULES: Tuple[_Rule, ...] = (
-    _rule("metatrader5_import", _LINE_START + r"(?:import[ \t]+MetaTrader5|from[ \t]+MetaTrader5[ \t]+import)\b", _M),
-    _rule("metatrader5_reference", r"\bMetaTrader5\b"),
-    _rule("mt5_initialize", r"\b(?:mt5|MetaTrader5|mt)[ \t]*\.[ \t]*initialize[ \t]*\("),
-    _rule("mt5_login", r"\b(?:mt5|MetaTrader5|mt)[ \t]*\.[ \t]*login[ \t]*\("),
+    _rule(
+        "metatrader5_import",
+        _LINE_START + r"(?:import[ \t]+MetaTrader5|from[ \t]+MetaTrader5[ \t]+import)\b",
+        _M,
+    ),
+    _rule("metatrader5_reference", r"\bMetaTrader5\b", _I),
+    _rule("mt5_initialize", r"\b(?:mt5|MetaTrader5|mt)[ \t]*\.[ \t]*initialize[ \t]*\(", _I),
+    _rule("mt5_login", r"\b(?:mt5|MetaTrader5|mt)[ \t]*\.[ \t]*login[ \t]*\(", _I),
     _rule("order_send", r"\border_send[ \t]*\("),
     _rule("order_check", r"\border_check[ \t]*\("),
     _rule("positions_get", r"\bpositions_get[ \t]*\("),
@@ -821,7 +904,8 @@ BROKER_RULES: Tuple[_Rule, ...] = (
         _LINE_START
         + r"(?:import[ \t]+socket\b|from[ \t]+socket[ \t]+import\b)"
         + r"|\bsocket[ \t]*\.[ \t]*(?:socket|create_connection)[ \t]*\("
-        + r"|\bSocket(?:Create|Connect|Send|Read)[ \t]*\(|\bSystem\.Net\.Sockets\b|\bjava\.net\.Socket\b|\bWSAStartup\b",
+        + r"|\bSocket(?:Create|Connect|Send|Read)[ \t]*\(|\bSystem\.Net\.Sockets\b"
+        + r"|\bjava\.net\.Socket\b|\bWSAStartup\b",
         _M,
     ),
     _rule("dwx", r"\bdwx(?:_\w+)?\b|darwinex", _I),
@@ -838,7 +922,8 @@ BROKER_RULES: Tuple[_Rule, ...] = (
         "http_client",
         _LINE_START
         + r"(?:import|from)[ \t]+(?:requests|httpx|aiohttp|urllib3)\b"
-        + r"|\b(?:requests|httpx)[ \t]*\.[ \t]*(?:get|post|put|patch|delete|request|Session|Client|AsyncClient)[ \t]*\("
+        + r"|\b(?:requests|httpx)[ \t]*\.[ \t]*"
+        + r"(?:get|post|put|patch|delete|request|Session|Client|AsyncClient)[ \t]*\("
         + r"|\bWebRequest[ \t]*\(|\burllib\.request\b",
         _M,
     ),
@@ -848,7 +933,7 @@ BROKER_RULES: Tuple[_Rule, ...] = (
     _rule("discord", r"\bdiscord(?:app)?\b", _I),
 )
 
-_CREDENTIAL_WORDS = r"(?:password|passwd|pwd|secret|token|api_?key|apikey|login|account)"
+_CREDENTIAL_WORDS = r"(?:password|passwd|pwd|secret|token|api[_\-]?key|login|account)"
 _NAME_BEFORE = r"(?<![A-Za-z0-9_])[A-Za-z0-9_.\-]{0,40}"
 _NAME_AFTER = r"[A-Za-z0-9_.\-]{0,40}[\"']?[ \t]{0,5}"
 _ASSIGN = r"(?::[ \t]{0,3}[A-Za-z_][A-Za-z0-9_.\[\], ]{0,40}=(?!=)|:|=(?!=))[ \t]{0,5}"
@@ -856,7 +941,7 @@ _ASSIGN = r"(?::[ \t]{0,3}[A-Za-z_][A-Za-z0-9_.\[\], ]{0,40}=(?!=)|:|=(?!=))[ \t
 CREDENTIAL_RULES: Tuple[_Rule, ...] = (
     _rule(
         "credential_assignment_literal",
-        _NAME_BEFORE + _CREDENTIAL_WORDS + _NAME_AFTER + _ASSIGN + r"[rbuRBU]{0,2}([\"'])(?!\1)[^\n]",
+        _NAME_BEFORE + _CREDENTIAL_WORDS + _NAME_AFTER + _ASSIGN + r"[rbuRBU]{0,2}\\?([\"'])(?!\\?\1)[^\n]",
         _I,
     ),
     _rule(
@@ -866,8 +951,10 @@ CREDENTIAL_RULES: Tuple[_Rule, ...] = (
     ),
     _rule(
         "mt5_login_or_initialize_literal_arguments",
-        r"\b(?:mt5|MetaTrader5|mt)[ \t]*\.[ \t]*(?:login|initialize)[ \t]*\([^)\n]{0,300}?(?:[0-9]{4,}|[\"'][^\"'\n])"
+        r"\b(?:mt5|MetaTrader5|mt)[ \t]*\.[ \t]*(?:login|initialize)[ \t]*\([^)\n]{0,300}?"
+        + r"(?:[0-9]{4,}|[\"'][^\"'\n])"
         + r"|\binitialize[ \t]*\([^)\n]{0,300}?(?:login|password|server)[ \t]*=[ \t]*(?:[0-9]|[\"'][^\"'\n])",
+        _I,
     ),
     _rule("private_key_header", r"-----BEGIN (?:[A-Z0-9]+ ){0,3}PRIVATE KEY(?: BLOCK)?-----"),
     _rule(
@@ -890,9 +977,15 @@ CREDENTIAL_CONFIG_RULES: Tuple[_Rule, ...] = (
     ),
 )
 PYTHON_RULES: Tuple[_Rule, ...] = (
-    _rule("python_main_guard", r"^[ \t\"']*if[ \t]+__name__[ \t]*==[ \t]*\\?[\"']__main__\\?[\"'][ \t]*:", _M),
+    _rule(
+        "python_main_guard", r"^[ \t\"']*if[ \t]+__name__[ \t]*==[ \t]*\\?[\"']__main__\\?[\"'][ \t]*:", _M
+    ),
     _rule("test_function", r"^[ \t\"']*(?:async[ \t]+)?def[ \t]+test\w*[ \t]*\(", _M),
-    _rule("unittest_usage", _LINE_START + r"(?:import[ \t]+unittest\b|from[ \t]+unittest\b)|\bunittest\.TestCase\b", _M),
+    _rule(
+        "unittest_usage",
+        _LINE_START + r"(?:import[ \t]+unittest\b|from[ \t]+unittest\b)|\bunittest\.TestCase\b",
+        _M,
+    ),
     _rule("pytest_usage", _LINE_START + r"(?:import[ \t]+pytest\b|from[ \t]+pytest\b)|@pytest\.", _M),
 )
 XML_RULES: Tuple[_Rule, ...] = (
@@ -903,11 +996,21 @@ XML_RULES: Tuple[_Rule, ...] = (
 _NEWLINE = re.compile("\n")
 
 
-def _apply_rules(text: str, rules: Sequence[_Rule], max_hits: int) -> Dict[str, Tuple[List[int], int]]:
+def _apply_rules(
+    text: str, rules: Sequence[_Rule], max_hits: int, prefilter: bool = True
+) -> Dict[str, Tuple[List[int], int]]:
     """rule name -> (line numbers listed, number of lines that matched).  Matched text is discarded."""
     offsets: Optional[List[int]] = None
     found: Dict[str, Tuple[List[int], int]] = {}
+    lowered = text.lower() if prefilter else ""
+    present: Dict[str, bool] = {}
     for rule in rules:
+        if prefilter:
+            for trigger in rule.triggers:
+                if trigger not in present:
+                    present[trigger] = trigger in lowered
+            if not any(present[trigger] for trigger in rule.triggers):
+                continue
         lines: List[int] = []
         last = 0
         total = 0
@@ -1002,7 +1105,9 @@ class _Dependencies:
         self.entries.append(entry)
 
     def as_dict(self) -> Dict[str, Any]:
-        ordered = sorted(self.entries, key=lambda item: (item["section"], item["name"].lower(), item.get("specifier", "")))
+        ordered = sorted(
+            self.entries, key=lambda item: (item["section"], item["name"].lower(), item.get("specifier", ""))
+        )
         return {"entries": ordered, "dropped": dict(self.dropped)}
 
 
@@ -1044,7 +1149,9 @@ def _toml_items(text: str) -> Iterator[Tuple[str, str, str]]:
         value = item.group(2)
         if value.startswith("["):
             parts = [value]
-            while "]" not in _TOML_STRING.sub("", " ".join(parts)) and index < len(lines) and len(parts) < 5000:
+            while (
+                "]" not in _TOML_STRING.sub("", " ".join(parts)) and index < len(lines) and len(parts) < 5000
+            ):
                 parts.append(_strip_toml_comment(lines[index]).strip())
                 index += 1
             value = " ".join(parts)
@@ -1052,7 +1159,10 @@ def _toml_items(text: str) -> Iterator[Tuple[str, str, str]]:
 
 
 def _toml_strings(value: str) -> List[str]:
-    return [match.group(1) if match.group(1) is not None else match.group(2) for match in _TOML_STRING.finditer(value)]
+    return [
+        match.group(1) if match.group(1) is not None else match.group(2)
+        for match in _TOML_STRING.finditer(value)
+    ]
 
 
 def _parse_requirements(text: str, found: _Dependencies) -> None:
@@ -1093,7 +1203,11 @@ def _parse_pipfile(text: str, found: _Dependencies) -> None:
 def _parse_setup_cfg(text: str, found: _Dependencies) -> None:
     parser = configparser.RawConfigParser(strict=False)
     parser.read_string(text)
-    for section, option in (("options", "install_requires"), ("options", "setup_requires"), ("options", "tests_require")):
+    for section, option in (
+        ("options", "install_requires"),
+        ("options", "setup_requires"),
+        ("options", "tests_require"),
+    ):
         if parser.has_option(section, option):
             for line in parser.get(section, option).splitlines():
                 found.add_requirement(line.strip(), section + "." + option)
@@ -1179,14 +1293,16 @@ def _python_versions(kind: str, text: str) -> List[str]:
 # Delimited text headers (column names only)
 # --------------------------------------------------------------------------------------------
 
-_COLUMN_NAME = re.compile(r"^[A-Za-z_<\[(#%$][A-Za-z0-9_ .\-/<>()\[\]%#:$]{0,63}$")
+_COLUMN_NAME = re.compile(r"^(?:[^\W\d]|[<\[(#%$])[\w .\-/<>()\[\]%#:$]{0,63}$")
 _LONG_DIGIT_RUN = re.compile(r"[0-9]{5,}")
 
 
 def _looks_like_column_name(value: str) -> bool:
     if value == "":
         return True  # an unnamed index column, as written by common export tools
-    return bool(_COLUMN_NAME.match(value)) and not _LONG_DIGIT_RUN.search(value) and not _looks_sensitive(value)
+    return (
+        bool(_COLUMN_NAME.match(value)) and not _LONG_DIGIT_RUN.search(value) and not _looks_sensitive(value)
+    )
 
 
 def _delimited_header(head: bytes, extension: str) -> Dict[str, Any]:
@@ -1213,7 +1329,10 @@ def _delimited_header(head: bytes, extension: str) -> Dict[str, Any]:
         fields = fields[:-1]
     names = [field_value.strip() for field_value in fields]
     if not names or not any(names) or not all(_looks_like_column_name(name) for name in names):
-        return {"header_withheld": "first line does not look like column names", "first_line_fields": len(names)}
+        return {
+            "header_withheld": "first line does not look like column names",
+            "first_line_fields": len(names),
+        }
     return {
         "columns": [_clean_text(name) for name in names],
         "delimiter": {",": "comma", ";": "semicolon", "\t": "tab", "|": "pipe"}[delimiter],
@@ -1393,7 +1512,9 @@ def _walk_tree(root_os: str, options: _Options, report: _WalkReport) -> Iterator
                 elif name in _VCS_OTHER_DIRECTORIES:
                     report.other_vcs.append(rel)
                 reason = options.excluded.get(os.path.normcase(name))
-                environment = _environment_record(path, rel) if (reason or options.detect_environments) else None
+                environment = (
+                    _environment_record(path, rel) if (reason or options.detect_environments) else None
+                )
                 if environment is not None:
                     report.environments.append(environment)
                     if reason is None:
@@ -1413,7 +1534,10 @@ def _walk_tree(root_os: str, options: _Options, report: _WalkReport) -> Iterator
 
 
 def _matches_any(rel: str, patterns: Sequence[str]) -> bool:
-    """Glob match of a relative POSIX-style path; ``*`` also crosses ``/`` and a directory name selects its content."""
+    """Glob match of a relative ``/``-separated path.
+
+    ``*`` also crosses ``/`` and a directory path selects everything below it.
+    """
     candidate = rel.lower() if _is_windows() else rel
     for raw in patterns:
         pattern = raw.replace("\\", "/") if os.sep == "\\" else raw
@@ -1455,6 +1579,7 @@ class _Plan:
     want_lines: bool = False
     want_rows: bool = False
     head_limit: int = 0
+    scan_limit: int = 0
     rules: Tuple[_Rule, ...] = ()
     delimited: bool = False
     dependency_kind: Optional[str] = None
@@ -1531,7 +1656,10 @@ class _Collector:
             rules.extend(XML_RULES)
         plan.rules = tuple(rules)
         if rules:
-            plan.head_limit = self.options.max_scan_bytes
+            plan.scan_limit = self.options.max_scan_bytes
+            if extension not in _SOURCE_EXTENSIONS:
+                plan.scan_limit = min(plan.scan_limit, _CONFIG_SCAN_BYTES)
+            plan.head_limit = plan.scan_limit
         if sensitive:
             return plan  # hashed on request, scanned for locations, but nothing is extracted
         if extension in _DELIMITED_EXTENSIONS:
@@ -1569,7 +1697,9 @@ class _Collector:
             self.files_opened += 1
             self.bytes_read += read.bytes_read
             if read.error is not None:
-                self.unreadable.append({"path": entry.rel, "error": read.error, "errno": read.errno, "stage": "read"})
+                self.unreadable.append(
+                    {"path": entry.rel, "error": read.error, "errno": read.errno, "stage": "read"}
+                )
                 read = None
             elif read.changed:
                 self.changed.append(entry.rel)
@@ -1583,7 +1713,9 @@ class _Collector:
         self._add_names(entry, lowered, extension)
         if extension in DATA_EXTENSIONS:
             self._add_data(entry, extension, plan, read)
-        if extension in MODEL_EXTENSIONS or (extension in (".txt", ".json") and _MODEL_TEXT_NAME.search(lowered)):
+        if extension in MODEL_EXTENSIONS or (
+            extension in (".txt", ".json") and _MODEL_TEXT_NAME.search(lowered)
+        ):
             item = _brief(entry)
             item["matched_by"] = "extension" if extension in MODEL_EXTENSIONS else "name pattern"
             self.models.append(item)
@@ -1597,7 +1729,9 @@ class _Collector:
         if plan.version_kind is not None:
             text = _decode_text(read.head[:_VERSION_FILE_BYTES])
             versions = _python_versions(plan.version_kind, text) if text is not None else []
-            self.version_files.append({"path": entry.rel, "kind": plan.version_kind, "python_versions": versions})
+            self.version_files.append(
+                {"path": entry.rel, "kind": plan.version_kind, "python_versions": versions}
+            )
         if lowered in ("setup.cfg", "pyproject.toml"):
             text = _decode_text(read.head) or ""
             marker = r"^\[tool:pytest\]" if lowered == "setup.cfg" else r"^\[tool\.pytest"
@@ -1609,7 +1743,9 @@ class _Collector:
         if name.lower() in _TERMINAL_DIRECTORY_HINTS:
             self.terminal_hints.append({"path": rel, "hint": "directory named " + name.lower()})
 
-    def _add_language(self, entry: _FileEntry, extension: str, plan: _Plan, read: Optional[_ReadResult]) -> None:
+    def _add_language(
+        self, entry: _FileEntry, extension: str, plan: _Plan, read: Optional[_ReadResult]
+    ) -> None:
         language = LANGUAGE_BY_EXTENSION.get(extension)
         if language is None:
             return
@@ -1639,7 +1775,9 @@ class _Collector:
         container = _container_kind(lowered)
         if container is not None:
             self.containers.append({"path": rel, "kind": container})
-        if extension in (".py", ".pyw") and (fnmatch.fnmatchcase(lowered, "test_*.py") or lowered.endswith("_test.py")):
+        if extension in (".py", ".pyw") and (
+            fnmatch.fnmatchcase(lowered, "test_*.py") or lowered.endswith("_test.py")
+        ):
             self.test_files.setdefault(rel, None)
         elif any(fnmatch.fnmatchcase(lowered, pattern) for pattern in _OTHER_TEST_GLOBS):
             self.other_tests.append(rel)
@@ -1683,11 +1821,11 @@ class _Collector:
         self.manifests.append(item)
 
     def _scan(self, entry: _FileEntry, lowered: str, read: _ReadResult, plan: _Plan) -> None:
-        text = _decode_text(read.head[: self.options.max_scan_bytes])
+        text = _decode_text(read.head[: plan.scan_limit])
         if text is None:
             self.scan_binary.append(entry.rel)
             return
-        if entry.st.st_size > self.options.max_scan_bytes:
+        if entry.st.st_size > plan.scan_limit:
             self.scan_truncated.append(entry.rel)
         found = _apply_rules(text, plan.rules, self.options.max_hits_per_file)
         for name, (lines, total) in found.items():
@@ -1718,8 +1856,8 @@ def _line_count(read: _ReadResult) -> int:
 
 
 def _progress_line(files: int, read_bytes: int) -> None:
-    print(  # noqa: T201 - progress goes to stderr by design
-        "[%s] %d files listed, %.1f MiB read" % (TOOL_NAME, files, read_bytes / float(1 << 20)),
+    print(
+        f"[{TOOL_NAME}] {files} files listed, {read_bytes / float(1 << 20):.1f} MiB read",
         file=sys.stderr,
         flush=True,
     )
@@ -1735,7 +1873,12 @@ def _scan_tree(
         if options.includes is not None and not _matches_any(entry.rel, options.includes):
             continue
         size = entry.st.st_size
-        record: Dict[str, Any] = {"path": entry.rel, "size": size, "mtime_ns": entry.st.st_mtime_ns, "sha256": None}
+        record: Dict[str, Any] = {
+            "path": entry.rel,
+            "size": size,
+            "mtime_ns": entry.st.st_mtime_ns,
+            "sha256": None,
+        }
         sensitive_reason = _sensitive_reason(entry.name, entry.parents)
         if sensitive_reason is not None:
             record["sensitive"] = True
@@ -1850,7 +1993,9 @@ def _manifest_line(record: Mapping[str, Any]) -> bytes:
     return text.encode("utf-8", "backslashreplace") + b"\n"
 
 
-def _write_manifest_file(records: Iterable[Mapping[str, Any]], path: str, forbidden_root: Optional[str]) -> int:
+def _write_manifest_file(
+    records: Iterable[Mapping[str, Any]], path: str, forbidden_root: Optional[str]
+) -> int:
     count = 0
     with _create_new_file(path, forbidden_root) as handle:
         for record in sorted(records, key=lambda item: str(item["path"])):
@@ -1884,9 +2029,9 @@ def read_manifest(path: PathLike) -> List[Dict[str, Any]]:
             try:
                 record = json.loads(line.decode("utf-8"))
             except ValueError:
-                raise ValueError("manifest line %d is not valid UTF-8 JSON" % number) from None
+                raise ValueError(f"manifest line {number} is not valid UTF-8 JSON") from None
             if not isinstance(record, dict) or not isinstance(record.get("path"), str):
-                raise ValueError("manifest line %d is not an object with a 'path'" % number)
+                raise ValueError(f"manifest line {number} is not an object with a 'path'")
             records.append(record)
     return records
 
@@ -2040,8 +2185,9 @@ def _total_memory_bytes() -> Optional[int]:
         if not _KERNEL32.GlobalMemoryStatusEx(ctypes.byref(status)):
             return None
         return int(status.ullTotalPhys)
-    kilobytes = _first_match("/proc/meminfo", r"^MemTotal:\s+([0-9]+)\s+kB", 4096)
-    return int(kilobytes) * 1024 if kilobytes else None
+    else:
+        kilobytes = _first_match("/proc/meminfo", r"^MemTotal:\s+([0-9]+)\s+kB", 4096)
+        return int(kilobytes) * 1024 if kilobytes else None
 
 
 def _cpu_model() -> Optional[str]:
@@ -2054,7 +2200,8 @@ def _cpu_model() -> Optional[str]:
         except OSError:
             return None
         return str(value).strip() or None
-    return _first_match("/proc/cpuinfo", r"^model name\s*:\s*(.+)$", 65536)
+    else:
+        return _first_match("/proc/cpuinfo", r"^model name\s*:\s*(.+)$", 65536)
 
 
 def _processor_string() -> Optional[str]:
@@ -2102,7 +2249,10 @@ def _host_info(root_real: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
 
 _PROCESS_HINTS: Tuple[Tuple[str, re.Pattern[str]], ...] = (
     ("python", re.compile(r"^(?:python[0-9.]*|pythonw|py|ipython[0-9.]*)(?:\.exe)?$", _I)),
-    ("metatrader_terminal", re.compile(r"^(?:terminal(?:64)?|metatrader\w*|mt[45]\w*|metatester(?:64)?)(?:\.exe)?$", _I)),
+    (
+        "metatrader_terminal",
+        re.compile(r"^(?:terminal(?:64)?|metatrader\w*|mt[45]\w*|metatester(?:64)?)(?:\.exe)?$", _I),
+    ),
     ("metaeditor", re.compile(r"^metaeditor(?:64)?(?:\.exe)?$", _I)),
     ("ctrader", re.compile(r"^ctrader\w*(?:\.exe)?$", _I)),
     ("interactive_brokers", re.compile(r"^(?:ibgateway\w*|tws\w*)(?:\.exe)?$", _I)),
@@ -2110,8 +2260,14 @@ _PROCESS_HINTS: Tuple[Tuple[str, re.Pattern[str]], ...] = (
     ("node", re.compile(r"^node(?:js)?(?:\.exe)?$", _I)),
     ("script_host", re.compile(r"^(?:cmd|powershell|pwsh|wscript|cscript)(?:\.exe)?$", _I)),
     ("jupyter", re.compile(r"^jupyter[\w\-]*(?:\.exe)?$", _I)),
-    ("database", re.compile(r"^(?:postgres|mysqld|sqlservr|redis-server|mongod|influxd|duckdb)(?:\.exe)?$", _I)),
-    ("container_runtime", re.compile(r"^(?:dockerd?|docker desktop|com\.docker\.\w+|containerd)(?:\.exe)?$", _I)),
+    (
+        "database",
+        re.compile(r"^(?:postgres|mysqld|sqlservr|redis-server|mongod|influxd|duckdb)(?:\.exe)?$", _I),
+    ),
+    (
+        "container_runtime",
+        re.compile(r"^(?:dockerd?|docker desktop|com\.docker\.\w+|containerd)(?:\.exe)?$", _I),
+    ),
     ("service_wrapper", re.compile(r"^(?:nssm|winsw|srvany)\w*(?:\.exe)?$", _I)),
 )
 _TASK_HINT = re.compile(
@@ -2138,16 +2294,29 @@ def _process_hints(image: str) -> List[str]:
 def _redact_task_command(command: str) -> str:
     """Keep the executable path of a scheduled task action; replace every argument by ``<redacted>``."""
     text = command.strip()
-    if not text:
-        return ""
-    if text.startswith('"'):
-        end = text.find('"', 1)
-        executable, rest = (text[1:end], text[end + 1 :]) if end > 0 else (text[1:], "")
+    closing = text.find('"', 1) if text.startswith('"') else -1
+    if closing > 0:
+        executable, rest = text[1:closing], text[closing + 1 :]
     else:
-        match = _EXECUTABLE_END.search(text)
-        cut = match.end() if match else (text.find(" ") if " " in text else len(text))
+        text = text.lstrip('"').strip()  # an unterminated quote does not show where the path ends
+        first = text.split(None, 1)[0] if text else ""
+        cut = len(first)
+        if not _EXECUTABLE_END.search(first) and ("\\" in first or "/" in first):
+            # an unquoted path that contains spaces: extend to the executable extension, unless
+            # something that looks like a switch or a quoted argument comes first
+            match = _EXECUTABLE_END.search(text)
+            if match is not None and not re.search(r"\s[-/\"]", text[: match.end()]):
+                cut = match.end()
         executable, rest = text[:cut], text[cut:]
     return _clean_text(executable) + (" <redacted>" if rest.strip() else "")
+
+
+def _short_field(value: str) -> str:
+    """A status or date field of a scheduled task; anything that looks like a command is withheld."""
+    text = value.strip()
+    if len(text) > 40 or any(char in text for char in '\\"=@'):
+        return "<withheld>"
+    return _clean_text(text)
 
 
 def _decode_console(data: bytes) -> str:
@@ -2196,7 +2365,12 @@ def _parse_schtasks(text: str, root_real: str) -> Dict[str, Any]:
             columns[key] = header.index(label)
     if len(columns) != len(_SCHTASKS_ENGLISH):
         if len(header) != _SCHTASKS_VERBOSE_COLUMNS:
-            return {"total": 0, "tasks": [], "microsoft_system_tasks_not_listed": 0, "column_mapping": "unrecognised"}
+            return {
+                "total": 0,
+                "tasks": [],
+                "microsoft_system_tasks_not_listed": 0,
+                "column_mapping": "unrecognised",
+            }
         columns, mapping = dict(_SCHTASKS_COLUMNS), "by_position"
     root_marker = _strip_extended_prefix(root_real).lower()
     seen: Set[Tuple[str, ...]] = set()
@@ -2211,19 +2385,28 @@ def _parse_schtasks(text: str, root_real: str) -> Dict[str, Any]:
         if name.lower().startswith("\\microsoft\\"):
             system_tasks.add(name)
             continue
+        if not name.startswith("\\"):
+            # every task path starts with a backslash; anything else means the columns are not the
+            # expected ones, and then no field can be trusted to be what its label says
+            return {
+                "total": 0,
+                "tasks": [],
+                "microsoft_system_tasks_not_listed": 0,
+                "column_mapping": "unrecognised",
+            }
         command = row[columns["task_to_run"]]
-        task = {
+        task: Dict[str, Any] = {
             "task_name": _clean_text(name),
-            "status": _clean_text(row[columns["status"]].strip()),
-            "next_run_time": _clean_text(row[columns["next_run_time"]].strip()),
-            "last_run_time": _clean_text(row[columns["last_run_time"]].strip()),
+            "status": _short_field(row[columns["status"]]),
+            "next_run_time": _short_field(row[columns["next_run_time"]]),
+            "last_run_time": _short_field(row[columns["last_run_time"]]),
             "task_to_run": _redact_task_command(command),
             "mentions_root": root_marker in " ".join(row).lower(),
             "trading_hint": bool(_TASK_HINT.search(name) or _TASK_HINT.search(command)),
         }
-        key = tuple(str(task[field_name]) for field_name in sorted(task))
-        if key not in seen:
-            seen.add(key)
+        identity = tuple(str(task[field_name]) for field_name in sorted(task))
+        if identity not in seen:
+            seen.add(identity)
             tasks.append(task)
     tasks.sort(key=lambda item: (item["task_name"].lower(), item["task_to_run"], item["next_run_time"]))
     return {
@@ -2236,7 +2419,7 @@ def _parse_schtasks(text: str, root_real: str) -> Dict[str, Any]:
 
 def _windows_system_tool(name: str, root_real: str) -> str:
     """Absolute path of a tool in the Windows system directory (never resolved through PATH or the root)."""
-    system_root = os.environ.get("SystemRoot") or os.environ.get("windir") or "C:\\Windows"
+    system_root = os.environ.get("SYSTEMROOT") or os.environ.get("WINDIR") or "C:\\Windows"
     path = os.path.join(system_root, "System32", name)
     if not os.path.isfile(path) or _is_within(_real(path), root_real):
         raise FileNotFoundError(name)
@@ -2254,7 +2437,7 @@ def _collect_processes_windows(root_real: str, guard: _Guard) -> Dict[str, Any]:
     tasks: Dict[str, Any] = {"status": "error", "error": None, "query": "schtasks /Query /FO CSV /V"}
     try:
         tasklist = _windows_system_tool("tasklist.exe", root_real)
-        guard.allowed_commands.add((tasklist, "/FO", "CSV", "/NH"))
+        guard.allowed_commands.add(subprocess.list2cmdline((tasklist, "/FO", "CSV", "/NH")))
         completed = subprocess.run(
             [tasklist, "/FO", "CSV", "/NH"],
             shell=False,
@@ -2271,7 +2454,7 @@ def _collect_processes_windows(root_real: str, guard: _Guard) -> Dict[str, Any]:
         processes["error"] = type(exc).__name__
     try:
         schtasks = _windows_system_tool("schtasks.exe", root_real)
-        guard.allowed_commands.add((schtasks, "/Query", "/FO", "CSV", "/V"))
+        guard.allowed_commands.add(subprocess.list2cmdline((schtasks, "/Query", "/FO", "CSV", "/V")))
         completed = subprocess.run(
             [schtasks, "/Query", "/FO", "CSV", "/V"],
             shell=False,
@@ -2297,7 +2480,10 @@ def _collect_processes_proc(proc_root: str) -> Dict[str, Any]:
             pids = sorted(int(entry.name) for entry in iterator if entry.name.isdigit())
     except OSError as exc:
         processes["error"] = type(exc).__name__
-        return {"processes": processes, "scheduled_tasks": {"status": "not_collected", "error": None, "query": None}}
+        return {
+            "processes": processes,
+            "scheduled_tasks": {"status": "not_collected", "error": None, "query": None},
+        }
     relevant: List[Dict[str, Any]] = []
     total = 0
     for pid in pids:
@@ -2356,7 +2542,9 @@ class _Capper:
 
 
 def _by_path(items: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    return sorted(items, key=lambda item: (str(item["path"]), str(item.get("kind", "")), str(item.get("rule", ""))))
+    return sorted(
+        items, key=lambda item: (str(item["path"]), str(item.get("kind", "")), str(item.get("rule", "")))
+    )
 
 
 def _locations(collector: _Collector, rule: str, capper: _Capper, section: str) -> List[Dict[str, Any]]:
@@ -2382,7 +2570,9 @@ def _build_inventory(
     capper = _Capper(options.max_list_entries)
     for rel, name in report.directories:
         collector.add_directory(rel, name)
-    largest = [{"path": path, "size": size} for size, path in sorted(collector.sizes, key=lambda x: (-x[0], x[1]))]
+    largest = [
+        {"path": path, "size": size} for size, path in sorted(collector.sizes, key=lambda x: (-x[0], x[1]))
+    ]
 
     languages: Dict[str, Any] = {}
     for name, slot in sorted(collector.languages.items()):
@@ -2394,18 +2584,31 @@ def _build_inventory(
             "extensions": sorted(slot["extensions"]),
         }
 
-    test_directories = sorted(rel for rel, name in report.directories if name.lower() in _TEST_DIRECTORY_NAMES)
-    test_files = [{"path": path, "test_functions": count} for path, count in sorted(collector.test_files.items())]
+    test_directories = sorted(
+        rel for rel, name in report.directories if name.lower() in _TEST_DIRECTORY_NAMES
+    )
+    test_files = [
+        {"path": path, "test_functions": count} for path, count in sorted(collector.test_files.items())
+    ]
     data_files = _by_path(collector.data_files)
-    data_largest = sorted(data_files, key=lambda item: (-int(item["size"]), str(item["path"])))[:_LARGEST_FILES]
+    by_size = sorted(data_files, key=lambda item: (-int(item["size"]), str(item["path"])))
+    data_largest = [
+        {"path": item["path"], "size": item["size"], "mtime_utc": item["mtime_utc"]}
+        for item in by_size[:_LARGEST_FILES]
+    ]
 
     credential_rules = CREDENTIAL_RULES + CREDENTIAL_CONFIG_RULES
     findings: List[Dict[str, Any]] = []
     for rule in credential_rules:
-        findings.extend({"path": path, "line": line, "rule": rule.name} for path, line in collector.hits.get(rule.name, []))
+        findings.extend(
+            {"path": path, "line": line, "rule": rule.name}
+            for path, line in collector.hits.get(rule.name, [])
+        )
     findings.sort(key=lambda item: (item["path"], item["line"], item["rule"]))
 
-    repositories = [_git_info(path, rel, root_real) for path, rel in sorted(report.git_directories, key=lambda x: x[1])]
+    repositories = [
+        _git_info(path, rel, root_real) for path, rel in sorted(report.git_directories, key=lambda x: x[1])
+    ]
     root_repository = next((item for item in repositories if item["path"] == ".git"), None)
 
     environments = _by_path(report.environments)
@@ -2413,7 +2616,12 @@ def _build_inventory(
         if item["kind"] == "pyvenv.cfg":
             parent = item["path"].rsplit("/", 1)[0] if "/" in item["path"] else "."
             environments.append(
-                {"path": parent, "kind": "venv", "detected_by": "pyvenv.cfg", "python_versions": item["python_versions"]}
+                {
+                    "path": parent,
+                    "kind": "venv",
+                    "detected_by": "pyvenv.cfg",
+                    "python_versions": item["python_versions"],
+                }
             )
 
     unreadable = _by_path(report.unreadable + collector.unreadable)
@@ -2437,7 +2645,9 @@ def _build_inventory(
             "config_files": _by_path(collector.test_config),
             "unittest_usage": _locations(collector, "unittest_usage", capper, "tests"),
             "pytest_usage": _locations(collector, "pytest_usage", capper, "tests"),
-            "other_language_test_files": capper.cap("tests.other_language_test_files", sorted(collector.other_tests)),
+            "other_language_test_files": capper.cap(
+                "tests.other_language_test_files", sorted(collector.other_tests)
+            ),
         },
         "data": {
             "file_count": len(data_files),
@@ -2451,10 +2661,15 @@ def _build_inventory(
             "files": capper.cap("models.files", _by_path(collector.models)),
         },
         "broker_interfaces": {
-            "rules": {rule.name: _locations(collector, rule.name, capper, "broker_interfaces") for rule in BROKER_RULES},
+            "rules": {
+                rule.name: _locations(collector, rule.name, capper, "broker_interfaces")
+                for rule in BROKER_RULES
+            },
             "rule_totals": _rule_totals(collector, BROKER_RULES),
             "mql_files": _counts(collector.mql_files),
-            "terminal_hints": capper.cap("broker_interfaces.terminal_hints", _by_path(collector.terminal_hints)),
+            "terminal_hints": capper.cap(
+                "broker_interfaces.terminal_hints", _by_path(collector.terminal_hints)
+            ),
         },
         "process_entry_points": {
             "python_main_guard": _locations(collector, "python_main_guard", capper, "process_entry_points"),
@@ -2475,7 +2690,9 @@ def _build_inventory(
         },
         "python_environments": {
             "environments": _by_path(environments),
-            "version_files": _by_path(item for item in collector.version_files if item["kind"] != "pyvenv.cfg"),
+            "version_files": _by_path(
+                item for item in collector.version_files if item["kind"] != "pyvenv.cfg"
+            ),
         },
         "version_control": {
             "has_git_directory": root_repository is not None,
@@ -2524,15 +2741,24 @@ def _build_inventory(
             "max_hash_bytes": options.max_hash_bytes,
             "max_line_count_bytes": options.max_line_count_bytes,
             "max_scan_bytes": options.max_scan_bytes,
+            "config_file_scan_bytes": min(options.max_scan_bytes, _CONFIG_SCAN_BYTES),
             "max_list_entries": options.max_list_entries,
             "max_hits_per_file": options.max_hits_per_file,
             "dependency_manifest_parse_bytes": _MANIFEST_PARSE_BYTES,
             "header_max_chars": _HEADER_MAX_CHARS,
         },
-        "not_hashed_over_max_hash_bytes": capper.cap("exclusions_and_caps.not_hashed", sorted(collector.not_hashed)),
-        "line_count_skipped_over_cap": capper.cap("exclusions_and_caps.line_count", sorted(collector.line_cap)),
-        "scan_truncated_at_max_scan_bytes": sorted(collector.scan_truncated),
-        "scan_skipped_binary_content": capper.cap("exclusions_and_caps.scan_binary", sorted(collector.scan_binary)),
+        "not_hashed_over_max_hash_bytes": capper.cap(
+            "exclusions_and_caps.not_hashed", sorted(collector.not_hashed)
+        ),
+        "line_count_skipped_over_cap": capper.cap(
+            "exclusions_and_caps.line_count", sorted(collector.line_cap)
+        ),
+        "scan_truncated_at_max_scan_bytes": capper.cap(
+            "exclusions_and_caps.scan_truncated", sorted(collector.scan_truncated)
+        ),
+        "scan_skipped_binary_content": capper.cap(
+            "exclusions_and_caps.scan_binary", sorted(collector.scan_binary)
+        ),
         "hit_lists_capped_per_file": _by_path(collector.hit_caps),
         "truncated_lists": capper.truncated,
     }
@@ -2555,8 +2781,8 @@ def _refuse_if_tool_inside(root_real: str) -> None:
         location = getattr(module, "__file__", None)
         if isinstance(location, str) and _is_within(_real(location), root_real):
             raise AuditRefused(
-                "Python module '%s' was loaded from inside --root; copy the audit tool outside the audited "
-                "tree and run it from there" % name
+                "Python module '" + name + "' was loaded from inside --root; copy the audit tool outside "
+                "the audited tree and run it from there"
             )
     if _is_within(_real(__file__), root_real):
         raise AuditRefused("the audit tool must not be located inside --root")
@@ -2598,7 +2824,10 @@ def _prepare_output_directory(out_real: str) -> None:
             if next(iterator, None) is not None:
                 raise AuditRefused("--out exists and is not empty; choose a new folder")
     else:
-        os.makedirs(out_real)
+        try:
+            os.makedirs(out_real)
+        except OSError as exc:
+            raise AuditRefused("--out cannot be created (" + type(exc).__name__ + ")") from None
 
 
 def _tool_block(argv: Sequence[str]) -> Dict[str, Any]:
@@ -2608,7 +2837,14 @@ def _tool_block(argv: Sequence[str]) -> Dict[str, Any]:
 def _command_audit(args: argparse.Namespace, argv: Sequence[str]) -> int:
     _non_negative(
         args,
-        ("max_hash_bytes", "max_line_count_bytes", "max_scan_bytes", "max_list_entries", "max_hits_per_file", "progress_every"),
+        (
+            "max_hash_bytes",
+            "max_line_count_bytes",
+            "max_scan_bytes",
+            "max_list_entries",
+            "max_hits_per_file",
+            "progress_every",
+        ),
     )
     root_real = _resolve_root(args.root)
     out_real = _real(args.out)
@@ -2648,7 +2884,8 @@ def _command_audit(args: argparse.Namespace, argv: Sequence[str]) -> int:
             "root": args.root,
             "out": args.out,
             "disk_free_bytes": volatile["disk_free_bytes"],
-            "note": "this block and tool.argv differ between runs; everything else is identical for an unchanged tree",
+            "note": "this block and tool.argv differ between runs; "
+            "everything else is identical for an unchanged tree",
         }
         document: Dict[str, Any] = {"tool": _tool_block(argv), "run": run}
         document.update(inventory)
@@ -2668,40 +2905,41 @@ def _command_audit(args: argparse.Namespace, argv: Sequence[str]) -> int:
         read_only = not guard.write_violations and not writes_inside_root
         clean = read_only and not guard.other_violations
         hashed = sum(1 for record in records if record["sha256"] is not None)
+        unreadable_count = len(report.unreadable) + len(collector.unreadable)
+        location_count = sum(len(lines) for lines in collector.hits.values())
+        output_names = sorted([*(os.path.basename(path) for path in written), "audit_log.txt"])
         log = [
-            "%s %s (schema %d)" % (TOOL_NAME, TOOL_VERSION, SCHEMA_VERSION),
-            "started %s, finished %s" % (run["started_utc"], run["finished_utc"]),
-            "root: %s" % _clean_text(str(args.root)),
-            "out:  %s" % _clean_text(str(args.out)),
-            "files listed in manifest.jsonl: %d (%d bytes)" % (len(records), collector.total_bytes),
-            "files hashed (SHA-256): %d; not hashed: %d" % (hashed, len(records) - hashed),
-            "files opened read-only (mode 'rb'): %d; bytes read: %d" % (collector.files_opened, collector.bytes_read),
-            "directories walked: %d; excluded directories (counted, not read): %d"
-            % (len(report.directories) + 1, len(report.excluded)),
-            "links recorded and not followed: %d; special files not opened: %d" % (len(report.links), len(report.special)),
-            "sensitive-named files: %d (%s)"
-            % (len(collector.sensitive), "hashed on request" if options.hash_sensitive else "not opened"),
-            "unreadable paths: %d; files that changed while being read: %d"
-            % (len(report.unreadable) + len(collector.unreadable), len(collector.changed)),
-            "keyword locations recorded: %d (matched text is never recorded)"
-            % sum(len(lines) for lines in collector.hits.values()),
-            "processes.json: %s" % ("written" if processes is not None else "not requested"),
+            f"{TOOL_NAME} {TOOL_VERSION} (schema {SCHEMA_VERSION})",
+            f"started {run['started_utc']}, finished {run['finished_utc']}",
+            "root: " + _clean_text(str(args.root)),
+            "out:  " + _clean_text(str(args.out)),
+            f"files listed in manifest.jsonl: {len(records)} ({collector.total_bytes} bytes)",
+            f"files hashed (SHA-256): {hashed}; not hashed: {len(records) - hashed}",
+            f"manifest files opened read-only (mode 'rb'): {collector.files_opened}; "
+            f"bytes read: {collector.bytes_read}",
+            f"directories walked: {len(report.directories) + 1}; "
+            f"excluded directories (counted, not read): {len(report.excluded)}",
+            f"links recorded and not followed: {len(report.links)}; "
+            f"special files not opened: {len(report.special)}",
+            f"sensitive-named files: {len(collector.sensitive)} "
+            + ("(hashed on request)" if options.hash_sensitive else "(not opened)"),
+            f"unreadable paths: {unreadable_count}; "
+            f"files that changed while being read: {len(collector.changed)}",
+            f"keyword locations recorded: {location_count} (matched text is never recorded)",
+            "processes.json: " + ("written" if processes is not None else "not requested"),
             "network: not used; git: not started; file content: not emitted",
-            "runtime guard: %s; opens under root seen by the interpreter: %d read, %d write; other blocked events: %d"
-            % (
-                "active" if guard.installed else "not available on this Python",
-                guard.read_opens,
-                len(guard.write_violations),
-                len(guard.other_violations),
-            ),
-            "output files: " + ", ".join(sorted(os.path.basename(path) for path in written) + ["audit_log.txt"]),
+            "runtime guard: " + ("active" if guard.installed else "not available on this Python"),
+            f"opens under root seen by the interpreter (includes .git and environment metadata): "
+            f"{guard.read_opens} read, {len(guard.write_violations)} write; "
+            f"other blocked events: {len(guard.other_violations)}",
+            "output files: " + ", ".join(output_names),
         ]
         if read_only:
             log.append(READ_ONLY_OK_LINE)
         else:
             log.append("READ-ONLY CHECK FAILED: " + ", ".join(guard.write_violations + writes_inside_root))
         write("audit_log.txt", [("\n".join(log) + "\n").encode("utf-8", "backslashreplace")])
-    print("[%s] done: %d files, output in %s" % (TOOL_NAME, len(records), args.out), file=sys.stderr)  # noqa: T201
+    print(f"[{TOOL_NAME}] done: {len(records)} files, output in {args.out}", file=sys.stderr)
     return EXIT_OK if clean else EXIT_GUARD_VIOLATION
 
 
@@ -2722,7 +2960,7 @@ def _command_manifest(args: argparse.Namespace) -> int:
             os.makedirs(parent)
         _write_manifest_file(records, out_real, root_real)
         clean = not guard.write_violations and not guard.other_violations
-    print("[%s] manifest: %d files written to %s" % (TOOL_NAME, len(records), args.out), file=sys.stderr)  # noqa: T201
+    print(f"[{TOOL_NAME}] manifest: {len(records)} files written to {args.out}", file=sys.stderr)
     return EXIT_OK if clean else EXIT_GUARD_VIOLATION
 
 
@@ -2730,20 +2968,32 @@ def _command_compare(args: argparse.Namespace) -> int:
     try:
         result = compare_manifests(args.a, args.b, strict_mtime=args.strict_mtime)
     except (OSError, ValueError) as exc:
-        raise AuditRefused("cannot read manifest (%s): %s" % (type(exc).__name__, exc)) from None
+        raise AuditRefused(f"cannot read manifest ({type(exc).__name__}): {exc}") from None
     sys.stdout.write(json.dumps(result, sort_keys=True, indent=2, ensure_ascii=True) + "\n")
     return int(result["exit_code"])
 
 
 def _add_scan_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--root", required=True, help="tree to read (never modified)")
-    parser.add_argument("--hash-sensitive", action="store_true", help="also hash files whose name suggests secrets")
-    parser.add_argument("--max-hash-bytes", type=int, default=None, help="do not hash files larger than this")
-    parser.add_argument("--exclude-dir", action="append", metavar="NAME", help="additional directory name to skip")
-    parser.add_argument("--no-default-excludes", action="store_true", help="do not skip the default directory names")
-    parser.add_argument("--include-venvs", action="store_true", help="descend into detected Python environments")
     parser.add_argument(
-        "--progress-every", type=int, default=_DEFAULT_PROGRESS_EVERY, metavar="N", help="progress line every N files"
+        "--hash-sensitive", action="store_true", help="also hash files whose name suggests secrets"
+    )
+    parser.add_argument("--max-hash-bytes", type=int, default=None, help="do not hash files larger than this")
+    parser.add_argument(
+        "--exclude-dir", action="append", metavar="NAME", help="additional directory name to skip"
+    )
+    parser.add_argument(
+        "--no-default-excludes", action="store_true", help="do not skip the default directory names"
+    )
+    parser.add_argument(
+        "--include-venvs", action="store_true", help="descend into detected Python environments"
+    )
+    parser.add_argument(
+        "--progress-every",
+        type=int,
+        default=_DEFAULT_PROGRESS_EVERY,
+        metavar="N",
+        help="progress line every N files",
     )
 
 
@@ -2759,9 +3009,13 @@ def _build_parser() -> argparse.ArgumentParser:
     audit = commands.add_parser("audit", help="write inventory.json, manifest.jsonl and audit_log.txt")
     _add_scan_arguments(audit)
     audit.add_argument("--out", required=True, help="new or empty folder outside --root")
-    audit.add_argument("--processes", action="store_true", help="also write processes.json (read-only OS queries)")
+    audit.add_argument(
+        "--processes", action="store_true", help="also write processes.json (read-only OS queries)"
+    )
     audit.add_argument("--count-rows", action="store_true", help="count the rows of .csv/.tsv files")
-    audit.add_argument("--no-csv-headers", action="store_true", help="do not report column names of .csv/.tsv")
+    audit.add_argument(
+        "--no-csv-headers", action="store_true", help="do not report column names of .csv/.tsv"
+    )
     audit.add_argument("--max-line-count-bytes", type=int, default=_DEFAULT_MAX_LINE_COUNT_BYTES)
     audit.add_argument("--max-scan-bytes", type=int, default=_DEFAULT_MAX_SCAN_BYTES)
     audit.add_argument("--max-list-entries", type=int, default=_DEFAULT_MAX_LIST_ENTRIES)
@@ -2770,12 +3024,16 @@ def _build_parser() -> argparse.ArgumentParser:
     manifest = commands.add_parser("manifest", help="write only a SHA-256 manifest (JSON lines)")
     _add_scan_arguments(manifest)
     manifest.add_argument("--out", required=True, help="new manifest file outside --root")
-    manifest.add_argument("--include", action="append", metavar="GLOB", help="only paths matching this pattern")
+    manifest.add_argument(
+        "--include", action="append", metavar="GLOB", help="only paths matching this pattern"
+    )
 
     compare = commands.add_parser("compare", help="compare two manifests; exit 0 when content is identical")
     compare.add_argument("a", help="first manifest (before)")
     compare.add_argument("b", help="second manifest (after)")
-    compare.add_argument("--strict-mtime", action="store_true", help="also fail on modification-time differences")
+    compare.add_argument(
+        "--strict-mtime", action="store_true", help="also fail on modification-time differences"
+    )
     return parser
 
 
@@ -2794,7 +3052,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             return _command_manifest(args)
         return _command_compare(args)
     except AuditRefused as exc:
-        print("%s: refused: %s" % (TOOL_NAME, exc), file=sys.stderr)  # noqa: T201
+        print(f"{TOOL_NAME}: refused: {exc}", file=sys.stderr)
         return EXIT_REFUSED
 
 
