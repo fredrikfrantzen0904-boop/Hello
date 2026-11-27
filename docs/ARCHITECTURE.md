@@ -197,6 +197,9 @@ review rounds were written by sub-agents that did not write the code under test 
   another language must implement them from `specifications/SHARED_CONTRACTS.md`.
 * The ledger and the journal keep their state in memory for the life of a run; their cost per
   record and their memory use over a long paper run have been measured only on synthetic records.
+* `SystemClock` has the resolution of the operating system (on Windows with Python older than 3.13
+  the wall clock advances in steps of about 15.6 ms); the measured resolution of the paper machine is
+  a deliverable of the session-01 feed benchmark (open item U-08).
 * Nine shared types needed by later sessions do not exist yet (CR-003, CR-005).
 * No subsystem behaviour (data, strategy, prediction, decision, reflex, execution, risk, learning,
   backtesting, dashboard, QA) exists yet.

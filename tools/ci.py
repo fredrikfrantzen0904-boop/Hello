@@ -116,6 +116,11 @@ def build_steps(evidence_dir: Path) -> list[Step]:
             ("S00-ACC-01", "S00-ACC-02", "S00-ACC-03", "S00-ACC-04", "S00-ACC-05", "S00-ACC-06"),
         ),
         Step(
+            "every independent review finding has a disposition",
+            (py, "-m", "tools.summarize_reviews", "--check"),
+            ("OWN-09", "COM-10"),
+        ),
+        Step(
             "registers are valid",
             (py, "-m", "tools.gie_registers", "validate"),
             ("OWN-08", "S00-ASG-28"),
