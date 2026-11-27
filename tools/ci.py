@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import json
 import platform
+import re
 import subprocess
 import sys
 import time
@@ -211,6 +212,45 @@ def _tree_clean(evidence_dir: Path) -> bool:
     return not [path for path in paths if not (ignored and path.startswith(ignored))]
 
 
+_VOLATILE = re.compile(r"(pytest-of-[\w.-]+[\\/]+pytest-\d+[\\/]+[\w.\[\]-]+|0x[0-9a-fA-F]+|\b\d{6,}\b)")
+
+
+def failure_digest(evidence_dir: Path, limit: int = 14) -> list[str]:
+    """Compact summary of the tests that neither passed nor were skipped (for logs that are read remotely).
+
+    Per test module the number of failures and errors, then the most frequent last lines of the
+    failure texts with one example each.  Volatile parts (temporary paths, addresses, long
+    numbers) are masked so that equal causes group together.  Empty when every test passed.
+    """
+    path = evidence_dir / "test_results.json"
+    try:
+        tests = json.loads(path.read_text(encoding="utf-8"))["tests"]
+    except (OSError, ValueError, KeyError):
+        return []
+    bad = [item for item in tests if item.get("outcome") not in ("passed", "skipped", "xfailed")]
+    if not bad:
+        return []
+    modules: dict[str, dict[str, int]] = {}
+    reasons: dict[str, list[str]] = {}
+    for item in bad:
+        module = str(item.get("nodeid", "")).split("::")[0]
+        bucket = modules.setdefault(module, {})
+        outcome = str(item.get("outcome"))
+        bucket[outcome] = bucket.get(outcome, 0) + 1
+        text_lines = [line.strip() for line in str(item.get("detail", "")).splitlines() if line.strip()]
+        reason = _VOLATILE.sub("~", text_lines[-1] if text_lines else "(no text)")[:170]
+        reasons.setdefault(reason, []).append(str(item.get("nodeid", "")))
+    lines = [f"test failure digest: {len(bad)} test(s) neither passed nor skipped"]
+    for module in sorted(modules, key=lambda name: -sum(modules[name].values())):
+        counts = ", ".join(f"{count} {outcome}" for outcome, count in sorted(modules[module].items()))
+        lines.append(f"  {module}: {counts}")
+    lines.append("  most frequent reasons (last line of the failure text; one example each):")
+    for reason, nodeids in sorted(reasons.items(), key=lambda pair: -len(pair[1]))[:limit]:
+        lines.append(f"  {len(nodeids):4d} x {reason}")
+        lines.append(f"         e.g. {nodeids[0][:150]}")
+    return lines
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run the GIE integration CI.")
     parser.add_argument(
@@ -237,6 +277,7 @@ def main(argv: list[str] | None = None) -> int:
         if result.status != "passed":
             print(result.output_tail, flush=True)
 
+    digest = failure_digest(evidence_dir)
     counts = {
         status: sum(1 for r in results if r.status == status) for status in ("passed", "failed", "blocked")
     }
@@ -255,6 +296,7 @@ def main(argv: list[str] | None = None) -> int:
         "python": sys.version.split()[0],
         "platform": platform.platform(),
         "steps": [asdict(result) for result in results],
+        "test_failure_digest": digest,
     }
     (evidence_dir / "ci_results.json").write_text(
         json.dumps(payload, indent=2, sort_keys=True) + "\n",
@@ -265,6 +307,9 @@ def main(argv: list[str] | None = None) -> int:
     for result in results:
         print(f"{result.status.upper():8s} {result.name}")
     print(f"\noverall: {overall}  ({counts})  evidence: {evidence_dir}")
+    if digest:
+        print()
+        print("\n".join(digest))
     return 1 if counts["failed"] else 0
 
 
