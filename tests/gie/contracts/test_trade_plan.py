@@ -9,7 +9,9 @@ of performance, and no order is created anywhere in this module.
 Expected behaviour is taken from the specification, not from the implementation:
 
 * ``specifications/contracts/FIELDS.md`` - "TradePlan 1.0.0" with the invariants CAUSAL-1 and
-  PLN-1 .. PLN-12, ``Target``, ``EntryStyle`` and ``PlanStatus``;
+  PLN-1 .. PLN-15, ``Target`` (with ``scenario``), ``EntryStyle`` and ``PlanStatus``;
+* ``reviews/session_00/rework_2_change_notice.md`` section 11 - PLN-13 .. PLN-15, ``Target.scenario``
+  and the risk distance rule of ``validate_plan_transition``;
 * ``specifications/SHARED_CONTRACTS.md`` - section 2 (exact decimals, what 1 R is on a plan, only
   XAUUSD can be planned), section 4 (``alternative_group_id = f(opportunity_id)``), section 9.1
   (hard stop on the losing side and destinations on the winning side of the *effective* entry; an
@@ -68,7 +70,7 @@ from tests.gie import samples
 
 T0 = samples.T0
 STEP = D("0.000000000001")
-OTHER_RUN = identity.run_id("REPLAY", "1" * 64, "other-fixture")
+OTHER_RUN = identity.run_id("REPLAY", "1" * 64)
 SHADOW_MODEL = identity.model_version_id("fixture_shadow", "0.2.0", "cd" * 32)
 
 Build = Callable[[], object]
@@ -110,8 +112,12 @@ EXPECTED_TRANSITIONS: dict[PlanStatus | None, frozenset[PlanStatus]] = {
 
 
 # --------------------------------------------------------------------------- labelled fixture builders
-def _target(price: str, close_frac: str = "0", label: str = "fixture_target") -> Target:
-    return Target(label=label, price=D(price), close_frac=D(close_frac))
+def _target(
+    price: str, close_frac: str = "0", label: str | None = None, scenario: str | None = None
+) -> Target:
+    """A target named after its price unless a label is given (PLN-15: targets are named once)."""
+    name = label if label is not None else "t_" + price.replace(".", "_")
+    return Target(label=name, scenario=scenario, price=D(price), close_frac=D(close_frac))
 
 
 def _plan(**overrides: Any) -> TradePlan:
@@ -176,10 +182,16 @@ def _pullback(side: Side = Side.BUY, order_type: OrderType = OrderType.MARKET, *
     return samples.trade_plan(**fields)
 
 
+#: Entry level of a BUY STOP plan: above the reference 2650.35 (PLN-14), below the targets.
+STOP_ENTRY = D("2651.00")
+
+
 def _styled(style: EntryStyle, order_type: OrderType, **overrides: Any) -> TradePlan:
     fields: dict[str, Any] = {"entry_style": style, "entry_order_type": order_type}
     if style is EntryStyle.MARKET:
         fields["entry_price"] = None
+    elif style is EntryStyle.STOP:
+        fields["entry_price"] = STOP_ENTRY
     fields.update(overrides)
     return samples.trade_plan(**fields)
 
@@ -190,6 +202,12 @@ def _with_status(status: PlanStatus, revision: int = 0, **overrides: Any) -> Tra
         fields["status_reasons"] = ("FIXTURE_REASON",)
     fields.update(overrides)
     return samples.trade_plan(**fields)
+
+
+def _gold_condition(price: str) -> PriceCondition:
+    return PriceCondition(
+        price=D(price), trigger=PriceTrigger.AT_OR_BELOW, basis=PriceBasis.BID, timeframe=None
+    )
 
 
 def _changed(record: TradePlan, **changes: Any) -> TradePlan:
@@ -247,7 +265,7 @@ def _field_error(build: Build, path: str) -> ContractValidationError:
 
 
 # =========================================================================== inventory
-PLAN_INVARIANTS = ("CAUSAL-1", *(f"PLN-{number}" for number in range(1, 13)))
+PLAN_INVARIANTS = ("CAUSAL-1", *(f"PLN-{number}" for number in range(1, 16)))
 
 
 @pytest.mark.requirement("S00-ASG-14")
@@ -414,6 +432,38 @@ ACCEPTED_CASES: list[tuple[str, str, Build]] = [
     ("PLN-12", "stdev_only", lambda: _plan(expected_net_r_stderr=None, support_count=None)),
     ("PLN-12", "stderr_only", lambda: _plan(net_r_stdev=None)),
     ("PLN-12", "zero_stdev_is_a_statement", lambda: _plan(net_r_stdev=0.0, expected_net_r_stderr=None)),
+    ("PLN-13", "no_trigger_no_invalidation", lambda: _plan(entry_trigger=None, invalidations=())),
+    (
+        "PLN-13",
+        "smallest_positive_trigger_and_invalidation",
+        lambda: _plan(
+            entry_trigger=_gold_condition("0.000000000001"),
+            invalidations=(_gold_condition("0.000000000001"),),
+        ),
+    ),
+    ("PLN-14", "buy_limit_at_the_reference", lambda: _plan(entry_price=D("2650.35"))),
+    ("PLN-14", "sell_limit_at_the_reference", lambda: _sell(entry_price=D("2650.10"))),
+    (
+        "PLN-14",
+        "buy_stop_at_the_reference",
+        lambda: _styled(EntryStyle.STOP, OrderType.STOP, entry_price=D("2650.35")),
+    ),
+    (
+        "PLN-14",
+        "retest_by_market_above_the_reference",
+        lambda: _styled(EntryStyle.RETEST, OrderType.MARKET, entry_price=STOP_ENTRY),
+    ),
+    ("PLN-15", "sample_label_with_and_without_scenario", _plan),
+    (
+        "PLN-15",
+        "same_label_in_two_scenarios",
+        lambda: _plan(
+            targets=(
+                _target("2652.80", "0.5", "prior_high", "continuation"),
+                _target("2655.00", "0.5", "prior_high", "reversal"),
+            )
+        ),
+    ),
 ]
 
 
@@ -618,6 +668,40 @@ REJECTED_CASES: list[tuple[str, str, Build]] = [
         "support_count_alone_is_not_uncertainty",
         lambda: _changed(_plan(), net_r_stdev=None, expected_net_r_stderr=None, support_count=500),
     ),
+    ("PLN-13", "trigger_at_zero", lambda: _changed(_plan(), entry_trigger=_gold_condition("0"))),
+    (
+        "PLN-13",
+        "second_invalidation_negative",
+        lambda: _changed(_plan(), invalidations=(_gold_condition("2648.00"), _gold_condition("-0.01"))),
+    ),
+    (
+        "PLN-14",
+        "buy_limit_one_step_above_the_reference",
+        lambda: _changed(_plan(), entry_price=D("2650.35") + STEP),
+    ),
+    (
+        "PLN-14",
+        "buy_stop_one_step_below_the_reference",
+        lambda: _styled(EntryStyle.STOP, OrderType.STOP, entry_price=D("2650.35") - STEP),
+    ),
+    (
+        "PLN-15",
+        "two_targets_named_alike_without_scenario",
+        lambda: _changed(
+            _plan(), targets=(_target("2652.80", "0.5", "first"), _target("2655", "0.5", "first"))
+        ),
+    ),
+    (
+        "PLN-15",
+        "two_targets_named_alike_in_one_scenario",
+        lambda: _changed(
+            _plan(),
+            targets=(
+                _target("2652.80", "0.5", "prior_high", "reversal"),
+                _target("2655", "0.5", "prior_high", "reversal"),
+            ),
+        ),
+    ),
 ]
 
 
@@ -673,7 +757,8 @@ def test_entry_style_and_order_type_pairing(style: EntryStyle, order_type: Order
 def test_entry_price_is_null_if_and_only_if_the_style_is_market(
     style: EntryStyle, order_type: OrderType, has_entry_price: bool
 ) -> None:
-    entry_price = D("2649.80") if has_entry_price else None
+    level = STOP_ENTRY if style is EntryStyle.STOP else D("2649.80")  # PLN-14: a buy stop rests above
+    entry_price = level if has_entry_price else None
 
     def build() -> TradePlan:
         return _styled(style, order_type, entry_price=entry_price)
@@ -1144,12 +1229,6 @@ def test_entry_trigger_and_invalidations_are_price_conditions() -> None:
     assert info.value.details["path"] == "entry_trigger"
 
 
-def _gold_condition(price: str) -> PriceCondition:
-    return PriceCondition(
-        price=D(price), trigger=PriceTrigger.AT_OR_BELOW, basis=PriceBasis.BID, timeframe=None
-    )
-
-
 @pytest.mark.requirement("S00-ASG-14", "S00-ASG-20")
 def test_the_entry_trigger_of_a_gold_plan_must_be_a_price_greater_than_zero() -> None:
     # SHARED_CONTRACTS section 2, units table: PriceCondition.price may have any sign for a non-price
@@ -1158,8 +1237,9 @@ def test_the_entry_trigger_of_a_gold_plan_must_be_a_price_greater_than_zero() ->
         "0.000000000001"
     )
     for price in ("0", "-0.01", "-2648.20"):
-        with pytest.raises(ContractValidationError):
-            _changed(_plan(), entry_trigger=_gold_condition(price))
+        _invariant_error(
+            lambda price=price: _changed(_plan(), entry_trigger=_gold_condition(price)), "PLN-13"
+        )
 
 
 @pytest.mark.requirement("S00-ASG-14", "S00-ASG-20")
@@ -1169,8 +1249,9 @@ def test_the_invalidations_of_a_gold_plan_must_be_prices_greater_than_zero() -> 
     valid = _gold_condition("2648.00")
     assert _plan(invalidations=(valid,)).invalidations == (valid,)
     for price in ("0", "-0.01", "-2648.00"):
-        with pytest.raises(ContractValidationError):
-            _changed(_plan(), invalidations=(valid, _gold_condition(price)))
+        _invariant_error(
+            lambda price=price: _changed(_plan(), invalidations=(valid, _gold_condition(price))), "PLN-13"
+        )
 
 
 @pytest.mark.requirement("S00-ASG-14")
@@ -1213,6 +1294,159 @@ def test_wire_form_writes_a_market_plan_entry_price_as_explicit_null() -> None:
     with pytest.raises(ContractValidationError) as info:
         from_wire(missing_key, TradePlan)
     assert info.value.details["path"] == "entry_price"
+
+
+# =========================================================================== resting entry (PLN-14)
+REFERENCE = {Side.BUY: D("2650.35"), Side.SELL: D("2650.10")}
+#: Direction (+1 above, -1 below the reference) in which a resting entry is NOT marketable.
+BEYOND = {
+    (Side.BUY, OrderType.LIMIT): -1,
+    (Side.SELL, OrderType.LIMIT): 1,
+    (Side.BUY, OrderType.STOP): 1,
+    (Side.SELL, OrderType.STOP): -1,
+}
+RESTING_STYLES = [
+    (EntryStyle.LIMIT, OrderType.LIMIT),
+    (EntryStyle.RETEST, OrderType.LIMIT),
+    (EntryStyle.PULLBACK, OrderType.LIMIT),
+    (EntryStyle.STOP, OrderType.STOP),
+]
+
+
+def _resting(side: Side, style: EntryStyle, order_type: OrderType, entry: D, **overrides: Any) -> TradePlan:
+    """A plan with a valid risk geometry around *entry*: stop 2.00 away, one target 3.00 away."""
+    towards_profit = 1 if side is Side.BUY else -1
+    with decimal.localcontext(decimal.Context(prec=64, traps=[decimal.Inexact])):  # exact fixture arithmetic
+        stop = entry - towards_profit * D("2.00")
+        target = entry + towards_profit * D("3.00")
+    fields: dict[str, Any] = {
+        "side": side,
+        "entry_style": style,
+        "entry_order_type": order_type,
+        "entry_price": entry,
+        "reference_price": REFERENCE[side],
+        "stop_price": stop,
+        "targets": (_target(str(target), "1"),),
+        "invalidations": (),
+    }
+    fields.update(overrides)
+    return samples.trade_plan(**fields)
+
+
+def _entry_at(side: Side, order_type: OrderType, where: str) -> D:
+    direction = BEYOND[(side, order_type)]
+    offset = {"at": 0, "beyond": direction, "far_beyond": 100_000_000_000 * direction, "inside": -direction}
+    return REFERENCE[side] + offset[where] * STEP
+
+
+@pytest.mark.requirement("S00-ASG-14", "G04-12")
+@pytest.mark.parametrize("side", [Side.BUY, Side.SELL], ids=lambda side: side.value)
+@pytest.mark.parametrize(("style", "order_type"), RESTING_STYLES, ids=lambda item: item.value.lower())
+@pytest.mark.parametrize("where", ["at", "beyond", "far_beyond", "inside"])
+def test_pln14_a_resting_entry_lies_at_or_beyond_the_reference_price(
+    side: Side, style: EntryStyle, order_type: OrderType, where: str
+) -> None:
+    entry = _entry_at(side, order_type, where)
+
+    def build() -> TradePlan:
+        return _resting(side, style, order_type, entry)
+
+    if where == "inside":
+        error = _invariant_error(build, "PLN-14")
+        assert error.details["rule"] == next(r.text for r in TradePlan.ALL_INVARIANTS if r.id == "PLN-14")
+    else:
+        plan = build()
+        assert plan.entry_price == entry
+        assert from_wire(to_wire(plan), TradePlan) == plan
+
+
+@pytest.mark.requirement("S00-ASG-14", "G04-12")
+@pytest.mark.parametrize("status", list(PlanStatus), ids=lambda status: status.value)
+@pytest.mark.parametrize("side", [Side.BUY, Side.SELL], ids=lambda side: side.value)
+@pytest.mark.parametrize("order_type", [OrderType.LIMIT, OrderType.STOP], ids=lambda item: item.value)
+def test_pln14_applies_to_usable_plans_only(status: PlanStatus, side: Side, order_type: OrderType) -> None:
+    style = EntryStyle.STOP if order_type is OrderType.STOP else EntryStyle.LIMIT
+    reasons = ("PRICE_RAN_AWAY",) if status in NEEDS_REASON else ()
+
+    def build() -> TradePlan:
+        entry = _entry_at(side, order_type, "inside")
+        return _resting(side, style, order_type, entry, status=status, status_reasons=reasons)
+
+    if status in USABLE:
+        _invariant_error(build, "PLN-14")
+    else:  # a REJECTED, WITHDRAWN or EXPIRED revision records what happened; it rests nothing
+        assert build().status is status
+
+
+@pytest.mark.requirement("S00-ASG-14", "G04-12")
+@pytest.mark.parametrize("status", list(PlanStatus), ids=lambda status: status.value)
+@pytest.mark.parametrize("side", [Side.BUY, Side.SELL], ids=lambda side: side.value)
+@pytest.mark.parametrize("style", [EntryStyle.RETEST, EntryStyle.PULLBACK], ids=lambda item: item.value)
+@pytest.mark.parametrize("where", ["at", "beyond", "inside"])
+def test_pln14_does_not_apply_to_an_entry_by_market_order(
+    status: PlanStatus, side: Side, style: EntryStyle, where: str
+) -> None:
+    # A RETEST or PULLBACK executed by a MARKET order rests nothing: its level may lie on either side.
+    entry = _entry_at(side, OrderType.LIMIT, where)
+    reasons = ("PRICE_RAN_AWAY",) if status in NEEDS_REASON else ()
+    plan = _resting(side, style, OrderType.MARKET, entry, status=status, status_reasons=reasons)
+    assert (plan.entry_order_type, plan.entry_price) == (OrderType.MARKET, entry)
+
+
+@pytest.mark.requirement("S00-ASG-14", "G04-12")
+def test_pln14_is_decided_exactly_under_a_hostile_decimal_context() -> None:
+    inside = REFERENCE[Side.BUY] + STEP  # rounds to the reference with three significant digits
+    for context in HOSTILE_CONTEXTS.values():
+        with decimal.localcontext(context):
+            assert _resting(Side.BUY, EntryStyle.LIMIT, OrderType.LIMIT, REFERENCE[Side.BUY]).entry_price
+            _invariant_error(lambda: _resting(Side.BUY, EntryStyle.LIMIT, OrderType.LIMIT, inside), "PLN-14")
+
+
+# =========================================================================== targets: scenario (PLN-15)
+@pytest.mark.requirement("S00-ASG-14")
+def test_target_scenario_is_an_optional_code() -> None:
+    assert _target("2652.80").scenario is None
+    assert _target("2652.80", scenario="reversal").scenario == "reversal"
+    assert Target(label="first", price=D("2652.80"), close_frac=D("0")).scenario is None
+    for bad in ("Reversal", "", "a", "x" * 49, "re versal", 1, D("1")):
+        _field_error(
+            lambda bad=bad: Target(label="first", scenario=bad, price=D("2652.80"), close_frac=D("0")),
+            "scenario",
+        )
+    wire = to_wire(_plan())
+    assert [target["scenario"] for target in wire["targets"]] == [None, "reversal"]
+    assert all("scenario" in target for target in wire["targets"])  # optional keys are written as null
+    with pytest.raises(ContractValidationError):
+        from_wire({**wire, "targets": [{**wire["targets"][1], "scenario": "Reversal"}]}, TradePlan)
+
+
+@pytest.mark.requirement("S00-ASG-14")
+@pytest.mark.parametrize(
+    ("names", "valid"),
+    [
+        ((("first", None), ("second", None)), True),
+        ((("prior_high", None), ("prior_high", "reversal")), True),
+        ((("prior_high", "reversal"), ("prior_high", "continuation")), True),
+        ((("prior_high", "reversal"), ("prior_low", "reversal")), True),
+        ((("first", None), ("first", None)), False),
+        ((("prior_high", "reversal"), ("prior_high", "reversal")), False),
+        ((("a_b", None), ("c_d", None), ("a_b", None)), False),
+    ],
+)
+def test_pln15_targets_are_named_once_by_scenario_and_label(
+    names: tuple[tuple[str, str | None], ...], valid: bool
+) -> None:
+    targets = tuple(
+        _target(str(2652 + index), "0", label, scenario) for index, (label, scenario) in enumerate(names)
+    )
+
+    def build() -> TradePlan:
+        return _plan(targets=targets)
+
+    if valid:
+        assert build().targets == targets
+    else:
+        _invariant_error(build, "PLN-15")
 
 
 # =========================================================================== PlanEstimate (EST-1)
@@ -1464,3 +1698,91 @@ def test_an_illegal_transition_error_is_journalable_data() -> None:
     assert payload["code"] == "GIE.STATE.ILLEGAL_TRANSITION"
     assert payload["details"] == dict(error.details)
     assert isinstance(error, GieError)
+
+
+@pytest.mark.requirement("S00-ASG-14", "G04-11")
+@pytest.mark.parametrize(
+    ("first", "closer", "away"),
+    [
+        # BUY LIMIT entry 2649.80 / stop 2647.80 (1 R = 2.00); the reference 2650.35 bounds it (PLN-14).
+        pytest.param(_plan, D("2649.50"), D("2649.80") + STEP, id="buy_limit"),
+        # SELL LIMIT entry 2650.60 / stop 2652.60; the reference 2650.10 bounds it.
+        pytest.param(_sell, D("2650.90"), D("2650.60") - STEP, id="sell_limit"),
+        pytest.param(_pullback, D("2647.50"), D("2648.20") + STEP, id="buy_pullback"),
+        pytest.param(lambda: _pullback(Side.SELL), D("2652.50"), D("2652.00") - STEP, id="sell_pullback"),
+        pytest.param(
+            lambda: _styled(EntryStyle.STOP, OrderType.STOP), D("2650.50"), STOP_ENTRY + STEP, id="buy_stop"
+        ),
+    ],
+)
+def test_the_risk_distance_of_a_non_market_plan_may_not_grow(first: Build, closer: D, away: D) -> None:
+    previous = first()
+    assert isinstance(previous, TradePlan)
+
+    def revise(**changes: Any) -> TradePlan:
+        return _changed(
+            previous,
+            revision=1,
+            seq=1,
+            plan_id=identity.plan_id(previous.candidate_id, previous.entry_style.value, previous.variant, 1),
+            supersedes_plan_id=previous.plan_id,
+            **changes,
+        )
+
+    # Entry moved towards the unchanged stop: 1 R shrinks.
+    tighter = revise(entry_price=closer)
+    assert tighter.risk_per_unit < previous.risk_per_unit
+    validate_plan_transition(previous, tighter)
+    # Entry moved one step away from the unchanged stop: 1 R grows - refused although the stop is held.
+    wider = revise(entry_price=away)
+    assert wider.stop_price == previous.stop_price
+    assert wider.risk_per_unit == previous.risk_per_unit + STEP
+    error = _illegal(previous, wider)
+    assert error.details["rule"] == (
+        "the risk distance between entry_price and stop_price may not increase between revisions "
+        "(an entry that moves away from the stop widens 1 R)"
+    )
+
+
+@pytest.mark.requirement("S00-ASG-14", "G04-11")
+@pytest.mark.parametrize("side", [Side.BUY, Side.SELL], ids=lambda side: side.value)
+@pytest.mark.parametrize(
+    ("entry_step", "stop_step", "allowed"), [("0.10", "0.10", True), ("0.10", "0.05", False)]
+)
+def test_entry_and_stop_moved_towards_profit_keep_or_widen_1r(
+    side: Side, entry_step: str, stop_step: str, allowed: bool
+) -> None:
+    # Both move towards profit: the stop tightens.  Equal steps keep 1 R exactly (allowed); an entry that
+    # moves further than the stop widens 1 R although the stop itself was tightened (refused).
+    sign = 1 if side is Side.BUY else -1
+    previous = _plan() if side is Side.BUY else _sell()
+    assert previous.entry_price is not None
+    moved = _changed(
+        previous,
+        revision=1,
+        seq=1,
+        entry_price=previous.entry_price + sign * D(entry_step),
+        stop_price=previous.stop_price + sign * D(stop_step),
+        plan_id=identity.plan_id(previous.candidate_id, previous.entry_style.value, previous.variant, 1),
+        supersedes_plan_id=previous.plan_id,
+    )
+    if allowed:
+        assert moved.risk_per_unit == previous.risk_per_unit
+        validate_plan_transition(previous, moved)
+    else:
+        assert moved.risk_per_unit > previous.risk_per_unit
+        assert "risk distance" in _illegal(previous, moved).details["rule"]
+
+
+@pytest.mark.requirement("S00-ASG-14", "G04-11")
+@pytest.mark.parametrize("side", [Side.BUY, Side.SELL], ids=lambda side: side.value)
+def test_the_risk_distance_rule_does_not_apply_to_a_market_plan(side: Side) -> None:
+    # A MARKET plan is re-issued with a fresh reference price; only its stop is held.
+    first = _market(side, status=PlanStatus.ARMED)
+    away = D("0.45") if side is Side.BUY else D("-0.45")
+    fresh = _market(
+        side, status=PlanStatus.SELECTED, revision=1, seq=1, reference_price=first.reference_price + away
+    )
+    assert fresh.stop_price == first.stop_price
+    assert fresh.risk_per_unit > first.risk_per_unit
+    validate_plan_transition(first, fresh)

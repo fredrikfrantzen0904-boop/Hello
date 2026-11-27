@@ -1,8 +1,9 @@
 """Independent tests for ``gie.core.routing_lock`` - acceptance test S00-ACC-04 "Paper-only routing lock".
 
 Requirements: G08-03 (live lock), G08-10 (never enable real execution during this project
-phase), M-AUTH-13 (paper/replay only), M-AUTH-19 (keep real order routing disabled) and OWN-14
-(live execution remains disabled).  Every test of this module carries these markers.
+phase), M-AUTH-13 (paper/replay only), M-AUTH-19 (keep real order routing disabled), OWN-14
+(live execution remains disabled) and M-DIR-07 / COM-11 (the same rule under other ids).  Every
+test of this module verifies that no order can leave the process and carries these markers.
 
 The expected behaviour is taken from the module, function and class docstrings of
 ``gie/core/routing_lock.py``, from ``specifications/SHARED_CONTRACTS.md`` sections 9.1 / 9.3 and
@@ -64,7 +65,7 @@ from gie.core.routing_lock import (
 from tests.gie import samples
 
 pytestmark = [
-    pytest.mark.requirement("G08-03", "G08-10", "M-AUTH-13", "M-AUTH-19", "OWN-14"),
+    pytest.mark.requirement("G08-03", "G08-10", "M-AUTH-13", "M-AUTH-19", "OWN-14", "M-DIR-07", "COM-11"),
     pytest.mark.acceptance("S00-ACC-04"),
 ]
 
@@ -174,15 +175,23 @@ _VenueWithRenamedMember = Enum("_VenueWithRenamedMember", {"LIVE": "SIMULATED"},
 def _isolated_adapter_registry() -> Iterator[None]:
     """Run every test on a private copy of the adapter registry and prove nothing leaked."""
     original = routing_lock._SIMULATED_ADAPTER_TYPES
+    original_snapshots = routing_lock._FUNCTION_SNAPSHOTS
     assert isinstance(original, dict)
+    assert isinstance(original_snapshots, dict)
     snapshot = list(original.items())
+    function_snapshots = dict(original_snapshots)
     with pytest.MonkeyPatch.context() as patch:
         patch.setattr(routing_lock, "_SIMULATED_ADAPTER_TYPES", dict(original))
+        patch.setattr(routing_lock, "_FUNCTION_SNAPSHOTS", dict(original_snapshots))
         yield
     assert routing_lock._SIMULATED_ADAPTER_TYPES is original
+    assert routing_lock._FUNCTION_SNAPSHOTS is original_snapshots
     assert [(id(key), value) for key, value in original.items()] == [
         (id(key), value) for key, value in snapshot
     ]
+    assert original_snapshots == function_snapshots
+    # Nothing a test does to the enums may survive it either.
+    assert_live_routing_locked()
 
 
 def _inert_method(name: str) -> FunctionType:
@@ -692,6 +701,60 @@ def test_a_subclass_whose_creation_was_refused_cannot_be_used_as_a_guard() -> No
                 survivor(mode)
 
 
+def test_routing_guard_is_final_by_its_metaclass() -> None:
+    metaclass = type(RoutingGuard)
+    assert metaclass is not type
+    assert issubclass(metaclass, type)
+    # The metaclass refuses before the class object exists: no subclass is left behind.
+    subclasses_before = list(RoutingGuard.__subclasses__())
+    with pytest.raises(LiveRoutingLockedError, match="may not be subclassed"):
+        metaclass("ByMetaclass", (RoutingGuard,), {"__slots__": ()})
+    assert RoutingGuard.__subclasses__() == subclasses_before
+    # A class of the same metaclass that does not derive from the guard is no subclass and is allowed.
+    unrelated = metaclass("Unrelated", (), {})
+    assert not issubclass(unrelated, RoutingGuard)
+
+
+def test_a_subclass_created_behind_the_metaclass_is_refused_by_init_subclass() -> None:
+    # ``type.__new__`` called directly with the guard's metaclass skips the metaclass's own ``__new__``;
+    # ``__init_subclass__`` still refuses the class.
+    metaclass = type(RoutingGuard)
+    with pytest.raises(LiveRoutingLockedError, match="may not be subclassed") as caught:
+        type.__new__(metaclass, "BehindTheMetaclass", (RoutingGuard,), {"__slots__": ()})
+    assert caught.value.code == "GIE.ROUTING.LIVE_LOCKED"
+
+
+class _NotAGuard:
+    """SYNTHETIC FIXTURE: an object that offers a slot named like the guard's and nothing else."""
+
+    __slots__ = ("_mode",)
+
+
+def test_the_guard_methods_refuse_an_object_that_is_not_exactly_a_routing_guard() -> None:
+    # "an object whose exact type is not this class cannot be initialised as a guard", and the
+    # unbound methods the gateway calls check the exact type too.
+    registered = _registered_adapter_class()
+    impostor = _NotAGuard()
+    with pytest.raises(LiveRoutingLockedError, match="may not be subclassed"):
+        RoutingGuard.__init__(impostor, "PAPER")  # type: ignore[arg-type]
+    assert not hasattr(impostor, "_mode")
+    object.__setattr__(impostor, "_mode", RunMode.PAPER)
+    with pytest.raises(LiveRoutingLockedError, match="may not be subclassed"):
+        RoutingGuard.authorized_methods(impostor, registered())  # type: ignore[arg-type]
+    # The genuine guard admits the same adapter: the refusal is about the guard's type alone.
+    _assert_admitted(RoutingGuard("PAPER"), registered())
+
+
+def test_a_guard_cannot_be_given_a_mode_twice_or_carry_new_attributes_even_through_its_own_init() -> None:
+    guard = RoutingGuard("PAPER")
+    with pytest.raises(LiveRoutingLockedError, match="immutable"):
+        RoutingGuard.__init__(guard, "REPLAY")
+    assert guard.mode is RunMode.PAPER
+    assert RoutingGuard.__slots__ == ("_mode",)
+    with pytest.raises(LiveRoutingLockedError, match="immutable"):
+        guard.__dict__ = {}  # type: ignore[misc]
+
+
 @pytest.mark.parametrize(
     ("name", "value"),
     [
@@ -863,6 +926,189 @@ def test_a_class_from_any_other_module_cannot_be_registered(module: Any) -> None
     assert adapter_type.__module__ == module
     _assert_not_registrable(adapter_type)
     _assert_refused(RoutingGuard("PAPER"), adapter_type())
+
+
+# --------------------------------------------------------------------------- where a class really lives
+
+
+def _functions_living_in(module: str) -> dict[str, FunctionType]:
+    """SYNTHETIC FIXTURE: inert adapter methods whose globals are those of the module named *module*."""
+    module_globals: dict[str, Any] = {"__name__": module}
+    functions: dict[str, FunctionType] = {}
+    for name in _DOCUMENTED_ADAPTER_METHODS:
+        template = _inert_method(name)
+        functions[name] = FunctionType(
+            template.__code__, module_globals, name, template.__defaults__, template.__closure__
+        )
+    return functions
+
+
+def _register_from(module: str, adapter_type: Any) -> Any:
+    """Call ``register_simulated_adapter`` from code whose module (its globals' ``__name__``) is *module*."""
+
+    def registrar(candidate: Any) -> Any:
+        return register_simulated_adapter(candidate)
+
+    module_globals: dict[str, Any] = {
+        "__name__": module,
+        "register_simulated_adapter": register_simulated_adapter,
+    }
+    relocated = FunctionType(registrar.__code__, module_globals, "registrar")
+    return relocated(adapter_type)
+
+
+_ALLOWED_PLACES = ["gie.execution.simulator", "gie.backtesting.engine", "tests.gie.fixtures"]
+_FORBIDDEN_PLACES = [
+    "__main__",
+    "gie.strategy.signals",
+    "gie.contracts.guarded",
+    "gie.core.routing_lock",
+    "gie.execution",
+    "brokerbridge.orders",
+    "testsuite.adapters",
+]
+
+
+@pytest.mark.parametrize("place", _ALLOWED_PLACES)
+def test_a_class_registered_from_an_allowed_module_with_methods_living_there_is_admitted(place: str) -> None:
+    adapter_type = _adapter_class("Relocated", __module__=place, **_functions_living_in(place))
+    assert all(
+        function.__globals__["__name__"] == place for function in _own_functions(adapter_type).values()
+    )
+    assert _register_from(place, adapter_type) is adapter_type
+    assert adapter_type in registered_adapter_types()
+    assert _assert_admitted(RoutingGuard("PAPER"), adapter_type()) == _own_functions(adapter_type)
+
+
+@pytest.mark.parametrize("place", _FORBIDDEN_PLACES)
+def test_a_spoofed_module_name_does_not_make_methods_from_another_module_registrable(place: str) -> None:
+    # ``__module__`` says "tests."; the method functions really live in *place*.
+    adapter_type = _adapter_class("Spoofed", __module__="tests.gie.fixtures", **_functions_living_in(place))
+    assert adapter_type.__module__ == "tests.gie.fixtures"
+    _assert_not_registrable(adapter_type)
+    _assert_refused(RoutingGuard("PAPER"), adapter_type())
+
+
+@pytest.mark.parametrize("method", _DOCUMENTED_ADAPTER_METHODS)
+def test_a_single_method_living_in_another_module_makes_the_class_unregistrable(method: str) -> None:
+    foreign = _functions_living_in("brokerbridge.orders")[method]
+    adapter_type = _adapter_class("OneForeignMethod", **{method: foreign})
+    _assert_not_registrable(adapter_type)
+    _assert_refused(RoutingGuard("PAPER"), adapter_type())
+
+
+@pytest.mark.parametrize("place", _FORBIDDEN_PLACES)
+def test_a_registration_performed_from_a_module_outside_the_allow_list_is_refused(place: str) -> None:
+    # The class itself is impeccable (defined here, in ``tests.``); only the registering code is not.
+    adapter_type = _adapter_class("RegisteredFromElsewhere")
+    before = registered_adapter_types()
+    with pytest.raises(LiveRoutingLockedError, match="registered from") as caught:
+        _register_from(place, adapter_type)
+    assert caught.value.code == "GIE.ROUTING.LIVE_LOCKED"
+    assert registered_adapter_types() == before
+    _assert_refused(RoutingGuard("PAPER"), adapter_type())
+    # The same class registered from an allowed module is admitted: the refusal was about the caller.
+    assert _register_from("tests.gie.fixtures", adapter_type) is adapter_type
+    _assert_admitted(RoutingGuard("PAPER"), adapter_type())
+
+
+# --------------------------------------------------------------------------- functions changed in place
+
+
+def _with_keyword_default(name: str, default: Any) -> FunctionType:
+    """SYNTHETIC FIXTURE: an inert method with a keyword-only default."""
+
+    def method(self: object, *arguments: object, route: Any = default) -> tuple[str, int]:
+        return (name, len(arguments))
+
+    method.__name__ = name
+    return method
+
+
+def _change_code(function: FunctionType) -> None:
+    replacement = _inert_method("other").__code__  # same free variables, other code object
+    assert replacement is not function.__code__
+    function.__code__ = replacement
+
+
+def _change_defaults(function: FunctionType) -> None:
+    function.__defaults__ = ("route-for-real",)
+
+
+def _change_keyword_defaults(function: FunctionType) -> None:
+    function.__kwdefaults__ = {"route": "LIVE"}
+
+
+def _change_keyword_defaults_in_place(function: FunctionType) -> None:
+    assert function.__kwdefaults__ is not None
+    function.__kwdefaults__["route"] = "LIVE"
+
+
+def _change_closure_cell(function: FunctionType) -> None:
+    assert function.__closure__ is not None
+    function.__closure__[0].cell_contents = "submit-for-real"
+
+
+_IN_PLACE_CHANGES = [
+    _change_code,
+    _change_defaults,
+    _change_keyword_defaults,
+    _change_keyword_defaults_in_place,
+    _change_closure_cell,
+]
+
+
+@pytest.mark.parametrize("change", _IN_PLACE_CHANGES, ids=lambda change: change.__name__.removeprefix("_"))
+@pytest.mark.parametrize("method", ["submit", "poll"])
+def test_a_registered_method_changed_in_place_after_registration_is_refused(
+    change: Callable[[FunctionType], None], method: str
+) -> None:
+    # The class still holds the very same function object - only its code, defaults or closure changed.
+    adapter_type = _registered_adapter_class(**{method: _with_keyword_default(method, "PAPER")})
+    function = vars(adapter_type)[method]
+    guard = RoutingGuard("PAPER")
+    existing = adapter_type()
+    assert _assert_admitted(guard, existing)[method] is function
+    change(function)
+    assert vars(adapter_type)[method] is function
+    assert adapter_type in registered_adapter_types()
+    error = _assert_refused(guard, existing)
+    assert "modified after registration" in str(error)
+    _assert_refused(RoutingGuard("REPLAY"), adapter_type())
+    # Registering the changed class again does not launder the change.
+    with contextlib.suppress(LiveRoutingLockedError):
+        register_simulated_adapter(adapter_type)
+    _assert_refused(guard, existing)
+
+
+def test_restoring_the_registered_code_defaults_and_closure_restores_admission() -> None:
+    adapter_type = _registered_adapter_class(submit=_with_keyword_default("submit", "PAPER"))
+    function = vars(adapter_type)["submit"]
+    guard = RoutingGuard("PAPER")
+    code, defaults, keyword_defaults = function.__code__, function.__defaults__, function.__kwdefaults__
+    assert function.__closure__ is not None
+    cell_contents = function.__closure__[0].cell_contents
+    for change in _IN_PLACE_CHANGES:
+        change(function)
+        _assert_refused(guard, adapter_type())
+        function.__code__, function.__defaults__ = code, defaults
+        function.__kwdefaults__ = None if keyword_defaults is None else dict(keyword_defaults)
+        function.__closure__[0].cell_contents = cell_contents
+        _assert_admitted(guard, adapter_type())
+
+
+def test_a_keyword_default_replaced_by_an_object_that_merely_compares_equal_is_refused() -> None:
+    # "code, defaults and closures of the registered methods are remembered and compared": a
+    # default replaced by another object is a modification, whatever that object's ``==`` says
+    # (defaults and closure cells are compared by identity; the keyword defaults must be too).
+    adapter_type = _registered_adapter_class(submit=_with_keyword_default("submit", "PAPER"))
+    function = vars(adapter_type)["submit"]
+    guard = RoutingGuard("PAPER")
+    _assert_admitted(guard, adapter_type())
+    impostor = _EqualToEverything()
+    function.__kwdefaults__ = {"route": impostor}
+    assert function.__kwdefaults__["route"] is impostor
+    _assert_refused(guard, adapter_type())
 
 
 @pytest.mark.parametrize(
@@ -1647,6 +1893,96 @@ def test_the_self_check_detects_a_change_of_the_captured_genuine_members(
     with monkeypatch.context() as patch:
         patch.setattr(routing_lock, attribute, tampered)
         _assert_fails_closed(guard, adapter_type())
+    assert_live_routing_locked()
+    _assert_admitted(guard, adapter_type())
+
+
+@pytest.mark.parametrize(
+    ("vocabulary", "alias", "target"),
+    [
+        (RunMode, "LIVE", "PAPER"),
+        (RunMode, "REAL", "REPLAY"),
+        (ExecutionVenue, "LIVE", "SIMULATED"),
+        (ExecutionVenue, "MT5_DEMO", "SIMULATED"),
+    ],
+)
+def test_the_self_check_detects_an_alias_attribute_added_to_the_enum_class(
+    monkeypatch: pytest.MonkeyPatch, vocabulary: Any, alias: str, target: str
+) -> None:
+    # ``RunMode.LIVE = RunMode.PAPER`` is a plain class attribute: the enum tables (``__members__``,
+    # ``_member_map_``, iteration) do not show it, yet ``RunMode.LIVE`` resolves to a genuine member.
+    adapter_type = _registered_adapter_class()
+    guard = RoutingGuard("PAPER")
+    with monkeypatch.context() as patch:
+        patch.setattr(vocabulary, alias, vocabulary[target], raising=False)
+        assert getattr(vocabulary, alias) is vocabulary[target]  # the alias really resolves
+        assert alias not in vocabulary.__members__  # ... and the enum tables do not show it
+        assert len(list(vocabulary)) == len(vocabulary.__members__)
+        _assert_fails_closed(guard, adapter_type())
+    assert not hasattr(vocabulary, alias)
+    assert_live_routing_locked()
+    _assert_admitted(guard, adapter_type())
+
+
+@pytest.mark.parametrize("vocabulary", [RunMode, ExecutionVenue])
+def test_the_self_check_detects_a_forged_member_added_as_a_class_attribute(
+    monkeypatch: pytest.MonkeyPatch, vocabulary: Any
+) -> None:
+    adapter_type = _registered_adapter_class()
+    guard = RoutingGuard("PAPER")
+    with monkeypatch.context() as patch:
+        patch.setattr(vocabulary, "LIVE", _forged_member(vocabulary, "LIVE"), raising=False)
+        _assert_fails_closed(guard, adapter_type())
+    assert not hasattr(vocabulary, "LIVE")
+    assert_live_routing_locked()
+
+
+@pytest.mark.parametrize("vocabulary", [RunMode, ExecutionVenue])
+def test_a_plain_class_attribute_that_is_no_member_is_not_mistaken_for_an_alias(
+    monkeypatch: pytest.MonkeyPatch, vocabulary: Any
+) -> None:
+    # Guards the alias test against being a blanket refusal of every class attribute.
+    adapter_type = _registered_adapter_class()
+    guard = RoutingGuard("PAPER")
+    with monkeypatch.context() as patch:
+        patch.setattr(vocabulary, "synthetic_fixture_note", "not a member", raising=False)
+        assert_live_routing_locked()
+        _assert_admitted(guard, adapter_type())
+
+
+class _ContainsNothing:
+    """SYNTHETIC FIXTURE: answers ``in`` with no, but is no mapping - the enum machinery chokes on it."""
+
+    def __contains__(self, item: object) -> bool:
+        return False
+
+
+class _NotIterable:
+    """SYNTHETIC FIXTURE: something that cannot be iterated."""
+
+    __iter__ = None
+
+
+@pytest.mark.parametrize("vocabulary", [RunMode, ExecutionVenue])
+@pytest.mark.parametrize(
+    ("table", "broken"),
+    [("_member_map_", _ContainsNothing()), ("_member_names_", _NotIterable()), ("_value2member_map_", 7)],
+    ids=["member-map-not-a-mapping", "member-names-not-iterable", "value-map-not-a-mapping"],
+)
+def test_an_error_of_the_enum_machinery_is_reported_as_a_broken_lock(
+    monkeypatch: pytest.MonkeyPatch, vocabulary: Any, table: str, broken: Any
+) -> None:
+    # A tampered enum can make the enum machinery itself raise; the self-check reports that as
+    # LiveRoutingLockedError (fail closed, a GieError) and never lets the internal error escape.
+    adapter_type = _registered_adapter_class()
+    guard = RoutingGuard("PAPER")
+    adapter = adapter_type()
+    with monkeypatch.context() as patch:
+        patch.setattr(vocabulary, table, broken)
+        with pytest.raises(LiveRoutingLockedError, match="vocabulary has been changed") as caught:
+            assert_live_routing_locked()
+        assert caught.value.code == "GIE.ROUTING.LIVE_LOCKED"
+        _assert_fails_closed(guard, adapter)
     assert_live_routing_locked()
     _assert_admitted(guard, adapter_type())
 

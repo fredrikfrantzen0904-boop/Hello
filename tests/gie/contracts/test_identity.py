@@ -4,8 +4,10 @@ SYNTHETIC FIXTURE DATA ONLY.  Identifiers, hashes, labels and prices in this mod
 test values or come from the labelled synthetic builders of ``tests/gie/samples.py``.  The account
 alias used for external positions is a fixture alias, not a broker login.
 
-Expected behaviour: ``specifications/SHARED_CONTRACTS.md`` (revision 2) section 4 and the module
-docstring of ``gie.contracts.identity``:
+Expected behaviour: ``specifications/SHARED_CONTRACTS.md`` (revision 2) section 4, the module
+docstring of ``gie.contracts.identity`` and ``reviews/session_00/rework_2_change_notice.md`` section 10
+(every part validated, failure only as a ``GieError``; ``run_id(mode, manifest_sha256)``; an account
+alias that looks like an account number is refused):
 
 * form ``<prefix>_<32 lower-case hex>``, the hex part being the first 128 bits of the SHA-256 of the
   canonical JSON of ``[prefix, [identity parts...]]`` - pinned below with ``hashlib`` over payloads
@@ -18,6 +20,7 @@ from __future__ import annotations
 import hashlib
 import inspect
 import itertools
+import json
 import re
 from decimal import Decimal as D
 from typing import Any
@@ -30,8 +33,11 @@ from gie.contracts import (
     OrderState,
     RunMode,
     identity,
+    to_wire,
 )
+from gie.core.canonical import INT64_MAX
 from gie.core.errors import ContractValidationError, GieError, LiveRoutingLockedError
+from gie.core.timeutil import MAX_TIME_NS
 from tests.gie import samples
 
 pytestmark = [pytest.mark.acceptance("S00-ACC-02"), pytest.mark.requirement("S00-ASG-22")]
@@ -57,7 +63,7 @@ MDL, MDL2 = _fixture_id("mdl", "1"), _fixture_id("mdl", "2")
 
 #: function name -> (id prefix, valid arguments, alternative arguments that differ in every part).
 FUNCTIONS: dict[str, tuple[str, tuple[Any, ...], tuple[Any, ...]]] = {
-    "run_id": ("run", ("REPLAY", SHA, "fixture"), ("PAPER", SHA2, "fixture-2")),
+    "run_id": ("run", ("REPLAY", SHA), ("PAPER", SHA2)),
     "market_event_id": (
         "mev",
         ("liquidity_sweep", "XAUUSD", "M5", T, (D("2648.4"),)),
@@ -168,13 +174,30 @@ def test_text_parts_are_not_concatenated(first: tuple[str, str], second: tuple[s
 
 # =========================================================================== pinned values
 def test_pinned_run_id() -> None:
-    payload = '["run",["REPLAY","' + "0" * 64 + '","fixture"]]'
-    assert identity.run_id("REPLAY", "0" * 64, "fixture") == _reference("run", payload)
-    assert _reference("run", payload) == samples.RUN_ID
-    assert identity.run_id(RunMode.REPLAY, "0" * 64, "fixture") == _reference("run", payload)
-    assert identity.run_id("PAPER", "0" * 64, "fixture") == _reference(
-        "run", '["run",["PAPER","' + "0" * 64 + '","fixture"]]'
-    )
+    payload = '["run",["REPLAY","' + "0" * 64 + '"]]'
+    assert identity.run_id("REPLAY", "0" * 64) == _reference("run", payload)
+    assert identity.run_id(RunMode.REPLAY, "0" * 64) == _reference("run", payload)
+    assert identity.run_id("PAPER", "0" * 64) == _reference("run", '["run",["PAPER","' + "0" * 64 + '"]]')
+
+
+def _manifest_content_sha256(wire: dict[str, Any]) -> str:
+    """Independent computation of the manifest hash: canonical JSON of every field except run_id."""
+    content = {
+        key: value for key, value in wire.items() if key not in ("run_id", "contract", "schema_version")
+    }
+    text = json.dumps(content, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def test_the_sample_run_id_is_derived_from_the_sample_manifest() -> None:
+    manifest = samples.run_manifest()
+    wire = to_wire(manifest)
+    expected = identity.run_id(manifest.mode, _manifest_content_sha256(wire))
+    assert manifest.run_id == samples.RUN_ID == expected
+    # Any other manifest content is another run.
+    other = _manifest_content_sha256({**wire, "seed": wire["seed"] + 1})
+    assert identity.run_id(manifest.mode, other) != samples.RUN_ID
+    assert identity.run_id("PAPER", _manifest_content_sha256(wire)) != samples.RUN_ID
 
 
 def test_pinned_candidate_id_with_and_without_scorer() -> None:
@@ -316,11 +339,6 @@ def _invalid_cases() -> list[Any]:
     # ---- hashes and labels
     replace("run_id", 1, bad_sha)
     replace("model_version_id", 2, bad_sha)
-    replace(
-        "run_id",
-        2,
-        ["", "Fixture", "-fixture", ".fixture", "_x", "a" * 65, "has space", "x\n", "x/y", None, 5],
-    )
     # ---- external references
     bad_reference = ["", "has space", "a/b", "a\\b", "a" * 65, "b\n", "\tb", "café", "a,b", None, 5, b"a"]
     replace("external_position_id", 0, bad_reference)
@@ -363,6 +381,239 @@ def test_non_finite_or_unrepresentable_identity_price_is_refused_with_a_gie_erro
         identity.market_event_id("liquidity_sweep", "XAUUSD", "M5", T, prices)
 
 
+# =========================================================================== every part validated (rework 2)
+#: Well-formed strings outside the vocabulary of the record field each part comes from.
+WRONG_VOCABULARY: dict[tuple[str, int], list[str]] = {}
+_KIND = ["Liquidity_sweep", "l", "liquidity-sweep", "1sweep", "liquidity sweep", "a" * 49, "LIQUIDITY_SWEEP"]
+_SYMBOL = ["xauusd", "XAU/USD", "XAU USD", "_XAU", "-XAU", "X" * 25, "XAUüSD"]
+_TERM = ["m5", "5M", "M-5", "M 5", "M" * 49, "_M5"]
+_ENGINE = ["Sweep_reversal", "s", "a" * 33, "sweep.reversal", "sweep-reversal", "9sweep"]
+for _index, _values in enumerate((_KIND, _SYMBOL, _TERM)):
+    WRONG_VOCABULARY[("market_event_id", _index)] = _values
+    WRONG_VOCABULARY[("evaluation_slot_id", _index + 1)] = _values
+WRONG_VOCABULARY[("evaluation_slot_id", 0)] = _ENGINE
+WRONG_VOCABULARY[("evidence_id", 0)] = _ENGINE
+WRONG_VOCABULARY[("opportunity_id", 0)] = _KIND
+WRONG_VOCABULARY[("opportunity_id", 1)] = ["buy", "Buy", "B-UY", "BUY SELL", "1BUY"]
+WRONG_VOCABULARY[("opportunity_id", 2)] = ["scalp", "Scalp", "SCALP-1", "S" * 49]
+WRONG_VOCABULARY[("plan_id", 1)] = ["limit", "Limit", "LIMIT ORDER", "LIMIT-1"]
+WRONG_VOCABULARY[("client_order_id", 2)] = ["entry", "PROTECTIVE-STOP", "Entry", "ENTRY "]
+WRONG_VOCABULARY[("model_version_id", 0)] = _KIND
+WRONG_VOCABULARY[("model_version_id", 1)] = [
+    "1.0",
+    "01.0.0",
+    "1.00.0",
+    "v1.0.0",
+    "1.0.0-rc1",
+    "1.0.0.0",
+    "1234567890.0.0",
+    "1.0.0 ",
+    "-1.0.0",
+]
+
+
+@pytest.mark.parametrize(
+    ("name", "index", "value"),
+    [
+        pytest.param(name, index, value, id=f"{name}-part{index}-{number}")
+        for (name, index), values in sorted(WRONG_VOCABULARY.items())
+        for number, value in enumerate(values)
+    ],
+)
+def test_a_part_outside_its_field_vocabulary_is_refused(name: str, index: int, value: str) -> None:
+    args = FUNCTIONS[name][1]
+    with pytest.raises(ContractValidationError) as caught:
+        _call(name, (*args[:index], value, *args[index + 1 :]))
+    assert caught.value.code == "GIE.CONTRACT.INVALID"
+
+
+class _Opaque:
+    """An arbitrary object that is none of the accepted part types."""
+
+
+#: Hostile values for any part.  None of them is a valid value of any part of any function.
+HOSTILE_PARTS: list[Any] = [
+    _Opaque(),
+    1.5,
+    float("nan"),
+    float("inf"),
+    -float("inf"),
+    D("NaN"),
+    D("sNaN"),
+    D("Infinity"),
+    D("-Infinity"),
+    -1,
+    2**63,
+    2**64,
+    10**30,
+    -(2**70),
+    True,
+    b"x",
+    bytearray(b"x"),
+    {"a": 1},
+    "\x00",
+    "é",
+    "A" * 10_000,
+    _fixture_id("mev", "1") + "\x00",
+]
+
+
+@pytest.mark.parametrize(
+    ("name", "index"),
+    [
+        pytest.param(name, index, id=f"{name}-part{index}")
+        for name, (_prefix, args, _other) in sorted(FUNCTIONS.items())
+        for index in range(len(args))
+    ],
+)
+def test_every_part_of_every_function_fails_only_with_a_gie_error(name: str, index: int) -> None:
+    args = FUNCTIONS[name][1]
+    for value in HOSTILE_PARTS:
+        # pytest.raises(GieError) lets any other exception (TypeError, decimal.InvalidOperation, ...)
+        # through, which fails the test.
+        with pytest.raises(GieError):
+            _call(name, (*args[:index], value, *args[index + 1 :]))
+
+
+#: (function, index of the count part, largest accepted value)
+COUNT_PARTS = [
+    ("market_event_id", 3, MAX_TIME_NS),
+    ("evaluation_slot_id", 4, MAX_TIME_NS),
+    ("evidence_id", 2, INT64_MAX),
+    ("candidate_id", 2, INT64_MAX),
+    ("plan_id", 2, INT64_MAX),
+    ("plan_id", 3, INT64_MAX),
+    ("risk_decision_id", 2, INT64_MAX),
+    ("client_order_id", 3, INT64_MAX),
+    ("order_event_id", 1, INT64_MAX),
+]
+
+
+@pytest.mark.parametrize(
+    ("name", "index", "maximum"), [pytest.param(*case, id=f"{case[0]}-part{case[1]}") for case in COUNT_PARTS]
+)
+def test_integer_parts_are_bounded_at_both_ends(name: str, index: int, maximum: int) -> None:
+    args = FUNCTIONS[name][1]
+
+    def call(value: object) -> str:
+        return _call(name, (*args[:index], value, *args[index + 1 :]))
+
+    assert call(0) != call(maximum)
+    assert re.fullmatch(r"[a-z]{3}_[0-9a-f]{32}", call(maximum))
+    for value in (-1, maximum + 1, 2**64, -(2**63)):
+        with pytest.raises(ContractValidationError):
+            call(value)
+
+
+@pytest.mark.parametrize(
+    "price",
+    [D("NaN"), D("-NaN"), D("sNaN"), D("Infinity"), D("-Infinity"), D("1E+18"), D("1E-13")],
+    ids=str,
+)
+def test_a_non_finite_or_unrepresentable_price_fails_with_a_contract_error(price: D) -> None:
+    for prices in ([price], [D("2648.4"), price], (price, price), iter([price])):
+        with pytest.raises(ContractValidationError):
+            identity.market_event_id("liquidity_sweep", "XAUUSD", "M5", T, prices)
+
+
+def test_the_extreme_representable_prices_are_accepted() -> None:
+    for price in (D("0.000000000001"), D("999999999999999999.999999999999"), D("-0.000000000001")):
+        assert identity.market_event_id("liquidity_sweep", "XAUUSD", "M5", T, [price]).startswith("mev_")
+
+
+# =========================================================================== scope of each identifier
+#: Module docstring table, last column: what the identifier names and where it is unique.
+DOCUMENTED_SCOPE = {
+    "run_id": "run, everywhere",
+    "market_event_id": "event, everywhere",
+    "evaluation_slot_id": "slot, everywhere",
+    "evidence_id": "record, one run",
+    "opportunity_id": "opportunity, one run",
+    "candidate_id": "record, one run",
+    "alternative_group": "group, one run",
+    "plan_id": "record, one run",
+    "risk_decision_id": "record, everywhere",
+    "reservation_id": "record, everywhere",
+    "client_order_id": "order, everywhere",
+    "broker_order_id": "order, everywhere",
+    "order_event_id": "record, everywhere",
+    "position_id": "position, everywhere",
+    "model_version_id": "model, everywhere",
+}
+
+
+def test_the_module_docstring_states_the_scope_of_every_identifier() -> None:
+    doc = identity.__doc__ or ""
+    found: dict[str, str] = {}
+    for line in doc.splitlines():
+        match = re.match(r"^(\w+)\s.*\s(\w+, (?:one run|everywhere))\s*$", line)
+        if match:
+            found[match.group(1)] = match.group(2)
+    assert found == DOCUMENTED_SCOPE
+    assert "(run_id, id)" in doc
+
+
+def _chain(run: str) -> dict[str, str]:
+    """Every identifier of one opportunity, derived for *run* from the same market data."""
+    event = identity.market_event_id("liquidity_sweep", "XAUUSD", "M5", T, [D("2648.4")])
+    slot = identity.evaluation_slot_id("orb_vwap", "breakout", "XAUUSD", "M5", T)
+    opportunity = identity.opportunity_id("sweep_reversal_long", "BUY", "SCALP", [event])
+    candidate = identity.candidate_id(opportunity, MDL, 0)
+    plan = identity.plan_id(candidate, "LIMIT", 0, 0)
+    decision = identity.risk_decision_id(run, plan, 0)
+    order = identity.client_order_id(run, decision, "ENTRY", 0)
+    return {
+        "market_event_id": event,
+        "evaluation_slot_id": slot,
+        "evidence_id": identity.evidence_id("sweep_reversal", event, 0),
+        "opportunity_id": opportunity,
+        "candidate_id": candidate,
+        "alternative_group": identity.alternative_group_id(opportunity),
+        "plan_id": plan,
+        "model_version_id": identity.model_version_id("fixture_net_r", "0.1.0", SHA),
+        "external_position_id": identity.external_position_id("fixture-account", "987654321"),
+        "risk_decision_id": decision,
+        "reservation_id": identity.reservation_id(decision),
+        "client_order_id": order,
+        "broker_order_id": identity.broker_order_id(order),
+        "order_event_id": identity.order_event_id(order, 0),
+        "position_id": identity.position_id(run, order),
+    }
+
+
+def test_identifiers_without_a_run_are_equal_across_runs_and_the_others_differ() -> None:
+    first, second = _chain(identity.run_id("REPLAY", SHA)), _chain(identity.run_id("PAPER", SHA))
+    # Derived from what they describe: the same in every run (market events, slots, models) ...
+    shared = {"market_event_id", "evaluation_slot_id", "model_version_id", "external_position_id"}
+    # ... or containing no run although named per run: such a record is keyed by (run_id, id).
+    per_run_key = {name for name, scope in DOCUMENTED_SCOPE.items() if scope.endswith("one run")}
+    contains_run = set(first) - shared - per_run_key
+    assert contains_run == {
+        "risk_decision_id",
+        "reservation_id",
+        "client_order_id",
+        "broker_order_id",
+        "order_event_id",
+        "position_id",
+    }
+    for name in shared | per_run_key:
+        assert first[name] == second[name], name
+    for name in contains_run:
+        assert first[name] != second[name], name
+        assert DOCUMENTED_SCOPE[name].endswith("everywhere")
+
+
+def test_records_of_two_runs_over_the_same_data_share_the_run_free_identifiers() -> None:
+    other_run = identity.run_id("REPLAY", SHA2)
+    assert other_run != samples.RUN_ID
+    for build, field in (
+        (samples.evidence, "evidence_id"),
+        (samples.candidate, "candidate_id"),
+        (samples.trade_plan, "plan_id"),
+    ):
+        assert getattr(build(), field) == getattr(build(run_id=other_run), field)
+
+
 # =========================================================================== run_id and the routing lock
 @pytest.mark.requirement("G08-03", "G08-10")
 @pytest.mark.parametrize(
@@ -387,22 +638,30 @@ def test_non_finite_or_unrepresentable_identity_price_is_refused_with_a_gie_erro
 )
 def test_run_id_refuses_every_mode_that_is_not_replay_or_paper(mode: Any) -> None:
     with pytest.raises(LiveRoutingLockedError) as caught:
-        identity.run_id(mode, SHA, "fixture")
+        identity.run_id(mode, SHA)
     assert caught.value.code == "GIE.ROUTING.LIVE_LOCKED"
+    assert isinstance(caught.value, GieError)
 
 
 @pytest.mark.requirement("G08-03", "G08-10")
 def test_run_id_accepts_exactly_the_two_run_modes() -> None:
     assert [mode.value for mode in RunMode] == ["REPLAY", "PAPER"]
-    replay, paper = identity.run_id("REPLAY", SHA, "fixture"), identity.run_id("PAPER", SHA, "fixture")
+    replay, paper = identity.run_id("REPLAY", SHA), identity.run_id("PAPER", SHA)
     assert replay != paper
-    assert identity.run_id(RunMode.REPLAY, SHA, "fixture") == replay
-    assert identity.run_id(RunMode.PAPER, SHA, "fixture") == paper
+    assert identity.run_id(RunMode.REPLAY, SHA) == replay
+    assert identity.run_id(RunMode.PAPER, SHA) == paper
 
 
-@pytest.mark.parametrize("label", ["a", "0", "fixture", "fixture-paper", "a.b_c-d", "9" * 64, "a" + "." * 63])
-def test_run_id_accepts_documented_labels(label: str) -> None:
-    assert re.fullmatch(r"run_[0-9a-f]{32}", identity.run_id("REPLAY", SHA, label))
+@pytest.mark.parametrize("manifest_sha256", ["0" * 64, "f" * 64, "0123456789abcdef" * 4, SHA, SHA2])
+def test_run_id_accepts_any_lower_case_sha256(manifest_sha256: str) -> None:
+    assert re.fullmatch(r"run_[0-9a-f]{32}", identity.run_id("REPLAY", manifest_sha256))
+    assert identity.run_id("REPLAY", manifest_sha256) == _reference(
+        "run", f'["run",["REPLAY","{manifest_sha256}"]]'
+    )
+
+
+def test_run_id_takes_the_mode_and_the_manifest_hash_only() -> None:
+    assert list(inspect.signature(identity.run_id).parameters) == ["mode", "manifest_sha256"]
 
 
 # =========================================================================== market events
@@ -482,7 +741,9 @@ def test_evaluation_slot_id_differs_per_engine_and_from_the_market_event() -> No
     assert event not in slots.values()
     # A market event whose kind happens to be the word "slot" is still not a slot.
     assert identity.market_event_id("slot", "XAUUSD", "M5", T, []) not in slots.values()
-    assert identity.market_event_id("slot", "breakout", "XAUUSD", T, []) not in slots.values()
+    # Parts shifted by one position cannot even be formed: "breakout" is not a symbol (rework 2).
+    with pytest.raises(ContractValidationError):
+        identity.market_event_id("slot", "breakout", "XAUUSD", T, [])
 
 
 def test_inactive_and_missing_evidence_carry_the_engine_scoped_slot() -> None:
@@ -643,7 +904,42 @@ def test_external_position_id_uses_the_alias_and_never_collides_with_gie_positio
 
 @pytest.mark.parametrize("reference", ["A", "z", "0", "a" * 64, "FIXTURE-TICKET-1", "a.b_c:d-e", "1:2:3"])
 def test_external_position_id_accepts_the_reference_pattern(reference: str) -> None:
-    assert re.fullmatch(r"pos_[0-9a-f]{32}", identity.external_position_id(reference, reference))
+    # Rework 2: the alias may no longer be digits only ("0"), so the alias side is checked separately.
+    assert re.fullmatch(r"pos_[0-9a-f]{32}", identity.external_position_id("fixture-account", reference))
+    if not reference.isdigit():
+        assert re.fullmatch(r"pos_[0-9a-f]{32}", identity.external_position_id(reference, reference))
+
+
+@pytest.mark.parametrize(
+    "alias",
+    ["fixture-account", "acct1234", "a1234b5678", "1:2:3", "1234-5678", "desk_7", "x9999", "A.1234.B"],
+)
+def test_external_position_id_accepts_an_ordinary_alias_with_a_numeric_ticket(alias: str) -> None:
+    for ticket in ("987654321", "1", "0000000000000000000000000001"):
+        assert re.fullmatch(r"pos_[0-9a-f]{32}", identity.external_position_id(alias, ticket))
+    assert identity.external_position_id(alias, "987654321") == _reference(
+        "pos", f'["pos",["external","{alias}","987654321"]]'
+    )
+
+
+@pytest.mark.parametrize(
+    "alias",
+    [
+        pytest.param("0", id="one-digit"),
+        pytest.param("1234", id="four-digits-only"),
+        pytest.param("12345678", id="account-number"),
+        pytest.param("9" * 64, id="sixty-four-digits"),
+        pytest.param("acct12345", id="five-digits-at-the-end"),
+        pytest.param("12345acct", id="five-digits-at-the-start"),
+        pytest.param("ftmo-5123456-demo", id="seven-digits-inside"),
+        pytest.param("a1234b56789", id="second-run-of-five"),
+    ],
+)
+def test_external_position_id_refuses_an_alias_that_looks_like_an_account_number(alias: str) -> None:
+    with pytest.raises(ContractValidationError) as caught:
+        identity.external_position_id(alias, "987654321")
+    assert caught.value.code == "GIE.CONTRACT.INVALID"
+    assert "account number" in caught.value.message
 
 
 # =========================================================================== records verify their identifiers
@@ -668,7 +964,7 @@ def _other_ids() -> dict[str, str]:
         "brk": identity.broker_order_id(order),
         "pos": identity.position_id(samples.RUN_ID, order),
         "mdl": identity.model_version_id("zz_other_model", "0.1.0", SHA),
-        "run": identity.run_id("PAPER", "0" * 64, "fixture"),
+        "run": identity.run_id("PAPER", "0" * 64),
     }
 
 

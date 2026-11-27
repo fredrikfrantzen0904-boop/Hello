@@ -97,10 +97,10 @@ class Scheduler(Protocol):
     def call_at(self, due_ns: int, callback: TimerCallback) -> int:
         """Schedule ``callback(due_ns)`` at an absolute instant; returns a handle.
 
-        In replay a due time in the past is an error (an effect without a cause).
-        In paper it fires at the next poll, because real time may have moved on
-        between reading the clock and scheduling.  Code that must behave the same
-        in both uses :meth:`call_after`.
+        A due time before the current step instant is an error in replay and in
+        paper alike (an effect without a cause).  A due time that the system clock
+        of a paper run has already passed, but that is not before the step instant,
+        fires at the next poll.
         """
         ...
 
@@ -475,12 +475,18 @@ class PollingScheduler:
         try:
             while True:
                 wall_ns = self._clock.wall_ns()
-                due = self._timers.pop_due(wall_ns if limit_ns is None else min(limit_ns, wall_ns))
-                if due is None:
+                limit = wall_ns if limit_ns is None else min(limit_ns, wall_ns)
+                next_ns = self._timers.next_due_ns()
+                if next_ns is None or next_ns > limit:
+                    break
+                # Begin the step before the timer leaves the queue: if the loop has already
+                # stepped past this timer the refusal changes nothing and the timer stays pending.
+                self._clock.begin_step(next_ns)
+                due = self._timers.pop_due(next_ns)
+                if due is None:  # cannot happen: the head was due a moment ago
                     break
                 due_ns, callback = due
                 fired += 1
-                self._clock.begin_step(due_ns)
                 callback(due_ns)
         finally:
             self._firing = False
@@ -490,18 +496,29 @@ class PollingScheduler:
 class ClockView:
     """Read-only view of the run clock, as handed to components.
 
-    A component can read time; it cannot advance a replay clock, begin a paper
-    step or reach the object that can.  Only the run loop holds the clock itself.
+    A component can read time; it cannot advance a replay clock or begin a paper
+    step, and it cannot point the view at another clock (the view is immutable).
+    Only the run loop holds the clock itself.  Honest limit: Python has no
+    private attributes - ``object.__setattr__`` or reading ``_clock`` reaches
+    behind the view; the static scan forbids both in GIE code (CI).
     """
 
     __slots__ = ("_clock",)
+
+    _clock: Clock
 
     def __init__(self, clock: Clock) -> None:
         if type(clock) is ClockView:
             clock = clock._clock
         if not isinstance(clock, Clock):
             raise ContractValidationError("a clock view needs a clock")
-        self._clock: Final[Clock] = clock
+        super().__setattr__("_clock", clock)
+
+    def __setattr__(self, name: str, value: object) -> None:
+        raise AttributeError(f"a clock view is read-only: cannot set {name!r}")
+
+    def __delattr__(self, name: str) -> None:
+        raise AttributeError(f"a clock view is read-only: cannot delete {name!r}")
 
     @property
     def mode(self) -> ClockMode:
@@ -523,12 +540,20 @@ class SchedulerView:
 
     __slots__ = ("_scheduler",)
 
+    _scheduler: Scheduler
+
     def __init__(self, scheduler: Scheduler) -> None:
         if type(scheduler) is SchedulerView:
             scheduler = scheduler._scheduler
         if not isinstance(scheduler, Scheduler):
             raise ContractValidationError("a scheduler view needs a scheduler")
-        self._scheduler: Final[Scheduler] = scheduler
+        super().__setattr__("_scheduler", scheduler)
+
+    def __setattr__(self, name: str, value: object) -> None:
+        raise AttributeError(f"a scheduler view is read-only: cannot set {name!r}")
+
+    def __delattr__(self, name: str) -> None:
+        raise AttributeError(f"a scheduler view is read-only: cannot delete {name!r}")
 
     def call_at(self, due_ns: int, callback: TimerCallback) -> int:
         return self._scheduler.call_at(due_ns, callback)

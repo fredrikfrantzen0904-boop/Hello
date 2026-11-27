@@ -180,7 +180,7 @@ def _snapshot(function: FunctionType) -> _Snapshot:
         function,
         function.__code__,
         function.__defaults__,
-        None if function.__kwdefaults__ is None else tuple(sorted(function.__kwdefaults__.items())),
+        None if function.__kwdefaults__ is None else tuple(function.__kwdefaults__.items()),
         _closure_contents(function),
     )
 
@@ -193,9 +193,22 @@ def _function_unchanged(function: FunctionType) -> bool:
     return (
         current[1] is recorded[1]
         and current[2] is recorded[2]
-        and current[3] == recorded[3]
+        and _same_keyword_defaults(current[3], recorded[3])
         and len(current[4]) == len(recorded[4])
         and all(now is then for now, then in zip(current[4], recorded[4], strict=True))
+    )
+
+
+def _same_keyword_defaults(now: Any, then: Any) -> bool:
+    """Keyword-only defaults are compared by identity, name by name and in order.
+
+    ``==`` would accept an object that merely *claims* to be equal to the recorded
+    default; a replaced default is a modification whatever its ``__eq__`` says.
+    """
+    if now is None or then is None:
+        return now is then
+    return len(now) == len(then) and all(
+        a[0] is b[0] and a[1] is b[1] for a, b in zip(now, then, strict=True)
     )
 
 
@@ -310,7 +323,17 @@ def registered_adapter_types() -> frozenset[type]:
 
 
 class _FinalType(type):
-    """Metaclass of :class:`RoutingGuard`: a subclass is refused before its class object exists."""
+    """Metaclass of :class:`RoutingGuard`: a subclass is refused before its class object exists.
+
+    The class object itself is immutable as well: assigning or deleting a class
+    attribute (for example replacing ``authorized_methods``) is refused.
+    """
+
+    def __setattr__(cls, name: str, value: object) -> None:
+        raise LiveRoutingLockedError("RoutingGuard may not be modified", attribute=name)
+
+    def __delattr__(cls, name: str) -> None:
+        raise LiveRoutingLockedError("RoutingGuard may not be modified", attribute=name)
 
     def __new__(
         mcls, name: str, bases: tuple[type, ...], namespace: dict[str, Any], **kwargs: Any

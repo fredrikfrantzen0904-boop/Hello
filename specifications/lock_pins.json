@@ -2,6 +2,6 @@
   "schema_version": 1,
   "files": {
     "gie/contracts/guarded.py": "d9ac1d28a1b4a9926e76656ed7b239b231a7c72427e2bf8b91b82590e081aa4c",
-    "gie/core/routing_lock.py": "ed10a9f109916530ecb78cc357c6d9b78db5bb14e39fdc43a8f3ba71506c1650"
+    "gie/core/routing_lock.py": "f04ddde8f7086e4e5114cd18e34f6ee2063543e4e765ba55a032e3f5f9a5aad0"
   }
 }

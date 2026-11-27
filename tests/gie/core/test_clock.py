@@ -3,7 +3,7 @@
 Covers requirement S00-ASG-19 ("Clock") and acceptance test S00-ACC-03 ("Replay clock").
 
 The expected behaviour is taken from the docstrings of ``gie/core/clock.py`` and from
-``specifications/SHARED_CONTRACTS.md`` section 3.2 (revision 2), not from the implementation:
+``reviews/session_00/rework_2_change_notice.md`` section 1, not from the implementation:
 
 * a ``Clock`` has ``mode``, ``now_ns``, ``monotonic_ns`` and the read-only property
   ``regressions_observed``; a ``Scheduler`` has ``call_at``, ``call_after`` and ``cancel``;
@@ -17,9 +17,18 @@ The expected behaviour is taken from the docstrings of ``gie/core/clock.py`` and
   while the wall source is behind the last reading, time continues from the last reading at
   the pace of the monotonic source, and each backward step is counted once in
   ``regressions_observed``;
-* a ``PollingScheduler`` is the scheduler of a paper run: timers fire only when ``run_due``
-  is called, in ``(due time, registration order)``, never early; a due time in the past is not
-  an error; the same schedule gives the same callback order as on a ``ReplayClock``.
+* step time (``reviews/session_00/rework_2_change_notice.md`` section 1): in replay and in paper a
+  component sees the instant of the input being processed; only the run loop moves time;
+* a ``PaperClock`` returns the step instant from ``now_ns`` (it does not move between
+  ``begin_step`` calls), reads the injected system clock in ``wall_ns`` and refuses a step before
+  the current one (``ClockRegressionError``) or later than the wall clock (``FutureDataError``);
+* a ``PollingScheduler`` runs on exactly a ``PaperClock``: timers fire only when ``run_due`` is
+  called, in ``(due time, registration order)``, never early, each in a step that begins at its
+  due time; a due time before the step instant is refused as in replay; ``call_after`` is relative
+  to the step instant; the same schedule gives the same callbacks at the same instants as on a
+  ``ReplayClock``;
+* ``ClockView`` / ``SchedulerView`` are what components receive: reading time, scheduling and
+  cancelling timers - nothing that moves time or fires timers.
 
 SYNTHETIC FIXTURE: every instant, schedule and clock reading in this file is invented for
 testing.  Nothing here is market data, broker data or a measurement.
@@ -27,6 +36,7 @@ testing.  Nothing here is market data, broker data or a measurement.
 
 from __future__ import annotations
 
+import functools
 import inspect
 import itertools
 import sys
@@ -41,8 +51,18 @@ import pytest
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
-from gie.core.clock import Clock, ClockMode, PollingScheduler, ReplayClock, Scheduler, SystemClock
-from gie.core.errors import ClockRegressionError, ContractValidationError, GieError
+from gie.core.clock import (
+    Clock,
+    ClockMode,
+    ClockView,
+    PaperClock,
+    PollingScheduler,
+    ReplayClock,
+    Scheduler,
+    SchedulerView,
+    SystemClock,
+)
+from gie.core.errors import ClockRegressionError, ContractValidationError, FutureDataError, GieError
 from gie.core.timeutil import MAX_TIME_NS, NS_PER_MS, NS_PER_SECOND
 
 #: SYNTHETIC FIXTURE instant (2026-11-26 09:30:00 UTC), the same arbitrary instant as tests/gie/samples.py.
@@ -1163,6 +1183,10 @@ def _system_clock_on_fake_time() -> Clock:
     return _FakeTime().clock()
 
 
+def _paper_clock_on_fake_time() -> Clock:
+    return PaperClock(_FakeTime().clock())
+
+
 # =========================================================================== protocols
 
 
@@ -1221,7 +1245,11 @@ def test_a_replay_clock_never_observes_a_regression() -> None:
 
 @pytest.mark.requirement("S00-ASG-19")
 @pytest.mark.acceptance("S00-ACC-03")
-@pytest.mark.parametrize("make_clock", [_replay_clock, _system_clock_on_fake_time], ids=["replay", "system"])
+@pytest.mark.parametrize(
+    "make_clock",
+    [_replay_clock, _system_clock_on_fake_time, _paper_clock_on_fake_time],
+    ids=["replay", "system", "paper"],
+)
 def test_regressions_observed_is_a_read_only_property(make_clock: Callable[[], Clock]) -> None:
     clock = make_clock()
     assert isinstance(inspect.getattr_static(clock, "regressions_observed"), property)
@@ -1238,12 +1266,15 @@ def test_regressions_observed_is_a_read_only_property(make_clock: Callable[[], C
 def test_replay_clock_and_polling_scheduler_satisfy_the_scheduler_protocol() -> None:
     replay = ReplayClock(START)
     system = _FakeTime().clock()
-    paper = PollingScheduler(system)
+    paper_clock = PaperClock(system)
+    paper = PollingScheduler(paper_clock)
     assert isinstance(replay, Scheduler)
     assert isinstance(replay, Clock)  # clock and scheduler of a replay run
     assert isinstance(paper, Scheduler)
-    assert not isinstance(paper, Clock)  # a paper run takes its time from the SystemClock ...
-    assert not isinstance(system, Scheduler)  # ... which is no timer service
+    assert not isinstance(paper, Clock)  # a paper run takes its time from the PaperClock ...
+    assert isinstance(paper_clock, Clock)
+    assert not isinstance(paper_clock, Scheduler)  # ... which is no timer service
+    assert not isinstance(system, Scheduler)  # nor is the system clock underneath it
     # The check is meaningful.
     assert not isinstance(object(), Scheduler)
     assert not isinstance(_OnlyCallAt(), Scheduler)
@@ -1781,14 +1812,170 @@ def test_system_clock_monotonic_ns_is_non_decreasing_for_every_thread() -> None:
     assert {value for values in seen for value in values} <= produced
 
 
+# =========================================================================== PaperClock
+
+
+def _paper_clock(wall_ns: int = START) -> tuple[_FakeTime, PaperClock]:
+    """SYNTHETIC FIXTURE paper clock: a ``PaperClock`` on a ``SystemClock`` that reads fake sources."""
+    fake = _FakeTime(wall_ns=wall_ns)
+    return fake, PaperClock(fake.clock())
+
+
+@pytest.mark.requirement("S00-ASG-19")
+def test_a_paper_clock_is_a_clock_in_system_mode_that_starts_at_the_system_reading() -> None:
+    _, clock = _paper_clock()
+    assert isinstance(clock, Clock)
+    assert not isinstance(clock, Scheduler)  # time and timers are separate objects in paper
+    assert clock.mode is ClockMode.SYSTEM
+    assert clock.now_ns() == START
+    assert clock.wall_ns() == START
+    assert clock.regressions_observed == 0
+
+
+@pytest.mark.requirement("S00-ASG-19", "G08-06")
+def test_paper_step_time_does_not_move_between_steps_while_the_wall_clock_does() -> None:
+    fake, clock = _paper_clock()
+    monotonic_before = clock.monotonic_ns()
+    fake.pass_time(5 * NS_PER_SECOND)  # processing takes real time ...
+    reads_before = fake.wall_calls
+    assert [clock.now_ns() for _ in range(3)] == [START] * 3  # ... step time stands still
+    assert fake.wall_calls == reads_before  # reading step time does not read the operating system
+    assert clock.wall_ns() == START + 5 * NS_PER_SECOND  # the run loop sees real time
+    assert clock.monotonic_ns() == monotonic_before + 5 * NS_PER_SECOND  # elapsed time is measurable
+    assert clock.now_ns() == START
+
+
+@pytest.mark.requirement("S00-ASG-19")
+@pytest.mark.parametrize("step_offset", [0, 1, 7, NS_PER_SECOND])
+def test_begin_step_moves_step_time_to_any_instant_from_the_current_one_up_to_the_wall_clock(
+    step_offset: int,
+) -> None:
+    fake, clock = _paper_clock()
+    fake.pass_time(NS_PER_SECOND)
+    assert clock.begin_step(START + step_offset) == START + step_offset
+    assert clock.now_ns() == START + step_offset
+    # Several inputs share an instant: beginning a step at the current instant is allowed.
+    assert clock.begin_step(START + step_offset) == START + step_offset
+    # The wall clock itself is the latest instant a step may begin at.
+    assert clock.begin_step(START + NS_PER_SECOND) == START + NS_PER_SECOND
+    assert clock.now_ns() == START + NS_PER_SECOND
+
+
+@pytest.mark.requirement("S00-ASG-19")
+@pytest.mark.parametrize("back_by", [1, 2, NS_PER_MS, 10 * NS_PER_SECOND, START])
+def test_begin_step_refuses_an_instant_before_the_current_step_and_leaves_time_unchanged(
+    back_by: int,
+) -> None:
+    fake, clock = _paper_clock()
+    fake.pass_time(20 * NS_PER_SECOND)
+    clock.begin_step(START + 10 * NS_PER_SECOND)
+    current = clock.now_ns()
+    with pytest.raises(ClockRegressionError) as caught:
+        clock.begin_step(current - back_by)
+    assert caught.value.code == "GIE.TIME.CLOCK_REGRESSION"
+    assert clock.now_ns() == current
+    assert clock.regressions_observed == 0  # a refused request is no step of the time source
+    assert clock.begin_step(current + 1) == current + 1  # still usable
+
+
+@pytest.mark.requirement("S00-ASG-19", "G08-06")
+@pytest.mark.parametrize("ahead_by", [1, 2, NS_PER_MS, NS_PER_SECOND, 2**40])
+def test_begin_step_refuses_an_instant_the_system_clock_has_not_reached(ahead_by: int) -> None:
+    # A step later than the wall clock would be an input from the future (look-ahead).
+    fake, clock = _paper_clock()
+    fake.pass_time(100)
+    with pytest.raises(FutureDataError) as caught:
+        clock.begin_step(START + 100 + ahead_by)
+    assert caught.value.code == "GIE.TIME.FUTURE"
+    assert isinstance(caught.value, GieError)
+    assert clock.now_ns() == START
+    fake.pass_time(ahead_by)  # once real time has reached the instant, the step may begin
+    assert clock.begin_step(START + 100 + ahead_by) == START + 100 + ahead_by
+
+
+@pytest.mark.requirement("S00-ASG-19", "S00-ASG-21")
+@pytest.mark.parametrize("time_ns", [*_NOT_AN_INT, *_NEGATIVE, *_TOO_LARGE])
+def test_begin_step_rejects_values_that_are_not_valid_instants(time_ns: Any) -> None:
+    fake, clock = _paper_clock()
+    fake.pass_time(NS_PER_SECOND)
+    with pytest.raises(ContractValidationError):
+        clock.begin_step(time_ns)
+    assert clock.now_ns() == START
+
+
+@pytest.mark.requirement("S00-ASG-19")
+@pytest.mark.parametrize(
+    "not_a_system_clock",
+    [ReplayClock(START), _CompleteClock(), object(), 0, START],
+    ids=["replay", "replay-mode-clock", "object", "zero", "int"],
+)
+def test_a_paper_clock_runs_only_on_a_system_clock(not_a_system_clock: Any) -> None:
+    with pytest.raises(ContractValidationError):
+        PaperClock(not_a_system_clock)
+    assert PaperClock(_FakeTime().clock()).now_ns() == START  # a system clock is accepted
+
+
+@pytest.mark.requirement("S00-ASG-19", "G08-06")
+def test_a_paper_clock_reports_the_regressions_of_its_system_clock_and_keeps_stepping() -> None:
+    fake, clock = _paper_clock()
+    fake.pass_time(10)
+    clock.begin_step(START + 10)
+    fake.step_wall(-3_600 * NS_PER_SECOND)  # the operating system steps the wall clock back an hour
+    fake.pass_time(5)
+    assert clock.wall_ns() == START + 15  # the system clock keeps running at the monotonic pace
+    assert clock.regressions_observed == 1
+    assert clock.begin_step(START + 15) == START + 15  # step time is unaffected by the step back
+    with pytest.raises(FutureDataError):
+        clock.begin_step(START + 16)
+    assert clock.regressions_observed == 1
+
+
+@pytest.mark.requirement("S00-ASG-19")
+def test_a_paper_clock_never_reads_the_operating_system_clock_itself(monkeypatch: pytest.MonkeyPatch) -> None:
+    def forbidden(*args: object, **kwargs: object) -> int:
+        raise AssertionError("the paper clock must read the injected system clock only")
+
+    with monkeypatch.context() as patch:
+        for name in ("time", "time_ns", "monotonic", "monotonic_ns", "perf_counter", "perf_counter_ns"):
+            patch.setattr(time, name, forbidden)
+        fake, clock = _paper_clock()
+        fake.pass_time(50)
+        assert clock.begin_step(START + 50) == START + 50
+        assert (clock.now_ns(), clock.wall_ns(), clock.regressions_observed) == (START + 50, START + 50, 0)
+
+
 # =========================================================================== PollingScheduler
 
 
-def _paper() -> tuple[_FakeTime, SystemClock, PollingScheduler]:
-    """SYNTHETIC FIXTURE paper run: a ``SystemClock`` on fake sources and its ``PollingScheduler``."""
-    fake = _FakeTime()
-    clock = fake.clock()
+def _paper() -> tuple[_FakeTime, PaperClock, PollingScheduler]:
+    """SYNTHETIC FIXTURE paper run: a ``PaperClock`` on fake sources and its ``PollingScheduler``."""
+    fake, clock = _paper_clock()
     return fake, clock, PollingScheduler(clock)
+
+
+class _PaperClockSubclass(PaperClock):
+    """SYNTHETIC FIXTURE: a subclass of the paper clock - not exactly a ``PaperClock``."""
+
+    __slots__ = ()
+
+
+@pytest.mark.requirement("S00-ASG-19")
+@pytest.mark.parametrize(
+    "make_clock",
+    [
+        lambda: _FakeTime().clock(),
+        lambda: ReplayClock(START),
+        lambda: ClockView(PaperClock(_FakeTime().clock())),
+        lambda: _PaperClockSubclass(_FakeTime().clock()),
+        lambda: None,
+        object,
+    ],
+    ids=["system", "replay", "view-of-paper", "paper-subclass", "none", "object"],
+)
+def test_a_polling_scheduler_requires_exactly_a_paper_clock(make_clock: Callable[[], Any]) -> None:
+    with pytest.raises(ContractValidationError):
+        PollingScheduler(make_clock())
+    assert isinstance(PollingScheduler(PaperClock(_FakeTime().clock())), Scheduler)
 
 
 @pytest.mark.requirement("S00-ASG-19", "G03-03")
@@ -1801,6 +1988,7 @@ def test_polling_timers_fire_only_when_the_loop_polls() -> None:
     fake.pass_time(NS_PER_SECOND)  # every timer is long overdue ...
     for _ in range(3):
         clock.now_ns()  # ... and reading the clock is not polling
+        clock.wall_ns()
     assert trace.events == []
     assert scheduler.pending_timers() == 3
     assert scheduler.run_due() == 3  # returns how many fired
@@ -1854,14 +2042,24 @@ def test_a_polling_timer_never_fires_early() -> None:
 
 
 @pytest.mark.requirement("S00-ASG-19")
-def test_a_polling_callback_receives_its_due_time_while_the_clock_shows_the_actual_time() -> None:
+def test_run_due_begins_a_step_at_each_due_time_however_late_the_loop_polls() -> None:
+    # Step time: while a timer runs, ``now_ns`` is its due time - as in replay - even though the
+    # wall clock is already later.  The lateness is measurable (wall_ns) but never seen as now_ns.
     fake, clock, scheduler = _paper()
-    trace = _Trace(clock)
-    scheduler.call_after(10, trace.timer("a"))
-    scheduler.call_after(40, trace.timer("b"))
+    seen: list[tuple[str, int, int, int]] = []
+
+    def timer(label: str) -> Callable[[int], None]:
+        return lambda due_ns: seen.append((label, due_ns, clock.now_ns(), clock.wall_ns()))
+
+    scheduler.call_after(10, timer("a"))
+    scheduler.call_after(40, timer("b"))
     fake.pass_time(75)  # the loop polls late
     assert scheduler.run_due() == 2
-    assert trace.events == [("a", START + 10, START + 75), ("b", START + 40, START + 75)]
+    assert seen == [("a", START + 10, START + 10, START + 75), ("b", START + 40, START + 40, START + 75)]
+    # Only the run loop moves time: after the poll step time is the last timer's instant.
+    assert clock.now_ns() == START + 40
+    clock.begin_step(START + 75)
+    assert clock.now_ns() == START + 75
 
 
 @pytest.mark.requirement("S00-ASG-19")
@@ -1890,7 +2088,7 @@ def test_a_limit_beyond_the_current_time_never_makes_a_timer_fire_early(limit_of
     scheduler.call_after(50, trace.timer("not-yet"))
     fake.pass_time(20)
     limit_ns = MAX_TIME_NS if limit_offset is None else START + limit_offset
-    assert scheduler.run_due(limit_ns=limit_ns) == 1  # the limit is capped at now
+    assert scheduler.run_due(limit_ns=limit_ns) == 1  # the limit is capped at the wall clock
     assert trace.labels == ["due"]
     assert (scheduler.pending_timers(), scheduler.next_timer_ns()) == (1, START + 50)
     fake.pass_time(29)
@@ -1916,22 +2114,48 @@ def test_run_due_rejects_a_limit_that_is_not_a_valid_instant(limit_ns: Any) -> N
 
 
 @pytest.mark.requirement("S00-ASG-19")
-def test_a_due_time_in_the_past_is_not_an_error_in_paper_and_fires_at_the_next_poll() -> None:
-    # Real time may have moved on between reading the clock and scheduling.
+@pytest.mark.parametrize("before_by", [1, 50, START + 100])
+def test_a_polling_due_time_before_the_step_instant_is_refused_like_in_replay(before_by: int) -> None:
+    # "call_at refuses a due time in the past, exactly like ReplayClock" - the past is the step instant.
+    fake, clock, scheduler = _paper()
+    fake.pass_time(100)
+    clock.begin_step(START + 100)
+    fired: list[int] = []
+    with pytest.raises(ClockRegressionError) as caught:
+        scheduler.call_at(START + 100 - before_by, fired.append)
+    assert caught.value.code == "GIE.TIME.CLOCK_REGRESSION"
+    assert (scheduler.pending_timers(), scheduler.next_timer_ns()) == (0, None)
+    # The same refusal in replay, for the same request at the same instant.
+    replay = ReplayClock(START)
+    replay.advance_to(START + 100)
+    with pytest.raises(ClockRegressionError):
+        replay.call_at(START + 100 - before_by, fired.append)
+    # The step instant itself is a valid due time and fires at the next poll.
+    scheduler.call_at(START + 100, fired.append)
+    assert scheduler.run_due() == 1
+    assert fired == [START + 100]
+
+
+@pytest.mark.requirement("S00-ASG-19")
+def test_a_polling_due_time_after_the_step_instant_but_before_the_wall_clock_fires_at_the_next_poll() -> None:
+    # Real time has moved on while the step is processed; what counts for "the past" is step time.
     fake, clock, scheduler = _paper()
     fake.pass_time(100)
     trace = _Trace(clock)
-    scheduler.call_at(START + 90, trace.timer("past-90"))
-    scheduler.call_at(START + 50, trace.timer("past-50"))
-    scheduler.call_at(START + 100, trace.timer("now"))
-    scheduler.call_at(START + 70, trace.timer("past-70"))
-    scheduler.call_at(0, trace.timer("epoch"))
+    scheduler.call_at(START + 90, trace.timer("90"))
+    scheduler.call_at(START + 50, trace.timer("50"))
+    scheduler.call_at(START + 100, trace.timer("100"))
+    scheduler.call_at(START, trace.timer("step-instant"))
     scheduler.call_at(START + 101, trace.timer("future"))
-    assert trace.events == []  # scheduling alone fires nothing, however late the due time is
-    assert (scheduler.pending_timers(), scheduler.next_timer_ns()) == (6, 0)
-    assert scheduler.run_due() == 5
-    assert trace.labels == ["epoch", "past-50", "past-70", "past-90", "now"]  # still in due-time order
-    assert [due_ns for _, due_ns, _ in trace.events] == [0, START + 50, START + 70, START + 90, START + 100]
+    assert trace.events == []  # scheduling alone fires nothing
+    assert (scheduler.pending_timers(), scheduler.next_timer_ns()) == (5, START)
+    assert scheduler.run_due() == 4
+    assert trace.events == [
+        ("step-instant", START, START),
+        ("50", START + 50, START + 50),
+        ("90", START + 90, START + 90),
+        ("100", START + 100, START + 100),
+    ]
     assert scheduler.pending_timers() == 1
 
 
@@ -1945,25 +2169,35 @@ def test_polling_call_at_rejects_values_that_are_not_valid_instants(due_ns: Any)
 
 
 @pytest.mark.requirement("S00-ASG-19", "G03-03")
-def test_polling_call_after_is_relative_to_the_time_of_the_call() -> None:
+def test_polling_call_after_is_relative_to_the_step_instant_not_to_the_wall_clock() -> None:
     fake, clock, scheduler = _paper()
     trace = _Trace(clock)
-    fake.pass_time(123)
-    handle = scheduler.call_after(NS_PER_SECOND, trace.timer("relative"))
+    fake.pass_time(123)  # real time moved on, step time did not
+    handle = scheduler.call_after(NS_PER_SECOND, trace.timer("from-step"))
     assert type(handle) is int
-    assert scheduler.next_timer_ns() == START + 123 + NS_PER_SECOND
-    fake.pass_time(NS_PER_SECOND - 1)
+    assert scheduler.next_timer_ns() == START + NS_PER_SECOND
+    clock.begin_step(START + 123)
+    scheduler.call_after(NS_PER_SECOND, trace.timer("from-next-step"))
+    assert scheduler.pending_timers() == 2
+    fake.pass_time(NS_PER_SECOND - 124)  # wall: START + NS_PER_SECOND - 1
     assert scheduler.run_due() == 0
     fake.pass_time(1)
     assert scheduler.run_due() == 1
-    due_ns = START + 123 + NS_PER_SECOND
-    assert trace.events == [("relative", due_ns, due_ns)]
+    fake.pass_time(122)
+    assert scheduler.run_due() == 0
+    fake.pass_time(1)
+    assert scheduler.run_due() == 1
+    assert trace.events == [
+        ("from-step", START + NS_PER_SECOND, START + NS_PER_SECOND),
+        ("from-next-step", START + 123 + NS_PER_SECOND, START + 123 + NS_PER_SECOND),
+    ]
 
 
 @pytest.mark.requirement("S00-ASG-19")
-def test_polling_call_after_with_no_delay_fires_at_the_next_poll() -> None:
-    _, clock, scheduler = _paper()
+def test_polling_call_after_with_no_delay_fires_at_the_next_poll_at_the_step_instant() -> None:
+    fake, clock, scheduler = _paper()
     trace = _Trace(clock)
+    fake.pass_time(30)
     scheduler.call_after(0, trace.timer("now"))
     assert trace.events == []
     assert scheduler.run_due() == 1
@@ -1983,24 +2217,55 @@ def test_polling_call_after_rejects_delays_that_are_not_int_durations(delay_ns: 
 def test_polling_callbacks_may_schedule_further_timers_and_those_already_due_fire_in_the_same_poll() -> None:
     fake, clock, scheduler = _paper()
     trace = _Trace(clock)
+    refusals: list[GieError] = []
 
     def first(due_ns: int) -> None:
         trace.timer("A")(due_ns)
         scheduler.call_at(START + 30, trace.timer("D"))  # same instant as B, registered later
         scheduler.call_at(START + 20, trace.timer("C"))  # between A and B
-        scheduler.call_at(START + 5, trace.timer("P"))  # before A's own due time: the past
-        scheduler.call_after(0, trace.timer("N"))  # due now, i.e. at the time of the poll
-        scheduler.call_after(1, trace.timer("L"))  # not due in this poll
+        try:
+            scheduler.call_at(START + 5, trace.timer("P"))  # before A's own due time: the past
+        except GieError as exc:
+            refusals.append(exc)
+        scheduler.call_after(0, trace.timer("N"))  # A's own instant: fires in this poll, after A
+        scheduler.call_after(1, trace.timer("L"))  # START + 11
+        scheduler.call_after(31, trace.timer("X"))  # START + 41: not due in this poll
 
     scheduler.call_at(START + 10, first)
     scheduler.call_at(START + 30, trace.timer("B"))
     fake.pass_time(40)
     assert scheduler.run_due() == 6
-    assert trace.labels == ["A", "P", "C", "B", "D", "N"]
+    assert trace.labels == ["A", "N", "L", "C", "B", "D"]
+    assert [type(refusal) for refusal in refusals] == [ClockRegressionError]
     assert (scheduler.pending_timers(), scheduler.next_timer_ns()) == (1, START + 41)
     fake.pass_time(1)
     assert scheduler.run_due() == 1
-    assert trace.labels[-1] == "L"
+    assert trace.events[-1] == ("X", START + 41, START + 41)
+
+
+@pytest.mark.requirement("S00-ASG-19")
+@pytest.mark.parametrize("schedule", ["call_at", "call_after"])
+def test_a_timer_a_callback_registers_for_its_own_instant_fires_in_the_same_poll(schedule: str) -> None:
+    fake, clock, scheduler = _paper()
+    trace = _Trace(clock)
+
+    def parent(due_ns: int) -> None:
+        trace.timer("parent")(due_ns)
+        if schedule == "call_at":
+            scheduler.call_at(due_ns, trace.timer("child"))
+        else:
+            scheduler.call_after(0, trace.timer("child"))
+
+    scheduler.call_after(10, parent)
+    scheduler.call_after(10, trace.timer("sibling"))  # registered before the child
+    fake.pass_time(10)
+    assert scheduler.run_due(limit_ns=START + 10) == 3
+    assert trace.events == [
+        ("parent", START + 10, START + 10),
+        ("sibling", START + 10, START + 10),
+        ("child", START + 10, START + 10),
+    ]
+    assert scheduler.pending_timers() == 0
 
 
 @pytest.mark.requirement("S00-ASG-19")
@@ -2010,7 +2275,7 @@ def test_a_limit_also_holds_for_timers_scheduled_during_the_poll_and_while_time_
 
     def slow(due_ns: int) -> None:
         trace.timer("slow")(due_ns)
-        fake.pass_time(1_000)  # the clock keeps moving while callbacks run
+        fake.pass_time(1_000)  # the wall clock keeps moving while callbacks run
         scheduler.call_at(START + 15, trace.timer("child-before-limit"))
         scheduler.call_at(START + 25, trace.timer("child-after-limit"))
 
@@ -2022,6 +2287,7 @@ def test_a_limit_also_holds_for_timers_scheduled_during_the_poll_and_while_time_
     assert (scheduler.pending_timers(), scheduler.next_timer_ns()) == (2, START + 25)
     assert scheduler.run_due() == 2
     assert trace.labels == ["slow", "child-before-limit", "child-after-limit", "after-limit"]
+    assert [now_ns for _, _, now_ns in trace.events] == [START + 10, START + 15, START + 25, START + 30]
 
 
 @pytest.mark.requirement("S00-ASG-19")
@@ -2080,10 +2346,28 @@ def test_an_exception_in_a_polling_callback_propagates_and_leaves_the_other_time
         scheduler.run_due()
     assert caught.value is failure
     assert trace.labels == ["A", "B"]
+    assert clock.now_ns() == START + 20  # step time stays at the failed timer's instant, as in replay
     assert (scheduler.pending_timers(), scheduler.next_timer_ns()) == (2, START + 20)
     # A later poll delivers the remaining timers in order; the failed one is not repeated.
     assert scheduler.run_due() == 2
     assert trace.labels == ["A", "B", "C", "D"]
+
+
+@pytest.mark.requirement("S00-ASG-19")
+def test_a_poll_refused_because_the_loop_already_stepped_past_a_timer_keeps_that_timer_pending() -> None:
+    # The run loop must poll before it begins a later step.  If it does not, run_due cannot begin a
+    # step at the overdue timer's instant (step time never moves back) and refuses - fail closed.
+    # A refusal changes nothing: the timer (a feed-silence check, an expiry) must not vanish silently.
+    fake, clock, scheduler = _paper()
+    fired: list[int] = []
+    scheduler.call_after(10, fired.append)
+    fake.pass_time(100)
+    clock.begin_step(START + 50)  # loop error: stepped past the timer without polling
+    with pytest.raises(ClockRegressionError):
+        scheduler.run_due()
+    assert fired == []
+    assert clock.now_ns() == START + 50
+    assert (scheduler.pending_timers(), scheduler.next_timer_ns()) == (1, START + 10)
 
 
 @pytest.mark.requirement("S00-ASG-19", "G08-06")
@@ -2100,9 +2384,11 @@ def test_polling_timers_keep_firing_on_time_when_the_wall_clock_is_stepped_backw
     assert scheduler.run_due() == 1
     assert trace.events == [("silence-check", START + NS_PER_SECOND, START + NS_PER_SECOND)]
     assert clock.regressions_observed == 1
-    # A timer scheduled during the step is relative to the time that keeps running.
+    # A timer scheduled during the step is relative to the step instant (the silence check's).
     scheduler.call_after(500, trace.timer("next"))
-    fake.pass_time(500)
+    fake.pass_time(499)
+    assert scheduler.run_due() == 0
+    fake.pass_time(1)
     assert scheduler.run_due() == 1
     assert trace.events[-1] == ("next", START + NS_PER_SECOND + 500, START + NS_PER_SECOND + 500)
 
@@ -2114,18 +2400,17 @@ def test_a_polling_scheduler_takes_its_time_only_from_the_injected_clock(
     def forbidden(*args: object, **kwargs: object) -> int:
         raise AssertionError("the scheduler must not read the operating-system clock itself")
 
-    virtual = ReplayClock(START)  # any Clock can drive it
-    scheduler = PollingScheduler(virtual)
     fired: list[int] = []
     with monkeypatch.context() as patch:
         for name in ("time", "time_ns", "monotonic", "monotonic_ns", "perf_counter", "perf_counter_ns"):
             patch.setattr(time, name, forbidden)
+        fake, _, scheduler = _paper()
         scheduler.call_after(10, fired.append)
         scheduler.call_at(START + 20, fired.append)
         assert scheduler.run_due() == 0
-        virtual.advance_by(10)
+        fake.pass_time(10)
         assert scheduler.run_due() == 1
-        virtual.advance_by(10)
+        fake.pass_time(10)
         assert scheduler.run_due(limit_ns=START + 20) == 1
     assert fired == [START + 10, START + 20]
 
@@ -2147,6 +2432,176 @@ def test_call_after_beyond_the_largest_instant_behaves_the_same_in_replay_and_pa
     assert scheduler.pending_timers() == 0
 
 
+# =========================================================================== ClockView / SchedulerView
+
+#: What a component must never be able to do with what it is handed.
+_RUN_LOOP_ONLY = ("advance_to", "advance_by", "begin_step", "run_due", "wall_ns")
+
+
+def _public(value: object) -> set[str]:
+    return {name for name in dir(value) if not name.startswith("_")}
+
+
+def _clocks_for_views() -> list[tuple[str, Clock]]:
+    replay = ReplayClock(START)
+    replay.advance_by(7)
+    fake, paper = _paper_clock()
+    fake.pass_time(9)
+    paper.begin_step(START + 9)
+    return [("replay", replay), ("paper", paper), ("system", fake.clock())]
+
+
+@pytest.mark.requirement("S00-ASG-19")
+@pytest.mark.parametrize("index", [0, 1, 2], ids=["replay", "paper", "system"])
+def test_a_clock_view_reads_the_clock_and_offers_nothing_else(index: int) -> None:
+    _, clock = _clocks_for_views()[index]
+    view = ClockView(clock)
+    assert isinstance(view, Clock)
+    assert not isinstance(view, Scheduler)  # not even of a replay clock, which is both
+    assert _public(view) == {"mode", "now_ns", "monotonic_ns", "regressions_observed"}
+    for name in (*_RUN_LOOP_ONLY, "call_at", "call_after", "cancel"):
+        assert not hasattr(view, name), name
+    assert view.mode is clock.mode
+    assert view.now_ns() == clock.now_ns()
+    assert view.monotonic_ns() == clock.monotonic_ns()
+    assert view.regressions_observed == clock.regressions_observed == 0
+
+
+@pytest.mark.requirement("S00-ASG-19")
+def test_a_clock_view_follows_the_clock_as_the_run_loop_moves_it() -> None:
+    replay = ReplayClock(START)
+    fake, paper = _paper_clock()
+    replay_view, paper_view = ClockView(replay), ClockView(paper)
+    replay.advance_to(START + 40)
+    fake.pass_time(60)
+    paper.begin_step(START + 40)
+    assert replay_view.now_ns() == paper_view.now_ns() == START + 40
+    fake.step_wall(-NS_PER_SECOND)
+    paper.wall_ns()
+    assert paper_view.regressions_observed == 1
+
+
+@pytest.mark.requirement("S00-ASG-19")
+@pytest.mark.parametrize("make_scheduler", ["replay", "paper"])
+def test_a_scheduler_view_schedules_and_cancels_and_offers_nothing_else(make_scheduler: str) -> None:
+    if make_scheduler == "replay":
+        replay = ReplayClock(START)
+        scheduler: Any = replay
+        clock: Clock = replay
+
+        def run_loop(target_ns: int) -> None:
+            replay.advance_to(target_ns)
+    else:
+        fake, paper, polling = _paper()
+        scheduler, clock = polling, paper
+
+        def run_loop(target_ns: int) -> None:
+            fake.pass_time(target_ns - fake.wall_ns)
+            polling.run_due(limit_ns=target_ns)
+            paper.begin_step(target_ns)
+
+    view = SchedulerView(scheduler)
+    assert isinstance(view, Scheduler)
+    assert not isinstance(view, Clock)
+    assert _public(view) == {"call_at", "call_after", "cancel"}
+    for name in (*_RUN_LOOP_ONLY, "now_ns", "next_timer_ns", "pending_timers"):
+        assert not hasattr(view, name), name
+    trace = _Trace(clock)
+    view.call_at(START + 10, trace.timer("at"))
+    view.call_after(20, trace.timer("after"))
+    doomed = view.call_after(15, trace.timer("doomed"))
+    view.cancel(doomed)
+    assert scheduler.pending_timers() == 2  # the view schedules on the scheduler itself
+    with pytest.raises(ClockRegressionError):
+        view.call_after(-1, trace.timer("negative"))
+    run_loop(START + 30)
+    assert trace.events == [("at", START + 10, START + 10), ("after", START + 20, START + 20)]
+    with pytest.raises(ClockRegressionError):
+        view.call_at(START + 29, trace.timer("past"))  # the same refusal through the view
+
+
+@pytest.mark.requirement("S00-ASG-19")
+def test_nothing_can_be_set_on_a_view() -> None:
+    replay = ReplayClock(START)
+    clock_view, scheduler_view = ClockView(replay), SchedulerView(replay)
+    for view, names in (
+        (clock_view, ("now_ns", "monotonic_ns", "mode", "regressions_observed", "advance_to", "begin_step")),
+        (scheduler_view, ("call_at", "call_after", "cancel", "run_due", "advance_to")),
+    ):
+        for name in names:
+            with pytest.raises(AttributeError):
+                setattr(view, name, lambda *args: None)
+        assert not hasattr(view, "__dict__")
+    assert clock_view.now_ns() == START
+    assert _public(clock_view) == {"mode", "now_ns", "monotonic_ns", "regressions_observed"}
+    assert _public(scheduler_view) == {"call_at", "call_after", "cancel"}
+
+
+@pytest.mark.requirement("S00-ASG-19")
+def test_a_view_cannot_be_redirected_to_another_clock_or_scheduler() -> None:
+    # "Read-only view of the run clock": a component that holds the view must not be able to make
+    # it (and every other component sharing it) read a clock or use a scheduler of its own choosing.
+    run_clock = ReplayClock(START)
+    other = ReplayClock(START + NS_PER_SECOND)
+    clock_view, scheduler_view = ClockView(run_clock), SchedulerView(run_clock)
+    with pytest.raises((AttributeError, GieError)):
+        clock_view._clock = other  # type: ignore[misc]
+    with pytest.raises((AttributeError, GieError)):
+        scheduler_view._scheduler = other  # type: ignore[misc]
+    assert clock_view.now_ns() == START
+
+
+@pytest.mark.requirement("S00-ASG-19")
+@pytest.mark.parametrize(
+    "not_a_clock",
+    [None, object(), START, _ClockWithoutRegressions(), _OnlyCallAt()],
+    ids=["none", "object", "int", "no-regressions", "scheduler-only"],
+)
+def test_a_clock_view_wraps_exactly_one_clock(not_a_clock: Any) -> None:
+    with pytest.raises(ContractValidationError):
+        ClockView(not_a_clock)
+    _, _, polling = _paper()
+    for wrong in (polling, SchedulerView(polling)):
+        with pytest.raises(ContractValidationError):
+            ClockView(wrong)
+    replay = ReplayClock(START)
+    with pytest.raises(TypeError):
+        ClockView()  # type: ignore[call-arg]
+    with pytest.raises(TypeError):
+        ClockView(replay, replay)  # type: ignore[call-arg]
+    # A view of a view reads the same clock and is still only a view.
+    nested = ClockView(ClockView(replay))
+    replay.advance_by(3)
+    assert nested.now_ns() == START + 3
+    assert _public(nested) == {"mode", "now_ns", "monotonic_ns", "regressions_observed"}
+
+
+@pytest.mark.requirement("S00-ASG-19")
+@pytest.mark.parametrize(
+    "not_a_scheduler",
+    [None, object(), START, _OnlyCallAt()],
+    ids=["none", "object", "int", "call-at-only"],
+)
+def test_a_scheduler_view_wraps_exactly_one_scheduler(not_a_scheduler: Any) -> None:
+    with pytest.raises(ContractValidationError):
+        SchedulerView(not_a_scheduler)
+    fake, paper = _paper_clock()
+    for wrong in (fake.clock(), paper, ClockView(paper)):
+        with pytest.raises(ContractValidationError):
+            SchedulerView(wrong)
+    replay = ReplayClock(START)
+    with pytest.raises(TypeError):
+        SchedulerView()  # type: ignore[call-arg]
+    with pytest.raises(TypeError):
+        SchedulerView(replay, replay)  # type: ignore[call-arg]
+    nested = SchedulerView(SchedulerView(replay))
+    fired: list[int] = []
+    nested.call_after(5, fired.append)
+    replay.advance_by(5)
+    assert fired == [START + 5]
+    assert _public(nested) == {"call_at", "call_after", "cancel"}
+
+
 # =========================================================================== both schedulers: shared rules
 
 
@@ -2166,17 +2621,20 @@ class _ReplayRun:
 
 
 class _PaperRun:
-    """SYNTHETIC FIXTURE paper loop: a ``SystemClock`` on fake sources, polled after every time step."""
+    """SYNTHETIC FIXTURE paper loop: real time passes, the loop polls, then begins the next step."""
 
     def __init__(self) -> None:
         self.fake = _FakeTime()
-        self.clock: Clock = self.fake.clock()
-        self.polling = PollingScheduler(self.clock)
+        self.paper = PaperClock(self.fake.clock())
+        self.clock: Clock = self.paper
+        self.polling = PollingScheduler(self.paper)
         self.scheduler: Scheduler = self.polling
 
     def advance(self, delta_ns: int) -> None:
+        target_ns = self.paper.now_ns() + delta_ns
         self.fake.pass_time(delta_ns)
         self.polling.run_due()
+        self.paper.begin_step(target_ns)
 
     def state(self) -> tuple[int, int | None]:
         return self.polling.pending_timers(), self.polling.next_timer_ns()
@@ -2284,6 +2742,24 @@ def test_a_negative_delay_is_refused_alike_by_both_schedulers(
     assert fired == []
 
 
+@pytest.mark.requirement("S00-ASG-19")
+@pytest.mark.acceptance("S00-ACC-03")
+@_BOTH_RUNS
+@pytest.mark.parametrize("before_by", [1, 100])
+def test_a_due_time_before_the_current_instant_is_refused_alike_by_both_schedulers(
+    make_run: Callable[[], _Run], before_by: int
+) -> None:
+    run = make_run()
+    run.advance(100)
+    fired: list[int] = []
+    with pytest.raises(ClockRegressionError):
+        run.scheduler.call_at(START + 100 - before_by, fired.append)
+    assert run.state() == (0, None)
+    run.scheduler.call_at(START + 100, fired.append)  # the current instant is allowed
+    run.advance(0)
+    assert fired == [START + 100]
+
+
 # =========================================================================== replay / paper equivalence
 
 _SCHEDULE_OPERATIONS = st.one_of(
@@ -2296,19 +2772,18 @@ _SCHEDULE_SCRIPTS = st.lists(_SCHEDULE_OPERATIONS, max_size=40)
 def _drive_schedule(run: _Run, script: _Script) -> list[tuple[Any, ...]]:
     """Run a schedule script (the operations of ``_drive`` plus ``call_after``) on *run*.
 
-    Timers scheduled from a callback use the absolute instant ``due + delay``; in paper that
-    instant may already lie in the past, which is allowed.  Returns everything that must be the
-    same in replay and paper: which timer fired with which due time, in which order, and the
-    pending timers after every operation.  The actual time inside a callback is not part of it
-    (replay: the due time; paper: the time of the poll) - only that it is never before the due time.
+    Timers scheduled from a callback use the absolute instant ``due + delay`` (never before the
+    step instant, which is the due time).  Returns everything that must be the same in replay and
+    paper: which timer fired with which due time at which step instant, in which order, and the
+    pending timers after every operation.
     """
     trace: list[tuple[Any, ...]] = []
     handles: list[int] = []
 
     def make_callback(label: tuple[int, ...], child_delays: tuple[int, ...]) -> Callable[[int], None]:
         def callback(due_ns: int) -> None:
-            assert run.clock.now_ns() >= due_ns, "a timer fired early"
-            trace.append(("fired", label, due_ns - START))
+            assert run.clock.now_ns() == due_ns, "step time inside a timer is its due time"
+            trace.append(("fired", label, due_ns - START, run.clock.now_ns() - START))
             for position, delay in enumerate(child_delays):
                 handles.append(run.scheduler.call_at(due_ns + delay, make_callback((*label, position), ())))
 
@@ -2341,7 +2816,15 @@ def _drive_schedule(run: _Run, script: _Script) -> list[tuple[Any, ...]]:
 def test_the_example_schedule_gives_the_hand_derived_callback_order_in_replay_and_in_paper() -> None:
     # Guards the equivalence property below against being vacuous (see the hand derivation at
     # test_the_example_script_exercises_nested_scheduling_and_cancellation).
-    expected_fired = [((0,), 5), ((1,), 5), ((0, 0), 5), ((3,), 8), ((0, 1), 8), ((3, 0), 8), ((0, 2), 35)]
+    expected_fired = [
+        ((0,), 5, 5),
+        ((1,), 5, 5),
+        ((0, 0), 5, 5),
+        ((3,), 8, 8),
+        ((0, 1), 8, 8),
+        ((3, 0), 8, 8),
+        ((0, 2), 35, 35),
+    ]
     for make_run in (_ReplayRun, _PaperRun):
         trace = _drive_schedule(make_run(), _EXAMPLE_SCRIPT)
         assert [entry[1:] for entry in trace if entry[0] == "fired"] == expected_fired
@@ -2367,7 +2850,7 @@ def test_the_same_schedule_fires_the_same_callbacks_in_the_same_order_in_replay_
         ("call_at", *operation[1:]) if operation[0] == "call_after" else operation for operation in script
     ]
     reference = [
-        ("fired", entry[1], entry[2] - START) if entry[0] == "fired" else entry
+        ("fired", entry[1], entry[2] - START, entry[3] - START) if entry[0] == "fired" else entry
         for entry in _reference(START, reference_script)
     ]
     reference = [("advanced", entry[1] - START) if entry[0] == "advanced" else entry for entry in reference]
@@ -2388,9 +2871,10 @@ def _run_loop(
     """One documented run loop: fire the timers due up to the next input, then deliver the input.
 
     Replay advances the virtual clock to the input's availability instant.  Paper gets to the
-    input *lag_ns* after it was received and calls ``run_due(limit_ns=<receive time>)`` first.
-    Returns the log of fired timers and delivered inputs, and for every timer
-    ``(label, due offset, length of the log when it was registered)``.
+    input *lag_ns* after it was received, calls ``run_due(limit_ns=<receive time>)`` first and then
+    begins the input's step.  Returns the log of fired timers and delivered inputs (with the step
+    instant each saw), and for every timer ``(label, due offset, length of the log when it was
+    registered)``.
     """
     log: list[tuple[Any, ...]] = []
     registrations: list[tuple[int, int, int]] = []
@@ -2401,7 +2885,7 @@ def _run_loop(
 
         def callback(fired_due_ns: int) -> None:
             assert fired_due_ns == due_ns
-            assert run.clock.now_ns() >= due_ns, "a timer fired early"
+            assert run.clock.now_ns() == due_ns, "step time inside a timer is its due time"
             log.append(("timer", label, due_ns - START))
 
         run.scheduler.call_at(due_ns, callback)
@@ -2412,6 +2896,7 @@ def _run_loop(
         else:
             run.fake.pass_time(max(available_ns + lag_ns - run.fake.wall_ns, 0))
             run.polling.run_due(limit_ns=available_ns)
+            run.paper.begin_step(available_ns)
 
     for delay in initial_timers:
         schedule(START + delay)
@@ -2419,6 +2904,7 @@ def _run_loop(
     for gap, follow_ups in inputs:
         available_ns += gap
         fire_timers_up_to(available_ns)
+        assert run.clock.now_ns() == available_ns, "step time of an input is its availability instant"
         log.append(("input", available_ns - START))
         for delay in follow_ups:
             schedule(available_ns + delay)
@@ -2476,3 +2962,112 @@ def test_the_example_run_loop_gives_the_hand_derived_interleaving() -> None:
     assert _run_loop(_ReplayRun(), initial_timers, inputs, 0)[0] == expected
     for lag_ns in (0, 7, 10_000):
         assert _run_loop(_PaperRun(), initial_timers, inputs, lag_ns)[0] == expected
+
+
+# =========================================================================== component conformance
+
+
+class _Component:
+    """SYNTHETIC FIXTURE component: what a subsystem does with the views it is handed.
+
+    On every input it reads step time and schedules a follow-up timer; the follow-up reads step
+    time again and re-arms a heartbeat.  It records every instant it saw.  It holds only the views.
+    """
+
+    def __init__(self, clock: ClockView, scheduler: SchedulerView, follow_up_ns: int) -> None:
+        self._clock = clock
+        self._scheduler = scheduler
+        self._follow_up_ns = follow_up_ns
+        self._heartbeats = 0
+        self.seen: list[tuple[Any, ...]] = []
+
+    def on_input(self, label: int) -> None:
+        for name in _RUN_LOOP_ONLY:
+            assert not hasattr(self._clock, name)
+            assert not hasattr(self._scheduler, name)
+        now_ns = self._clock.now_ns()
+        self.seen.append(("input", label, now_ns - START))
+        self._scheduler.call_after(self._follow_up_ns, functools.partial(self._follow_up, label, now_ns))
+
+    def _follow_up(self, label: int, scheduled_at_ns: int, due_ns: int) -> None:
+        now_ns = self._clock.now_ns()
+        self.seen.append(("follow-up", label, scheduled_at_ns - START, due_ns - START, now_ns - START))
+        if self._heartbeats < 3:
+            self._heartbeats += 1
+            self._scheduler.call_after(7, self._heartbeat)
+
+    def _heartbeat(self, due_ns: int) -> None:
+        self.seen.append(("heartbeat", due_ns - START, self._clock.now_ns() - START))
+
+
+def _run_component_in_replay(gaps: Sequence[int], follow_up_ns: int) -> list[tuple[Any, ...]]:
+    clock = ReplayClock(START)
+    component = _Component(ClockView(clock), SchedulerView(clock), follow_up_ns)
+    available_ns = START
+    for label, gap in enumerate(gaps):
+        available_ns += gap
+        clock.advance_to(available_ns)
+        component.on_input(label)
+    clock.advance_to(available_ns + 1_000)
+    return component.seen
+
+
+def _run_component_in_paper(gaps: Sequence[int], follow_up_ns: int, lag_ns: int) -> list[tuple[Any, ...]]:
+    fake, clock = _paper_clock()
+    scheduler = PollingScheduler(clock)
+    component = _Component(ClockView(clock), SchedulerView(scheduler), follow_up_ns)
+
+    def step_to(available_ns: int) -> None:
+        fake.pass_time(max(available_ns + lag_ns - fake.wall_ns, 0))  # the input arrives, late
+        scheduler.run_due(limit_ns=available_ns)
+        clock.begin_step(available_ns)
+
+    available_ns = START
+    for label, gap in enumerate(gaps):
+        available_ns += gap
+        step_to(available_ns)
+        component.on_input(label)
+    step_to(available_ns + 1_000)
+    return component.seen
+
+
+@pytest.mark.requirement("S00-ASG-19", "G03-03")
+@pytest.mark.acceptance("S00-ACC-03")
+def test_the_example_component_observes_the_hand_derived_instants_in_replay_and_in_paper() -> None:
+    # Inputs at +0, +5 and +20; follow-ups 10 later; the first three follow-ups re-arm a heartbeat 7 later.
+    expected = [
+        ("input", 0, 0),
+        ("input", 1, 5),
+        ("follow-up", 0, 0, 10, 10),
+        ("follow-up", 1, 5, 15, 15),
+        ("heartbeat", 17, 17),
+        ("input", 2, 20),
+        ("heartbeat", 22, 22),
+        ("follow-up", 2, 20, 30, 30),
+        ("heartbeat", 37, 37),
+    ]
+    assert _run_component_in_replay([0, 5, 15], 10) == expected
+    for lag_ns in (0, 3, 10_000):
+        assert _run_component_in_paper([0, 5, 15], 10, lag_ns) == expected
+
+
+@pytest.mark.requirement("S00-ASG-19", "G03-03")
+@pytest.mark.acceptance("S00-ACC-03")
+@_PROPERTY
+@given(
+    gaps=st.lists(st.integers(0, 40), max_size=20),
+    follow_up_ns=st.integers(0, 30),
+    lag_ns=st.sampled_from([0, 1, 9, 10_000]),
+)
+def test_the_same_component_observes_identical_instants_under_replay_and_under_paper(
+    gaps: list[int], follow_up_ns: int, lag_ns: int
+) -> None:
+    replay = _run_component_in_replay(gaps, follow_up_ns)
+    paper = _run_component_in_paper(gaps, follow_up_ns, lag_ns)
+    assert replay == paper
+    assert len([entry for entry in replay if entry[0] == "input"]) == len(gaps)
+    for entry in replay:
+        if entry[0] == "follow-up":
+            assert entry[3] == entry[4] == entry[2] + follow_up_ns  # fired exactly at its instant
+        elif entry[0] == "heartbeat":
+            assert entry[1] == entry[2]

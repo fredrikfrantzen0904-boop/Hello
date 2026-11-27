@@ -60,7 +60,7 @@ AS_OF = T0 - NS_PER_MS
 SHADOW_MODEL = identity.model_version_id("fixture_shadow", "0.2.0", "cd" * 32)
 BASELINE_MODEL = identity.model_version_id("fixture_ruleset", "1.0.0", "ee" * 32)
 OTHER_EVENT = identity.market_event_id("breakout", "XAUUSD", "M15", T0 - 900 * NS_PER_SECOND, [D("2651.20")])
-OTHER_RUN = identity.run_id("REPLAY", "1" * 64, "other-fixture")
+OTHER_RUN = identity.run_id("REPLAY", "1" * 64)
 
 Build = Callable[[], object]
 

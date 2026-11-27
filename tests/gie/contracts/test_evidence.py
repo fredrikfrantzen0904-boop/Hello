@@ -1331,6 +1331,7 @@ def test_a_valid_chain_of_revisions_is_accepted() -> None:
     third = _revision(
         2,
         state=EvidenceState.CONTRA,
+        stage=EvidenceStage.CONFIRMED,  # the stage never goes back (rework 2, section 11)
         contradicts_market_event_ids=(OTHER_EVENT,),
         decision_time_ns=T0 + 2 * NS_PER_SECOND,
         as_of_time_ns=T0 + 2 * NS_PER_SECOND,
@@ -1403,7 +1404,7 @@ def test_a_revision_must_supersede_exactly_the_previous_record() -> None:
 @pytest.mark.parametrize(
     ("field", "overrides"),
     [
-        ("run_id", {"run_id": identity.run_id("REPLAY", "1" * 64, "other-fixture")}),
+        ("run_id", {"run_id": identity.run_id("REPLAY", "1" * 64)}),
         ("mode", {"mode": RunMode.PAPER}),
         ("producer", {"producer": "strategy_intelligence.sweep_reversal_b"}),
         ("producer_class", {"producer_class": ProducerClass.PATTERN}),
@@ -1509,6 +1510,58 @@ def test_times_and_sequence_numbers_do_not_decrease_along_a_chain() -> None:
     earlier_watermark = _revision(1, seq=5, as_of_time_ns=T0 - NS_PER_MS - 1)
     assert _illegal(first, earlier_watermark).details["rule"] == "as_of_time_ns may not decrease"
     assert _illegal(first, _revision(1, seq=3)).details["rule"] == "seq may not decrease"
+
+
+#: Documented order of validate_evidence_transition (change notice section 11):
+#: NONE < ANTICIPATED < FORMING < ARMED < TRIGGERED < CONFIRMED < COMPLETED.
+STAGES_IN_ORDER = (
+    EvidenceStage.NONE,
+    EvidenceStage.ANTICIPATED,
+    EvidenceStage.FORMING,
+    EvidenceStage.ARMED,
+    EvidenceStage.TRIGGERED,
+    EvidenceStage.CONFIRMED,
+    EvidenceStage.COMPLETED,
+)
+
+
+@pytest.mark.requirement("S00-ASG-12")
+def test_the_stage_vocabulary_is_the_documented_progression() -> None:
+    assert tuple(EvidenceStage) == STAGES_IN_ORDER
+
+
+@pytest.mark.requirement("S00-ASG-12")
+@pytest.mark.parametrize(
+    ("before", "after"),
+    list(itertools.product(STAGES_IN_ORDER, repeat=2)),
+    ids=lambda stage: stage.value,
+)
+def test_the_stage_never_goes_back(before: EvidenceStage, after: EvidenceStage) -> None:
+    previous = _active(stage=before)
+    revision = _revision(1, stage=after)
+    if STAGES_IN_ORDER.index(after) >= STAGES_IN_ORDER.index(before):
+        validate_evidence_transition(previous, revision)
+    else:
+        error = _illegal(previous, revision)
+        assert error.details["rule"] == (
+            f"stage may not go back ({before.value} -> {after.value}); a setup that falls back is "
+            "INVALIDATED and a new observation starts"
+        )
+
+
+@pytest.mark.requirement("S00-ASG-12")
+@pytest.mark.parametrize("state", [EvidenceState.CONTRA, EvidenceState.INVALIDATED, EvidenceState.EXPIRED])
+def test_the_stage_does_not_go_back_in_a_contra_or_closing_revision_either(state: EvidenceState) -> None:
+    previous = _active(stage=EvidenceStage.CONFIRMED)
+    fields: dict[str, Any] = {"state": state}
+    if state is EvidenceState.CONTRA:
+        fields["contradicts_market_event_ids"] = (OTHER_EVENT,)
+    else:
+        fields.update(bullish_score=0.0, bearish_score=0.0)
+    validate_evidence_transition(previous, _revision(1, stage=EvidenceStage.CONFIRMED, **fields))
+    validate_evidence_transition(previous, _revision(1, stage=EvidenceStage.COMPLETED, **fields))
+    error = _illegal(previous, _revision(1, stage=EvidenceStage.TRIGGERED, **fields))
+    assert "stage may not go back (CONFIRMED -> TRIGGERED)" in error.details["rule"]
 
 
 @pytest.mark.requirement("S00-ASG-12")

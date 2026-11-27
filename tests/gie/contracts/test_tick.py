@@ -630,6 +630,60 @@ def test_feed_silence_refuses_a_now_that_is_not_an_instant(now_ns: object) -> No
         feed_silence_ns(tick, now_ns)  # type: ignore[arg-type]
 
 
+@pytest.mark.requirement("S00-ASG-11", "S00-ASG-21", "S00-ASG-23")
+@pytest.mark.parametrize(
+    "now_ns",
+    [-1, -(2**63), 2**63, 2**64, None, "0", D("0"), D(T0), 0.0, float("nan"), False],
+    ids=repr,
+)
+def test_feed_silence_validates_now_with_a_contract_error(now_ns: object) -> None:
+    # Rework 2 (change notice section 11) and the docstring: now_ns is an int in 0 .. 2**63 - 1,
+    # refused with ContractValidationError and never coerced (also not compared as a FutureDataError).
+    tick = samples.tick(event_time_ns=0, receive_time_ns=0, flags=())
+    with pytest.raises(ContractValidationError) as info:
+        feed_silence_ns(tick, now_ns)  # type: ignore[arg-type]
+    assert not isinstance(info.value, FutureDataError)
+    assert info.value.code == "GIE.CONTRACT.INVALID"
+
+
+@pytest.mark.requirement("S00-ASG-11", "S00-ASG-23")
+def test_feed_silence_accepts_the_bounds_of_now() -> None:
+    earliest = samples.tick(event_time_ns=0, receive_time_ns=0, flags=())
+    assert feed_silence_ns(earliest, 0) == 0
+    assert feed_silence_ns(earliest, MAX_TIME_NS) == MAX_TIME_NS
+    latest = samples.tick(event_time_ns=MAX_TIME_NS, receive_time_ns=MAX_TIME_NS, flags=())
+    assert feed_silence_ns(latest, MAX_TIME_NS) == 0
+
+
+class _TickLookAlike(Tick):  # type: ignore[misc]  # defined below "tests."; never registered
+    __slots__ = ()
+
+
+@pytest.mark.requirement("S00-ASG-11", "S00-ASG-23")
+@pytest.mark.parametrize(
+    "build",
+    [
+        pytest.param(lambda: None, id="none"),
+        pytest.param(lambda: to_wire(samples.tick()), id="wire_dict"),
+        pytest.param(lambda: samples.tick().receive_time_ns, id="receive_time_int"),
+        pytest.param(samples.clock_reading, id="clock_reading_record"),
+        pytest.param(samples.evidence, id="evidence_record"),
+        pytest.param(
+            lambda: _TickLookAlike(
+                **{field.name: getattr(samples.tick(), field.name) for field in dataclasses.fields(Tick)}
+            ),
+            id="tick_subclass",
+        ),
+    ],
+)
+def test_feed_silence_validates_the_type_of_the_last_tick(build: Any) -> None:
+    # Rework 2: last_tick must be a Tick of exactly that type; anything else is a contract error.
+    last_tick = build()
+    with pytest.raises(ContractValidationError) as info:
+        feed_silence_ns(last_tick, T0 + NS_PER_SECOND)
+    assert info.value.details.get("actual_type") == type(last_tick).__name__
+
+
 @pytest.mark.requirement("S00-ASG-11", "S00-ASG-23")
 def test_feed_silence_cannot_be_fooled_into_accepting_future_data_by_a_float_now() -> None:
     # 30 ns before the receive time.  As a double the instant rounds UP to the next multiple of

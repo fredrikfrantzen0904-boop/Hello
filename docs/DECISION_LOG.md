@@ -213,8 +213,12 @@ registration of a simulated adapter also requires that the module whose code cal
 registration and the module that owns each adapter method (`function.__globals__`) are allowed,
 and the record framework requires that the code which creates a record class belongs to
 `gie.contracts` or the tests. The code, defaults and closures of the registered adapter methods are
-remembered and compared on every use. The self-check also detects an alias attribute added to the
-run-mode or venue enumeration. The static scan, its tests and the pins
+remembered and compared on every use - by identity, also the keyword-only defaults, so an object
+that merely claims to be equal to the recorded default is refused. The class object of the guard
+is immutable (its metaclass refuses assignment and deletion of class attributes). The self-check
+also detects an alias attribute added to the run-mode or venue enumeration. (The last two points
+were reported by the engineer who maintained the lock tests after the second rework; the pins were
+updated with this entry.) The static scan, its tests and the pins
 (`specifications/lock_pins.json`) exist now; the scan also forbids file-system writes below `gie/`
 outside the journal module, because a file dropped into a terminal's exchange folder would be a
 routing channel that needs no network call.

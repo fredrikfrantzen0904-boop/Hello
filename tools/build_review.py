@@ -655,12 +655,12 @@ def build(evidence_dir: Path, out: Path, reviewed_commit: str, allow_dirty: bool
         ],
         [
             "Deterministic",
-            "canonical JSON (RFC 8785 with exact integers), content-derived ids, injected time and timers; the order of a run is its journal (one input, run to completion, publish, next input)",
+            "canonical JSON (RFC 8785 with exact integers), content-derived ids, injected time and timers, seeds derived from the run manifest; step time: in replay and in paper a component sees the instant of the input being processed and only the run loop moves time; the order of a run is its journal (one input, run to completion, publish, next input)",
             "gie/core, gie/contracts/journal.py",
         ],
         [
             "Causal (no look-ahead)",
-            "inputs ordered by availability time; every derived record carries its market-data watermark; the journal refuses a record that depends on a tick not yet delivered; a derived record never outlives its inputs",
+            "inputs ordered by availability time; every derived record carries its market-data watermark; the journal refuses a record whose declared watermark lies beyond the newest journaled input; a derived record never outlives its inputs. Limit: the guard judges declared watermarks - that a producer read nothing later is shown by its prefix-invariance test (sessions 02, 03, 04, 10)",
             "gie/contracts/journal.py, causality.py, gie/core/freshness.py",
         ],
         [
@@ -670,7 +670,7 @@ def build(evidence_dir: Path, out: Path, reviewed_commit: str, allow_dirty: bool
         ],
         [
             "Labelled data",
-            "every record names run, mode and data origin; a derived record cannot claim a better origin than its inputs; fixtures are SYNTHETIC_FIXTURE; every run starts with a RunManifest",
+            "every record names run, mode and data origin; a derived record cannot claim a better origin than its inputs; fixtures are SYNTHETIC_FIXTURE; every run starts with a RunManifest and is identified by its content (role, risk regime, data, configuration, parameters, seed, code, pinned models)",
             "gie/contracts/common.py, causality.py, run.py",
         ],
         [
@@ -680,8 +680,18 @@ def build(evidence_dir: Path, out: Path, reviewed_commit: str, allow_dirty: bool
         ],
         [
             "Rules across records",
-            "sequence rules (stops only tighten, nothing after a terminal state, one executed alternative) and plan / approval / order agreement are enforced where records are published and where orders are sent",
+            "sequence rules (stops only tighten, nothing after a terminal state, one executed alternative, the daily floor never decreases), references (a record refers only to records that are part of the run) and plan / approval / order agreement are enforced by one ledger per run, owned by the journal; the order gateway reads from the same ledger and journals a request before the adapter sees it",
             "gie/contracts/ledger.py, authorization.py, journal.py, guarded.py",
+        ],
+        [
+            "Amounts decide, fractions report",
+            "account limits are decided on exact amounts in account currency; fractions are derived for reporting with a stated rounding direction and verified by the record",
+            "gie/contracts/risk_decision.py, gie/core/canonical.py",
+        ],
+        [
+            "One writer of order events",
+            "order events are written by the execution engine and its simulated broker only; the reflex engine states intents (tighten stop, exit) through a port; every order names who originated it",
+            "gie/contracts/order_event.py, interfaces.py",
         ],
         [
             "Parallel work without collisions",
@@ -693,7 +703,7 @@ def build(evidence_dir: Path, out: Path, reviewed_commit: str, allow_dirty: bool
     story.append(p("Routing lock", H2))
     story.append(
         p(
-            '"Real routing" is any order message leaving the process towards a broker, terminal or exchange - demo accounts included (decision D-011, to be confirmed: U-06). (1) <b>Vocabulary</b>: RunMode = {REPLAY, PAPER}, ExecutionVenue = {SIMULATED}; a live order cannot be constructed or decoded. (2) <b>Constant</b>: LIVE_ROUTING_PERMITTED is the literal False, read from no environment variable, file or flag. (3) <b>Guard and gateway</b>: the only path to an execution adapter is the order gateway (GuardedExecutionAdapter); before every call the RoutingGuard admits only adapter classes registered from the execution or backtesting package (or tests) that declare the simulated venue, carry no per-instance attributes and still have exactly the registered method functions - and the gateway calls those registered functions. (4) <b>Static scan</b> in CI for broker order-entry calls, broker SDK imports, process and network escapes, adapter calls outside the gateway, and the pinned hashes of the lock module and the gateway. Honest limit: Python cannot stop a person who rewrites the lock module or writes an adapter that does something other than simulate; that is caught by the scan, the pins, the tests and review, not by the runtime. There is no configuration that unlocks it.'
+            '"Real routing" is any order message leaving the process towards a broker, terminal or exchange - demo accounts included (decision D-011, to be confirmed: U-06). (1) <b>Vocabulary</b>: RunMode = {REPLAY, PAPER}, ExecutionVenue = {SIMULATED}; a live order cannot be constructed or decoded. (2) <b>Constant</b>: LIVE_ROUTING_PERMITTED is the literal False, read from no environment variable, file or flag. (3) <b>Guard and gateway</b>: the only path to an execution adapter is the order gateway (GuardedExecutionAdapter); before every call the RoutingGuard admits only adapter classes registered from the execution or backtesting package (or tests) that declare the simulated venue, carry no per-instance attributes and still have exactly the registered method functions (code, defaults and closures); a claimed module name is not trusted alone - the registering module and the module that owns each method must be allowed too - and the gateway calls those registered functions. (4) <b>Static scan</b> in CI for broker order-entry calls, broker SDK imports, process and network escapes, file-system writes outside the journal module (a file dropped for a terminal would be a routing channel), adapter calls outside the gateway, and the pinned hashes of the lock module and the gateway. Honest limit: Python cannot stop a person who rewrites the lock module or writes an adapter that does something other than simulate; that is caught by the scan, the pins, the tests and review, not by the runtime. There is no configuration that unlocks it.'
         )
     )
     story.append(p("Repository layout and ownership", H2))
@@ -805,25 +815,25 @@ def build(evidence_dir: Path, out: Path, reviewed_commit: str, allow_dirty: bool
         ["kind of rule", "rules", "enforced by"],
         [
             "Inside one record (a violating record cannot be constructed or decoded)",
-            "no live mode or real venue exists; only XAUUSD can be planned, ordered or held by GIE; every plan has a hard stop on the losing side; every entry order carries its plan, its risk approval and an attached protective stop; a rejection grants nothing; emergency halt never approves; at or below the daily profit floor nothing is approved; a stop is never wider than the initial stop; missing evidence has null scores and inactive evidence zero scores; a model is ACTIVE only with a recorded owner approval and its evidence",
+            "no live mode or real venue exists; only XAUUSD can be planned, ordered or held by GIE; every plan has a hard stop on the losing side and a resting entry that is not marketable; every entry order carries its plan, its risk approval and an attached protective stop; only the execution engine creates an entry; a rejection grants nothing; emergency halt never approves; at or below the daily profit floor nothing is approved (decided on amounts); an approval states the aggregates it rests on; a stop is never wider than the initial stop; an open position names its protective order; missing evidence has null scores and inactive evidence zero scores; a model is ACTIVE only with a recorded owner approval and its evidence; a run is what its manifest says",
             "record invariants (appendix A)",
         ],
         [
             "Across a sequence of records",
-            "a stop is only tightened and never removed; a position is never increased; the executable net P&L peak never decreases; a replacement adds no risk; nothing follows a terminal order state; at most one alternative plan of a group is executed; a model reaches ACTIVE only through SHADOW; the profit floor never decreases within a day",
-            "transition validators and LifecycleLedger, applied by the journal and the order gateway",
+            "a stop is only tightened and never removed; a position grows only through fills of its own entry order; the executable net P&L peak never decreases; a replacement adds no risk; nothing follows a terminal order state; at most one alternative plan of a group is executed; one working protective stop per position; a model reaches ACTIVE only through SHADOW; within a day the profit floor never decreases or disappears and a halt stays in force; a record refers only to records that are part of the run",
+            "transition validators and the one LifecycleLedger of the run, owned by the journal",
         ],
         [
             "Between plan, approval and order",
-            "the order is the plan that was approved (same content by fingerprint), within the granted volume, with the planned stop attached, and nothing expired - failing closed exactly at the boundary; every other order may only reduce or protect an open GIE position; GIE never sends orders for positions of other systems",
-            "authorisation checks in the order gateway",
+            "the order is the plan that was approved (same content by fingerprint), within the granted volume, with the planned stop and slippage bound, resting on a model the role of the run allows, and nothing expired - failing closed exactly at the boundary; every other order may only reduce or protect an open GIE position; GIE never sends orders for positions of other systems; the request is journaled before the adapter sees it",
+            "authorisation checks in the order gateway, which reads plan, approval and position from the run ledger",
         ],
     ]
     story.append(table(safety_rows, [22, 62, 28]))
     story.append(p("Provisional elements and shared types still missing", H2))
     story.append(
         p(
-            "Because the six engines could not be inspected (B-001), engine-specific vocabularies are open strings or small provisional enumerations (EvidenceStage, MarketSession, TickFlag, ModelKind, reason codes). The following shared types are needed by later sessions and were deliberately <b>not</b> defined in Session 00, because their content depends on the audit and on broker and account facts (change requests CR-003 and CR-005). Each is the first deliverable of the session that proposes it and is added to the shared contracts by the coordinator; a consuming session writes no code against a type before it is integrated (extension gate)."
+            "Because the six engines could not be inspected (B-001), engine-specific vocabularies are open strings or small provisional enumerations (EvidenceStage, MarketSession, TickFlag, ModelKind, reason codes). The following shared elements are needed by later sessions and were deliberately <b>not</b> defined in Session 00, because their content depends on the audit, on broker and account facts or on the design of the session that owns the knowledge (change requests CR-003 and CR-005). Two of them are the coordinator's own and are due before the first subsystem is integrated: the step driver (CX-10) and the health event (CX-11). Each is the first deliverable of the session that proposes it and is added to the shared contracts by the coordinator; a consuming session writes no code against a type before it is integrated (extension gate)."
         )
     )
     extension_rows: list[list[Any]] = [["id", "shared type", "proposed by", "consumed by", "CR"]]
@@ -1009,7 +1019,72 @@ def build(evidence_dir: Path, out: Path, reviewed_commit: str, allow_dirty: bool
         story.append(table(rows, [40, 12, 18, 24, 18]))
         story.append(
             p(
-                "The individual findings and their disposition are in <font face='Courier'>reviews/session_00/evidence/independent_review.json</font>. This internal review does not replace the supervisor's independent review.",
+                "The individual findings and their disposition are in the review files named in section 12; what changed in the second rework is listed in <font face='Courier'>reviews/session_00/rework_2_change_notice.md</font>. This internal review does not replace the supervisor's independent review.",
+                SMALL,
+            )
+        )
+        story.append(p("Verification of the dispositions", H2))
+        story.append(
+            p(
+                "A disposition is the coordinator's own claim. It was therefore checked by verifiers who did not write the code: first the dispositions of round 1 (before the second rework), then - against the final code - the dispositions of round 2 and every round-1 item that had been found unfinished."
+            )
+        )
+        verification_rows: list[list[Any]] = [
+            ["verification", "items", "done", "partial", "not done", "cannot verify"]
+        ]
+        for title, name in (
+            ("round-1 dispositions, before the second rework", "review_round1_verification.json"),
+            ("round-2 dispositions and open round-1 items, final code", "final_verification.json"),
+        ):
+            document = load_json(REPO_ROOT / "reviews" / "session_00" / "evidence" / name)
+            if document is None:
+                verification_rows.append([esc(title), "<b>not run</b>", "-", "-", "-", "-"])
+                continue
+            verdict_counts: dict[str, int] = {}
+            for group in document.get("groups", []):
+                for verdict in group.get("verdicts", []):
+                    verdict_counts[verdict["verdict"]] = verdict_counts.get(verdict["verdict"], 0) + 1
+            verification_rows.append(
+                [
+                    esc(title),
+                    str(sum(verdict_counts.values())),
+                    str(verdict_counts.get("done", 0)),
+                    str(verdict_counts.get("partial", 0)),
+                    str(verdict_counts.get("not_done", 0)),
+                    str(verdict_counts.get("cannot_verify", 0)),
+                ]
+            )
+        story.append(table(verification_rows, [46, 10, 10, 12, 14, 20]))
+        final = load_json(REPO_ROOT / "reviews" / "session_00" / "evidence" / "final_verification.json")
+        if final is not None:
+            open_rows: list[list[Any]] = [
+                ["item", "verdict", "what the verifier found missing", "coordinator's response"]
+            ]
+            responses = final.get("responses", {})
+            for group in final.get("groups", []):
+                for verdict in group.get("verdicts", []):
+                    if verdict["verdict"] != "done":
+                        open_rows.append(
+                            [
+                                esc(verdict["id"]),
+                                status_text(verdict["verdict"]),
+                                esc(str(verdict.get("remaining", ""))[:700]),
+                                esc(str(responses.get(verdict["id"], "no response recorded"))[:500]),
+                            ]
+                        )
+            if len(open_rows) > 1:
+                story.append(
+                    p(
+                        "Items the final verification did not find fully done - listed explicitly, with what was done about each afterwards (a response is the coordinator's statement and was not verified again):",
+                        BODY,
+                    )
+                )
+                story.append(table(open_rows, [9, 10, 52, 41]))
+            else:
+                story.append(p("The final verification found every item done."))
+        story.append(
+            p(
+                "Limits of this independence, stated plainly (decision D-023): tests, tools, reviews and verifications were produced by sub-agents instructed by the coordinator of this one session. During the second rework a usage limit of the service stopped several sub-agents in the middle of their tasks; their unfinished work was completed by the coordinator or by sub-agents of another model. There was no third review round.",
                 SMALL,
             )
         )
