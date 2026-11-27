@@ -15,13 +15,17 @@ until the owner sets it to approved, conditional or rejected. Paper / research o
 | `evidence/review_round1_findings.json`, `review_round1_dispositions.yaml` | first independent review inside the session: findings verbatim, and what was done about each |
 | `evidence/review_round1_verification.json` | independent verification that each round-1 disposition was really carried out |
 | `evidence/review_round2_findings.json`, `review_round2_dispositions.yaml` | second review round on the reworked contracts |
+| `rework_2_change_notice.md` | every change of behaviour or interface made in the second rework |
+| `evidence/final_verification.json` | verdicts of verifiers who checked the round-2 dispositions and the open round-1 items against the final code (present only if that verification was run; the PDF says so) |
 | `evidence/test_author_reports.json` | what the engineers who wrote the tests reported: files, counts, defects found and their resolution, limitations |
 | `evidence/independent_review.json` | counts derived from the review files (`python -m tools.summarize_reviews`) |
 | `status_patch.yaml` | the Session 00 status of every requirement it touches, as applied to the requirements matrix |
 
 ## How the package was produced
 
-From a clean checkout of the reviewed commit (the PDF names it), with `python -m pip install -e ".[dev]"`:
+The registers are brought up to date first (last block below) and committed; that commit is the
+reviewed commit. From a clean checkout of it (the PDF names it), with
+`python -m pip install -e ".[dev]"`:
 
 ```bash
 python -m tools.ci --evidence-dir out                 # all gates; writes ci_results.json, test_results.json, junit.xml, coverage.json

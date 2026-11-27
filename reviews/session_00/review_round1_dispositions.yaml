@@ -58,7 +58,7 @@ dispositions:
   DI-02: {disposition: record, action: "CR-003: Candle and broker-calendar contracts required before S02 starts; start gate in the dependency graph requires the listed contract extensions"}
   DI-03: {disposition: fix, action: "Scheduler protocol (call_at, call_after, cancel); ReplayClock and PollingScheduler implement it; timer rule normative in section 3.2"}
   DI-04: {disposition: fix, action: "section 3.3 table of reference instants; feed silence vs source delay; TickFlag.STALE renamed DELAYED; helper feed_silence_ns"}
-  DI-05: {disposition: fix, action: "PriceLevel.identity; EVD-11 verifies market_event_id; identity fixed across revisions (validate_evidence_transition); anchor convention stated, per-kind table owned by the S02 feature dictionary"}
+  DI-05: {disposition: fix, action: "PriceLevel.identity; EVD-2 verifies market_event_id; identity fixed across revisions (validate_evidence_transition); anchor convention stated, per-kind table owned by the S02 feature dictionary"}
   DI-06: {disposition: fix, action: "evaluation-slot identity for INACTIVE/MISSING (engine scoped, never de-duplicated); NamedValue.value nullable; slot rule in section 4"}
   DI-07: {disposition: fix, action: "Evidence.observable_time_ns with observable <= as_of <= decision; notification delay defined; replay form of S02-ACC-05 stated"}
   DI-08: {disposition: fix, action: "group_by_market_event() in gie.contracts with deterministic representative; scores are never summed within a group"}
@@ -116,8 +116,8 @@ dispositions:
   SF-08: {disposition: fix, action: "members captured at import and compared by identity; EnumOf.check by identity"}
   SF-09: {disposition: fix, action: "contract subclassing refused outside gie.contracts; exact-type checks in codec, Obj and gateway"}
   SF-10: {disposition: fix, action: "OrderEvent.reference_price; protection geometry against reference and fill; Position initial stop on the losing side"}
-  SF-11: {disposition: fix, action: "0 < risk_frac <= 1; RSK-10 surplus rule; reference_equity_amount; validate_daily_state_sequence"}
-  SF-12: {disposition: fix, action: "monotonic rules apply to GIE-owned positions only; POS-8 verifies the id"}
+  SF-11: {disposition: fix, action: "0 < risk_frac <= 1; RSK-8 surplus rule (on amounts since rework 2, D-028); reference_equity_amount; validate_daily_state_sequence / advance_daily_risk (the floor can no longer be lowered through an intermediate decision)"}
+  SF-12: {disposition: fix, action: "monotonic rules apply to GIE-owned positions only; POS-3 verifies the id"}
   SF-13: {disposition: fix, action: "resting entries must expire; expiry of an entry may only shorten; authorization checks all expiries"}
   SF-14: {disposition: fix, action: "training_data_origin; 'validated' excludes fixture models; approved_by pattern; RiskDecision.quality_model_version_id"}
   SF-15: {disposition: fix, action: "revision floors for SHADOW/ACTIVE; rollback_of with a new approval; registry history validator"}
