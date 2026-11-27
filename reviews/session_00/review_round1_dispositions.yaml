@@ -1,0 +1,156 @@
+# Dispositions of the round-1 independent review findings (Session 00).
+#
+# Findings (verbatim): reviews/session_00/evidence/review_round1_findings.json
+# One entry per finding id.  disposition:
+#   fix      - corrected in the foundation (action says where)
+#   record   - not decided in Session 00; recorded as change request / open item for the owner
+#   decline  - not adopted, with the reason
+# 'state' is set to done only after the change exists and is covered by a test or a CI check.
+schema_version: 1
+round: 1
+rules:
+  - "The brief for Session 00 names nine contracts. Findings that ask for further shared contracts are not silently dropped and not silently added: they are recorded in CR-003 with the proposing session and the gate before which they are required."
+  - "Everything that can be corrected inside the nine contracts, the core and the tooling is corrected in Session 00."
+dispositions:
+  # ---------------------------------------------------------------- requirements matrix (master)
+  RM-01: {disposition: fix, action: "G05-05 reworded to the recovery and emergency-halt levels only; duplicates removed from G05-03/04; open item U-14; research_parameters header corrected"}
+  RM-02: {disposition: fix, action: "OWN-15 added"}
+  RM-03: {disposition: fix, action: "M-AUTH-14 split; M-AUTH-19 'Keep real order routing disabled' for all sessions"}
+  RM-04: {disposition: fix, action: "OWN-08 split into OWN-08, OWN-16, OWN-17, OWN-18"}
+  RM-05: {disposition: fix, action: "OWN-09 split (OWN-19..21); OWN-04 split (OWN-22)"}
+  RM-06: {disposition: fix, action: "OWN-11 split (OWN-23..26)"}
+  RM-07: {disposition: fix, action: "OWN-01 split; OWN-27 'implement the entire project' for all sessions"}
+  RM-08: {disposition: fix, action: "G07-01 split; G07-13 'Market memory'; S01 added"}
+  RM-09: {disposition: fix, action: "M-DIR-05 split (M-DIR-09); M-DIR-06 for all sessions"}
+  RM-10: {disposition: fix, action: "M-AUTH-16 split (M-AUTH-20..25); M-AUTH-17 split (M-AUTH-26)"}
+  RM-11: {disposition: fix, action: "M-GATE-09 split (M-GATE-10); M-GATE-07 split (M-GATE-11)"}
+  RM-12: {disposition: fix, action: "G06-06 split per source (G06-10..17)"}
+  RM-13: {disposition: fix, action: "G03-06 assigned to all sessions"}
+  RM-14: {disposition: fix, action: "G03-12 sessions extended with S01, S03"}
+  RM-15: {disposition: fix, action: "G05-07 keeps 'Above +5%'"}
+  RM-16: {disposition: fix, action: "G02-04..06 worded 'setup-specific ...' with the interpretation in notes"}
+  RM-17: {disposition: fix, action: "G09-02/03 prefixed 'Round 2:'; G09-02 split (G09-11..13); gloss moved to notes"}
+  RM-18: {disposition: fix, action: "G05-02, G01-10, G04-13, G06-01, G10-16 split; notes on the entries kept bundled"}
+  RM-19: {disposition: fix, action: "text holds the owner's words only; glosses moved to notes; generator verifies words against the verbatim source clause"}
+  RM-20: {disposition: fix, action: "M-DOC-01 added; specification version and extracted-text hashes in the matrix header"}
+  RM-21: {disposition: fix, action: "statuses, contributions and notes set at the gate; registers rendered by tools/gie_registers.py"}
+  RM-22: {disposition: fix, action: "sibling rules cross-referenced in notes; lock tests are marked with all sibling ids"}
+  # ---------------------------------------------------------------- requirements matrix (briefs)
+  RB-01: {disposition: fix, action: "S10-ASG-04..07 notes keep the broader 'ablations' reading; open item U-15"}
+  RB-02: {disposition: fix, action: "matrix statuses reflect B-001, CR-001, CR-002, D-001/002 at the gate; register validation ties OPEN blockers to blocked/partial status"}
+  RB-03: {disposition: fix, action: "start gate and integration gate defined in dependency_graph.yaml and WORKTREES.md"}
+  RB-04: {disposition: fix, action: "S12-DEP-02 note cites D-002 / CR-002; D-002 lists S12-DEP-02"}
+  RB-05: {disposition: fix, action: "dependency graph: S10 integrates_later, S12 ongoing"}
+  RB-06: {disposition: fix, action: "S00 owns shared test files, gie/__init__.py, gie/app/; ownership coverage checked by tools/check_architecture.py"}
+  RB-07: {disposition: fix, action: "S01-ASG-02 'timestamped raw bid/ask tick storage'"}
+  RB-08: {disposition: fix, action: "S03-ASG-01 split per source (S03-ASG-10..17)"}
+  RB-09: {disposition: fix, action: "notes on S06-ACC-02/06, S11-ACC-02, S12-ACC-02: each half needs its own marked test"}
+  RB-10: {disposition: fix, action: "S07-ASG-10, S05-ASG-05, S11-ASG-15, S08-ASG-11, S07-ASG-02, COM-10 split; notes on the rest"}
+  RB-11: {disposition: fix, action: "source_clause (verbatim paragraph) on every atom; notes for the three cases"}
+  RB-12: {disposition: fix, action: "see RM-03, RM-13"}
+  RB-13: {disposition: fix, action: "acceptance register: blockers on S00-ACC-05/06; validation checks listed test modules"}
+  RB-14: {disposition: fix, action: "one documented marker id (the requirement id); conftest aborts on unknown ids"}
+  RB-15: {disposition: fix, action: "dependency graph: dashboard.gie import rule and read_only flag"}
+  RB-16: {disposition: fix, action: "register description and notes: for evaluations 'passing' means reproducibly recorded, not favourable"}
+  RB-17: {disposition: fix, action: "see RB-11; specification version and hashes in the header"}
+  # ---------------------------------------------------------------- data / strategy / intermarket lens
+  DI-01: {disposition: record, action: "CR-003: Observation / release-vintage / news contracts required before S01 implements S01-ASG-12 and before S03 starts; proposed by S01+S03, integrated by the coordinator"}
+  DI-02: {disposition: record, action: "CR-003: Candle and broker-calendar contracts required before S02 starts; start gate in the dependency graph requires the listed contract extensions"}
+  DI-03: {disposition: fix, action: "Scheduler protocol (call_at, call_after, cancel); ReplayClock and PollingScheduler implement it; timer rule normative in section 3.2"}
+  DI-04: {disposition: fix, action: "section 3.3 table of reference instants; feed silence vs source delay; TickFlag.STALE renamed DELAYED; helper feed_silence_ns"}
+  DI-05: {disposition: fix, action: "PriceLevel.identity; EVD-11 verifies market_event_id; identity fixed across revisions (validate_evidence_transition); anchor convention stated, per-kind table owned by the S02 feature dictionary"}
+  DI-06: {disposition: fix, action: "evaluation-slot identity for INACTIVE/MISSING (engine scoped, never de-duplicated); NamedValue.value nullable; slot rule in section 4"}
+  DI-07: {disposition: fix, action: "Evidence.observable_time_ns with observable <= as_of <= decision; notification delay defined; replay form of S02-ACC-05 stated"}
+  DI-08: {disposition: fix, action: "group_by_market_event() in gie.contracts with deterministic representative; scores are never summed within a group"}
+  DI-09: {disposition: fix, action: "EVD-4 removed: ACTIVE with 0/0 scores means 'condition present, no directional information'"}
+  DI-10: {disposition: record, action: "CR-003: MarketCondition / TradingRestriction contract (S03 -> S05, S08) required before wave 3"}
+  DI-11: {disposition: fix, action: "receive-time rule for imported history (max of predecessor and event time + modelled delay); TickFlag.RECEIVE_TIME_MODELLED"}
+  DI-12: {disposition: fix, action: "TickSource protocol; replay step, loop ownership and dispatch order normative in section 10; candle queries with the Candle contract (CR-003)"}
+  DI-13: {disposition: fix, action: "total order of a run = journal order (run-to-completion steps); EventKey only orders exogenous inputs; ranks follow data flow"}
+  DI-14: {disposition: record, action: "CR-005: per-flag tick usability table to be defined once in gie.contracts by S01 before S02/S06/S07 consume ticks; tick consumers tolerate gaps, order streams do not (stated in 6.1)"}
+  DI-15: {disposition: fix, action: "EVD-12 for kind pending_limit; related_market_event_id"}
+  DI-16: {disposition: fix, action: "CONTRA defined; contradicts_market_event_ids (stable across revisions)"}
+  DI-17: {disposition: fix, action: "scores, levels and invalidation always describe the instrument named in symbol; translation to gold is learned by S04 (G06-09)"}
+  DI-18: {disposition: fix, action: "OUT_OF_ORDER by high-water mark; DUPLICATE on all source fields within a look-back owned by S01"}
+  DI-19: {disposition: fix, action: "section 6.3: tick seq persistent per (source, symbol); backfill / re-import / re-flag creates a new versioned source id"}
+  DI-20: {disposition: fix, action: "Timeframe.NONE; Timeframe listed as provisional"}
+  DI-21: {disposition: fix, action: "level unit, canonical order and uniqueness; strict triggers BELOW/ABOVE; PriceCondition; who evaluates invalidation; validate_evidence_transition"}
+  DI-22: {disposition: record, action: "D-018 extended: sessions request parameters through the coordinator; no freshness numbers are invented in Session 00"}
+  DI-23: {disposition: record, action: "limitation documented in SystemClock and ARCHITECTURE; measured clock resolution is a deliverable of the S01 feed benchmark; open item U-08"}
+  DI-24: {disposition: fix, action: "prefix-invariance comparison defined; a journal belongs to one run; RunContext; RunManifest contract"}
+  DI-25: {disposition: record, action: "storage encoding freedom stated; third-party allow-list per package and feature-dictionary format left to S01/S02 proposals (CR-003)"}
+  # ---------------------------------------------------------------- prediction / decision / learning lens
+  PD-01: {disposition: fix, action: "Candidate.risk_unit_price defines 1 R; PlanScorer protocol and PlanEstimate for plan-level estimates"}
+  PD-02: {disposition: fix, action: "opportunity_id (stable); alternative_group_id derived from it; alternative_group_id on RiskDecision and ENTRY orders; ledger enforces one executed alternative"}
+  PD-03: {disposition: fix, action: "candidate_id includes opportunity (with horizon) and scoring model"}
+  PD-04: {disposition: fix, action: "model_status on Candidate and TradePlan; ModelRegistry lookup by status; the PAPER/ACTIVE rule is open item U-17"}
+  PD-05: {disposition: record, action: "CR-003: Decision contract (S05) required before wave 3; only S04 emits Candidate records (section 1)"}
+  PD-06: {disposition: record, action: "CR-003: Outcome / label contract required before S04 trains and S09 starts"}
+  PD-07: {disposition: fix, action: "training_information_end_ns, embargo_ns, split_spec_sha256 on ModelVersion; Candidate.memory_cutoff_time_ns (prior-only invariant) and support_count; is_out_of_sample helper"}
+  PD-08: {disposition: fix, action: "derived_from / replaces / rollback_of fields; validate_registry_history"}
+  PD-09: {disposition: fix, action: "ModelRegistry protocol extended (register, transition, history, find, status_at); component_model_version_ids"}
+  PD-10: {disposition: fix, action: "training_data_origin, training_data_sha256, training_config_sha256; ModelVersion times are system-clock readings; replay model schedule comes from the run configuration"}
+  PD-11: {disposition: fix, action: "status_reasons; evaluation report, shadow runs and promotion criteria required on activation"}
+  PD-12: {disposition: fix, action: "see DI-13"}
+  PD-13: {disposition: fix, action: "status definitions, transition tables and validators for Candidate and TradePlan; effect of a superseding revision stated"}
+  PD-14: {disposition: fix, action: "expiry propagation rules and check_derivation(); as_of_time_ns defined as the market-data watermark"}
+  PD-15: {disposition: fix, action: "entry_price allowed as intended level for RETEST/PULLBACK; entry_trigger and invalidations on TradePlan"}
+  PD-16: {disposition: fix, action: "expected_net_r_stderr and support_count added; at least one uncertainty measure required; meaning of 'uncertainty' is open item U-16"}
+  PD-17: {disposition: fix, action: "Destination.scenario and horizon_ns with a defined probability; expected_win_r / expected_loss_r; Target.close_frac may be 0"}
+  PD-18: {disposition: fix, action: "see DI-17"}
+  PD-19: {disposition: fix, action: "consumer table corrected; RecordSource protocol and reference journal"}
+  PD-20: {disposition: record, action: "CR-003 extended with owners and gates for every additional shared type"}
+  PD-21: {disposition: fix, action: "PLN-11: ARMED/SELECTED require expected_net_r > 0"}
+  PD-22: {disposition: fix, action: "see DI-16"}
+  PD-23: {disposition: fix, action: "Contribution (evidence or named feature) on Candidate and TradePlan"}
+  PD-24: {disposition: fix, action: "close_frac >= 0; Candidate.unscored_reason"}
+  PD-25: {disposition: fix, action: "Position.peak_time_ns, trough_net_pnl_amount, close_reason; learning uses GIE-owned positions only (section 9)"}
+  # ---------------------------------------------------------------- safety lens
+  SF-01: {disposition: fix, action: "tools/check_live_lock.py (deny by default, pinned hashes) with tests, run in CI"}
+  SF-02: {disposition: fix, action: "requested_* fields on REPLACE_REQUESTED; replacement rules checked at request time; protective stop is its own order"}
+  SF-03: {disposition: fix, action: "RECONCILED obeys the no-added-risk rules"}
+  SF-04: {disposition: fix, action: "RoutingGuard final and immutable; adapters slot-only with method snapshot; gateway calls registered functions; create(); OrderGateway protocol"}
+  SF-05: {disposition: fix, action: "registration restricted to allow-listed modules; scan rule LL011. Sealing the registry at first guard creation: declined (see notes)", notes: "Sealing would only move the window (code can register before the first guard) and breaks legitimate test set-up; the scan and the module allow-list are the controls."}
+  SF-06: {disposition: fix, action: "intent/order-type pairing; validate_reducing_order; gateway requires the position for non-entry orders"}
+  SF-07: {disposition: fix, action: "validate_entry_authorization; ENTRY client_order_id derived from the risk decision (one order per approval); attempt field"}
+  SF-08: {disposition: fix, action: "members captured at import and compared by identity; EnumOf.check by identity"}
+  SF-09: {disposition: fix, action: "contract subclassing refused outside gie.contracts; exact-type checks in codec, Obj and gateway"}
+  SF-10: {disposition: fix, action: "OrderEvent.reference_price; protection geometry against reference and fill; Position initial stop on the losing side"}
+  SF-11: {disposition: fix, action: "0 < risk_frac <= 1; RSK-10 surplus rule; reference_equity_amount; validate_daily_state_sequence"}
+  SF-12: {disposition: fix, action: "monotonic rules apply to GIE-owned positions only; POS-8 verifies the id"}
+  SF-13: {disposition: fix, action: "resting entries must expire; expiry of an entry may only shorten; authorization checks all expiries"}
+  SF-14: {disposition: fix, action: "training_data_origin; 'validated' excludes fixture models; approved_by pattern; RiskDecision.quality_model_version_id"}
+  SF-15: {disposition: fix, action: "revision floors for SHADOW/ACTIVE; rollback_of with a new approval; registry history validator"}
+  SF-16: {disposition: fix, action: "section 9 split into record invariants and sequence rules; LifecycleLedger enforces sequence rules at publication (journal and gateway)"}
+  SF-17: {disposition: fix, action: "strict parameter loader: kinds, ranges, ordering of the daily levels, unknown keys refused, parameters_sha256"}
+  SF-18: {disposition: fix, action: "tools/check_docs_paths.py in CI; documents reworded to the true state"}
+  SF-19: {disposition: fix, action: "fullmatch everywhere; FieldSpec.since (missing key in a same-version message is an error); Float int rule; decimal errors wrapped; error details journalable"}
+  SF-20: {disposition: fix, action: "schema check asserts the routing vocabulary; any change of it is MAJOR plus an explicit problem"}
+  SF-21: {disposition: fix, action: "clock-based freshness helpers refuse a tolerance in replay; tolerance bounded"}
+  SF-22: {disposition: fix, action: "RECEIVE_TIME_MODELLED; derive_origin and check_derivation; run_id arguments validated; RunManifest"}
+  SF-23: {disposition: record, action: "open item U-18: read-only (investor) credentials and a single read-only facade for the paper data connection"}
+  SF-24: {disposition: fix, action: "account_ref documented as a local alias; external_ref pattern; tools/check_no_secrets.py in CI"}
+  # ---------------------------------------------------------------- determinism lens
+  DT-01: {disposition: fix, action: "see DI-13"}
+  DT-02: {disposition: fix, action: "RiskDecision.plan_fingerprint; validate_entry_authorization compares it"}
+  DT-03: {disposition: fix, action: "SystemClock keeps moving from the monotonic source during a backward step; regressions_observed on the Clock protocol and ClockReading"}
+  DT-04: {disposition: fix, action: "see DI-11; SequenceTracker refuses a decreasing ordering time"}
+  DT-05: {disposition: fix, action: "see DI-05; identity functions validate their inputs"}
+  DT-06: {disposition: fix, action: "see PD-03; identity table per prefix in section 4"}
+  DT-07: {disposition: fix, action: "see DI-04, PD-14"}
+  DT-08: {disposition: fix, action: "behavioural surface (transition tables, immutable field lists, identity parts, stream templates, ranks) emitted into the locked schemas as x-gie-behaviour"}
+  DT-09: {disposition: fix, action: "PollingScheduler: past due fires at the next poll; run_due(limit_ns); call_after as the safe idiom"}
+  DT-10: {disposition: fix, action: "EXACT used for every contract decimal operation; test under a hostile ambient context"}
+  DT-11: {disposition: fix, action: "POS-8; supersedes_* verified against the previous revision id; attempt on OrderEvent"}
+  DT-12: {disposition: fix, action: "fingerprint excludes MINOR/PATCH (contract name, MAJOR and fields)"}
+  DT-13: {disposition: fix, action: "Float.check refuses integers that are not exactly doubles"}
+  DT-14: {disposition: fix, action: "bounded semver components"}
+  DT-15: {disposition: fix, action: "schemas state they are necessary but not sufficient; uniqueItems for scalar lists; printable-text pattern for free strings"}
+  DT-16: {disposition: fix, action: "section 7 updated for number tokens; golden messages with 1.0 and 1e19 floats"}
+  DT-17: {disposition: fix, action: "canonical order and uniqueness for levels, destinations and targets"}
+  DT-18: {disposition: fix, action: "SequenceTracker: first_seq default 0, restore(), fingerprint and argument checks, optional ordering time"}
+  DT-19: {disposition: record, action: "section 8: a MAJOR bump requires a migration tool and a journal cut-over; golden check skips other MAJORs"}
+  DT-20: {disposition: fix, action: "stream scope defined: (run_id, stream) for run-scoped records; tick seq assigned once at ingest"}
+  DT-21: {disposition: fix, action: "trading-day bounds clamped; float underflow refused; path joined in error details; docstrings corrected"}
+  DT-22: {disposition: record, action: "see DI-02; section 6.1 gains the rule for how a new contract obtains a rank and an ordering time"}
+  DT-23: {disposition: fix, action: "section 3.2 / 6.2: background results and modelled latency are delivered through the scheduler at a virtual instant; measured latency never enters records"}
