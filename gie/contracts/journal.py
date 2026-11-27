@@ -57,6 +57,7 @@ from gie.contracts.codec import fingerprint, from_wire, to_wire
 from gie.contracts.common import DataOrigin, Produced, RunMode, origin_not_better_than
 from gie.contracts.ledger import LifecycleLedger
 from gie.contracts.model_version import ModelVersion
+from gie.contracts.order_event import OrderEvent
 from gie.contracts.ordering import ordering_time_ns, stream_name
 from gie.contracts.risk_decision import RiskDecision
 from gie.contracts.run import RunManifest
@@ -128,6 +129,7 @@ class MemoryJournal:
         self._tick_streams: Final[SequenceTracker] = SequenceTracker(first_seq=None, allow_gaps=True)
         self._input_watermark_ns: int | None = None
         self._tick_time_ns: int | None = None
+        self._journaled_tick_streams: Final[set[str]] = set()
         self.tick_gaps: int = 0
 
     # ------------------------------------------------------------------ reading
@@ -223,6 +225,22 @@ class MemoryJournal:
                     record,
                     model_version_id=record.model_version_id,
                 )
+        if isinstance(record, OrderEvent) and record.fill_tick_source is not None:
+            # A fill names the quote it was matched against.  Where the run journals that tick
+            # stream, the quote must be part of the journal; a run that keeps its ticks elsewhere
+            # (tick store, extension CX-19) cannot be checked here.
+            assert record.fill_tick_seq is not None
+            quotes = f"tick/{record.fill_tick_source}/{record.symbol}"
+            if (
+                quotes in self._journaled_tick_streams
+                and (quotes, record.fill_tick_seq) not in self._positions
+            ):
+                raise _refuse(
+                    "a fill names a quote of a journaled tick stream that is part of the journal",
+                    record,
+                    stream=quotes,
+                    fill_tick_seq=record.fill_tick_seq,
+                )
         if isinstance(record, RiskDecision) and record.quality_model_version_id is not None:
             pinned = manifest.model(record.quality_model_version_id, record.as_of_time_ns)
             if pinned is None or not pinned.validated:
@@ -307,6 +325,7 @@ class MemoryJournal:
             self._manifest = record
         if isinstance(record, Tick):
             self._tick_time_ns = record.receive_time_ns
+            self._journaled_tick_streams.add(stream)
         if isinstance(record, Tick | ClockReading):
             self._input_watermark_ns = max(self._input_watermark_ns or 0, ordering_time_ns(record))
         self._entries.append(entry)

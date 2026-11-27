@@ -164,7 +164,7 @@
           "type": "null"
         }
       ],
-      "description": "Feed of the quote this fill was matched against (stream tick/<symbol>/<source>)."
+      "description": "Feed of the quote this fill was matched against (stream tick/<source>/<symbol>)."
     },
     "intent": {
       "description": "Why the order exists.",

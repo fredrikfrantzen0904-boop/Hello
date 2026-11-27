@@ -1082,6 +1082,22 @@ def build(evidence_dir: Path, out: Path, reviewed_commit: str, allow_dirty: bool
                 story.append(table(open_rows, [9, 10, 52, 41]))
             else:
                 story.append(p("The final verification found every item done."))
+            defect_rows: list[list[Any]] = [
+                ["file", "severity", "additional defect found by a verifier", "response"]
+            ]
+            for group in final.get("groups", []):
+                for defect in group.get("new_defects", []):
+                    defect_rows.append(
+                        [
+                            Paragraph(esc(defect.get("file", "")), MONO),
+                            esc(defect.get("severity", "")),
+                            esc(str(defect.get("description", ""))[:500]),
+                            esc(str(defect.get("response") or "no response recorded")[:400]),
+                        ]
+                    )
+            if len(defect_rows) > 1:
+                story.append(p("Additional defects reported by the verifiers:", BODY))
+                story.append(table(defect_rows, [22, 9, 46, 35]))
         story.append(
             p(
                 "Limits of this independence, stated plainly (decision D-023): tests, tools, reviews and verifications were produced by sub-agents instructed by the coordinator of this one session. During the second rework a usage limit of the service stopped several sub-agents in the middle of their tasks; their unfinished work was completed by the coordinator or by sub-agents of another model. There was no third review round.",

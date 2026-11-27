@@ -146,8 +146,12 @@ contract_extensions:
      consumed_by: [S01, S06, S07, S11, S12], change_request: CR-003,
      requirements: [G08-06, G08-09, S09-ASG-05]}
   - {id: CX-12, name: Run configuration document / data digests / run catalogue / experiment and holdout bookkeeping / split specification,
-     proposed_by: [S10], consumed_by: [S04, S09, S11, S12], change_request: CR-003,
-     requirements: [S10-DEL-03, S10-DEL-04, S10-ACC-07, S10-ACC-09, S09-DEL-01]}
+     proposed_by: [S10, S01], consumed_by: [S04, S09, S11, S12], change_request: CR-003,
+     requirements: [S10-DEL-03, S10-DEL-04, S10-ACC-07, S10-ACC-09, S09-DEL-01],
+     must_define: [run configuration document, digest of every input stream (with session 01, which owns the tick store),
+                   run catalogue, experiment / trial / holdout bookkeeping, split specification as a record,
+                   enforcement that a model scores only data after the end of its training information
+                   (out of sample; shared helper gie.contracts.causality.is_out_of_sample)]}
   - {id: CX-13, name: Feed status record, proposed_by: [S01], consumed_by: [S06, S07, S08, S11],
      change_request: CR-003, requirements: [S01-ASG-08, S11-ASG-10, G08-06]}
   - {id: CX-14, name: Latency summary record, proposed_by: [S01], consumed_by: [S06, S07, S11, S12],
@@ -165,12 +169,16 @@ contract_extensions:
      must_define: [decimal and 64-bit integer values as strings (never parsed as doubles), labels for simulated /
                    unavailable / unvalidated values]}
   - {id: CX-18, name: Reservation life-cycle record, proposed_by: [S08], consumed_by: [S07],
-     change_request: CR-003, requirements: [S08-ASG-03, S08-ACC-06]}
+     change_request: CR-003, requirements: [S08-ASG-03, S08-ACC-06],
+     must_define: [states RESERVED / CONSUMED / RELEASED / EXPIRED, reason code of a release,
+                   the gateway check that refuses an entry whose reservation is no longer RESERVED]}
   - {id: CX-19, name: Adapter reconciliation queries / journal checkpoints / ledger eviction / raw tick storage,
      proposed_by: [S07], consumed_by: [S01, S10], change_request: CR-003,
      requirements: [S07-ASG-07, S07-ASG-08, S01-ASG-02, G08-04, G08-05],
-     must_define: [reconciliation rule for a report that changes a reduce-only order,
-                   raw source timestamp with its offset and source symbol kept in the tick store (not in Tick)]}
+     must_define: [adapter queries by which a restarted engine learns the state of its orders,
+                   raw source timestamp with its offset and source symbol kept in the tick store (not in Tick),
+                   lookup of a tick by (source, seq) so that session 12 can re-price a fill from
+                   fill_tick_source / fill_tick_seq when ticks are not journaled]}
   - {id: CX-20, name: Feature dictionary and per-kind identity table of evidence, proposed_by: [S02],
      consumed_by: [S03, S04, S09], change_request: CR-008,
      requirements: [S02-DEL-01, S02-ACC-02, G02-02],

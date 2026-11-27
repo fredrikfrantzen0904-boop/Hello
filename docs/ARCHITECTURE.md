@@ -156,8 +156,11 @@ demo accounts included (D-011). Layers:
 Honest limit: Python cannot stop a person who rewrites the lock module or writes an adapter whose
 `submit` method does something other than simulate. Those are caught by the scan, the pins, the
 tests (`tests/gie/core/test_routing_lock.py`, `tests/gie/contracts/test_guarded_adapter.py`,
-`tests/gie/tools/test_check_live_lock.py`) and by review - not by the runtime. There is no way to
-unlock by configuration.
+`tests/gie/tools/test_check_live_lock.py`) and by review - not by the runtime. The module
+allow-lists of the guard and of the record framework read names that code declares about itself;
+code that builds a namespace with `exec` can declare any name, which is why the scan forbids
+`exec`, `eval`, `compile` and dynamic imports in GIE code. There is no way to unlock by
+configuration.
 
 ## 7. Order of events, determinism and replay
 
@@ -245,6 +248,14 @@ sub-agents that did not write the code under test (D-023, with its stated limits
   CR-005), among them the step driver without which no subsystem can be integrated.
 * The look-ahead guard of the journal checks what a producer declares; it does not prove that the
   producer read nothing later. That proof is the prefix-invariance test of each producer.
+* A run declares the standing of its models in its manifest; every record is checked against that
+  declaration, but the declaration is not yet checked against the model registry (extension
+  CX-10 and the registry of session 09).
+* The requirement lock and the schema lock detect a change of what they hash; neither is anchored
+  in the git history, and neither covers the code of validators and identity functions - those
+  are covered by tests.
+* The read-only clock and scheduler views cannot be redirected, but Python cannot hide the object
+  behind them; reaching for it is a review matter.
 * Independence of tests and reviews was obtained by separating roles among sub-agents of one
   coordinating session (D-023); it is not the independence of a second party.
 * No subsystem behaviour (data, strategy, prediction, decision, reflex, execution, risk, learning,

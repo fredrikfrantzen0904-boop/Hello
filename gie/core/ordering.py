@@ -19,9 +19,10 @@ causal by construction (a record is always published after the records it was
 derived from) and it is reproducible because processing is deterministic.
 
 :class:`EventKey` and :func:`merge_ordered` are therefore used to *merge input
-streams* and, as a fallback, to order records of different journals; the ranks
-of GIE-produced records follow the data flow so that this fallback is causal
-for a chain that shares one instant.
+streams* and for nothing else.  The key is not a causal order of derived
+records: two records of one instant can sort against their derivation (a
+position snapshot has a lower rank than the order request it refers to), so
+records of a run are ordered by their journal, never by this key.
 
 **Per-stream sequence.**  Every stream numbers its records with consecutive
 integers.  :class:`SequenceTracker` classifies each arrival as accepted, an
@@ -217,6 +218,12 @@ class SequenceTracker:
         self._check_arguments(stream, last_seq, "restore", last_time_ns)
         if stream in self._last:
             raise SequenceConflictError("stream is already tracked and cannot be restored", stream=stream)
+        if recent is not None and not isinstance(recent, dict):
+            raise ContractValidationError(
+                "recent must be a mapping of sequence number to fingerprint",
+                stream=stream,
+                actual_type=type(recent).__name__,
+            )
         entries = dict(recent or {})
         for seq, fingerprint in entries.items():
             self._check_arguments(stream, seq, fingerprint, None)

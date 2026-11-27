@@ -130,7 +130,7 @@ One lifecycle event of one order at the simulated venue. Stream: ``order_event/<
 | `last_fill_price` | price > 0 \| null | no | USD per troy ounce | Price of this fill; set only on fill events. |
 | `average_fill_price` | price > 0 \| null | no | USD per troy ounce | Volume-weighted average price of all fills so far. |
 | `last_fill_cost_amount` | money >= 0 \| null | no | account currency | Commission and fees charged for this fill. |
-| `fill_tick_source` | feed id \| null | no |  | Feed of the quote this fill was matched against (stream tick/<symbol>/<source>). |
+| `fill_tick_source` | feed id \| null | no |  | Feed of the quote this fill was matched against (stream tick/<source>/<symbol>). |
 | `fill_tick_seq` | sequence number \| null | no |  | Sequence number of that quote in its stream; with fill_tick_source it makes every fill traceable to the market data that produced it. |
 | `reason_code` | reason code \| null | no |  | Reason of a rejection, cancellation, expiry or reconciliation; on the request of an EXIT or protective order, the reason for it (e.g. RATCHET, TIME_EXIT, EMERGENCY). |
 

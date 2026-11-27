@@ -279,9 +279,12 @@ foundation itself costs per record and per step on the build machine is in
   used.  Replaying the same inputs reproduces the same identifiers.  In the hashed canonical JSON
   a decimal part is written as the object `{"d": "<canonical decimal string>"}`, so the decimal
   `1` and the text `"1"` can never produce the same identifier.
-* **Validated.**  Every identity function validates every part with the vocabulary of the
-  corresponding record field (codes, symbols, enumeration values, integers within 64 bits, finite
-  decimals) and fails with a `GieError`; it never returns an identifier for malformed input.
+* **Validated.**  Every identity function validates the *form* of every part with the pattern of
+  the corresponding record field (codes, symbols, integers within 64 bits, finite decimals; an
+  enumeration-valued part such as side, horizon, timeframe or entry style is checked for the form
+  of an enumeration value, not against the enumeration itself - the record that carries the
+  identifier checks the value) and fails with a `GieError`; it never returns an identifier for
+  malformed input.
 * **Scope.**  An identifier that contains the run (`rsk`, `rsv`, `ord`, `brk`, `oev`, `pos`, and
   `run` itself) names one thing among all runs.  The identifiers of market events, evaluation
   slots and models are derived from what they describe and are deliberately equal across runs.
@@ -438,7 +441,12 @@ appended it MUST pass, in this order:
 3. **provenance against the manifest** - the data origin of a record is not better than the run's;
    a tick comes from a declared source and, in a replay, lies inside the declared data period; a
    candidate or plan is scored by a model that the manifest pins for that instant, with exactly
-   the pinned status;
+   the pinned status; a fill names a quote that is part of the journal, where the run journals
+   that tick stream.  The pins themselves are the run's configuration: they are built from the
+   model registry by the composition root when the run starts (extension CX-10), and the journal
+   does not compare them with registry entries that happen to be journaled in the same run - a
+   correct comparison needs the registry status *at the pinned period*
+   (`ModelRegistry.status_at`), which is session 09's registry;
 4. **time** - when the journal has the clock of the run, the ordering time of the record equals
    the step instant; tick receive times never decrease across all tick streams; a derived record
    is refused before any input was journaled and when its watermark `as_of_time_ns` lies beyond
@@ -557,7 +565,12 @@ under `tests/gie/golden/` and must decode with every later reader of the same MA
 check does not decode a directory of another MAJOR (the current reader refuses it by design) and
 lists it instead - reading it is the job of the migration tool below.  A golden *run trace*
 (`tests/gie/golden/traces/run_story.jsonl`, one coherent synthetic run in journal order) must be
-accepted by the journal in order, so the lifecycle rules are locked together with the messages.
+accepted by the journal in order.
+What the lock does **not** cover: the code of the validators and of the identity functions.  The
+identity and behaviour texts published in the schemas (`x-gie-behaviour`) are written by hand
+next to that code, and the golden trace only shows that a valid run is still accepted.  A change
+that alters a validator without changing a schema or a golden message is caught by the tests
+(which pin the identifiers of the samples and the refusal of every rule), not by the lock.
 
 A MAJOR bump makes older journals unreadable by the new code.  It therefore requires a migration
 tool and a journal cut-over, decided and recorded by the coordinator (not needed for 1.x).
@@ -587,6 +600,13 @@ place; once the status is `APPROVED` every change requires a version bump and a 
 | An approval states the aggregates it rests on (equity, open and pending risk, margin, gap stress) and never exceeds free margin; unknown is never approved | RSK-13 | G04-02, G04-04, G04-05, G04-07 |
 | The stop of a GIE position is never wider than its initial stop; an open position names its working protective order or states why it has none | POS-4, POS-9 | G04-11, G04-12 |
 | A GIE position holds at most what its entry order opened | POS-2 | G04-09, G04-10 |
+
+Not enforced yet, and stated so that nobody assumes it: there is **no minimum distance** between
+entry and stop (a stop one price step from the entry is a valid plan) - the broker's minimum stop
+distance is instrument data and arrives with extension CX-04; and a candidate's `Destination` may
+lie on either side of the market (the touch probability of an adverse level is information), while
+a plan *target* is always on the winning side (PLN-6) and carries a predicted probability only
+when it names the destination it is (`Target.scenario`).
 | A record cannot depend on market data received after it was created; retrieved historical cases are prior-only | CAUSAL-1, EVD-11, CND-11 | G10, S04-ASG-06, S10-ACC-02 |
 | Missing evidence has null scores; inactive evidence has zero scores | EVD-3, EVD-5 | S02-ACC-03 |
 | Every identifier that can be recomputed from the record is verified | section 4 | S00-ASG-22 |
@@ -610,7 +630,7 @@ history.
 | At most one working protective stop per position; working exit and take-profit volume stays within the open volume | `LifecycleLedger`, `validate_reducing_order` | G04-12, S07-ASG-05 |
 | A plan's stop never moves away from the entry between revisions and, for a resting entry, the risk distance never grows; final statuses are final | `validate_plan_transition` | G04-11 |
 | The identity of a market event never changes between evidence revisions; the stage never goes back | `validate_evidence_transition` | G02-02 |
-| A model reaches ACTIVE only through SHADOW; one ACTIVE version per model family; a rollback names the version of the same family that was active immediately before and needs a new approval; components are registered before the composite | `validate_model_transition`, `RegistryHistory` | G07-09, G07-10, G07-11 |
+| A model reaches ACTIVE only through SHADOW; one ACTIVE version per model family; a rollback names the version of the same family that was active immediately before and needs a new approval; components are registered before the composite.  When the only version a family ever had active is rolled back, the family has **no** active model: nothing is re-activated automatically and a consumer that needs the model fails closed | `validate_model_transition`, `RegistryHistory` | G07-09, G07-10, G07-11 |
 | Within a trading day, across all risk producers of the run: an emergency halt stays in force, the profit floor never decreases or disappears, the reference equity is frozen | `advance_daily_risk` | G05-04, G05-06 |
 | A record refers only to records that are already part of the run: candidate to evidence, plan to candidate (a target that names a scenario is that destination of the candidate), risk decision to plan, entry order to plan and approval, reduce-only order to a position whose entry order has filled, position to its entry order and protective order | `LifecycleLedger` (referential) | S10-ACC-02, G10 |
 
@@ -618,11 +638,14 @@ history.
 position and can only reduce or protect it: opposite side, volume within the open volume, a
 protective stop that covers the whole open volume and is never looser than the position's stop.
 While an entry order fills in parts the protective stop follows the open volume, so its volume may
-change in a replacement; the volume of an entry never grows.  The open-volume rule is checked
-when an order is requested (gateway) and when the simulated broker creates one; a later *report*
-of the simulated broker that changes the volume of a reduce-only order (a reconciliation) is
-recorded as the fact it is and is not re-checked against the open volume - the reconciliation
-rules belong to extension CX-19.  The trigger side is normative: a
+change in a replacement; the volume of an entry never grows.  The rules hold for requests and
+for reports of the simulated broker alike, because the simulated broker is GIE code (run ledger,
+every event of a reduce-only order): its volume never exceeds what the entry order has filled;
+the reduce-only orders of a position together never fill more than the entry order has filled;
+and while volume is still open, a report can neither cancel the working protective stop (unless
+an authorised cancel request is pending) nor change its volume so that it no longer covers the
+open volume.  A report that breaks one of these is refused and returned in `PollResult.errors`.
+The trigger side is normative: a
 protective stop of a long position triggers at or below its trigger price on the bid, of a short
 position at or above it on the ask.
 

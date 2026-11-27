@@ -177,7 +177,7 @@ class ReplayClock:
 
     * Time changes only through :meth:`advance_to` / :meth:`advance_by`.
     * Moving backwards raises :class:`ClockRegressionError`; advancing to the
-      current instant is a no-op.
+      current instant does not move time but fires the timers that are due at it.
     * Timers registered with :meth:`call_at` fire during an advance in
       ``(due time, registration order)`` order.  While a timer runs, ``now_ns``
       equals that timer's due time, so a callback can never observe time later
@@ -499,8 +499,9 @@ class ClockView:
     A component can read time; it cannot advance a replay clock or begin a paper
     step, and it cannot point the view at another clock (the view is immutable).
     Only the run loop holds the clock itself.  Honest limit: Python has no
-    private attributes - ``object.__setattr__`` or reading ``_clock`` reaches
-    behind the view; the static scan forbids both in GIE code (CI).
+    private attributes.  ``object.__setattr__`` is forbidden in GIE code by the
+    static scan; reading the private attribute (``view._clock``) reaches the
+    clock behind the view and is detected by no tool - it is a review matter.
     """
 
     __slots__ = ("_clock",)

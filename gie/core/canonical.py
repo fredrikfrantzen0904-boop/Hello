@@ -21,8 +21,11 @@ Everything else follows JCS:
 Consequence for readers: the JSON text does not say whether a number without a
 fraction was an integer or a double.  :func:`strict_loads` returns an ``int`` for
 every integer literal inside the signed 64-bit range and a ``float`` for a
-larger literal that is exactly a double (for example ``1e20`` written as
-``100000000000000000000``); the contract field type decides how it is used.
+larger literal that is the canonical rendering of a double - the digits this
+writer produces for it, for example ``1e20`` written as
+``100000000000000000000``.  A larger literal with any other digits is refused,
+also when its value happens to be exactly representable; the contract field
+type decides how a number is used.
 
 Decimal quantities (prices, volumes, money) never appear as JSON numbers; they
 are carried as canonical decimal *strings* (see :func:`decimal_to_str`).

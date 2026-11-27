@@ -1,0 +1,771 @@
+{
+ "description": "Final verification inside the session.  Six verifiers who wrote neither the code, the tests nor the dispositions checked the dispositions of review round 2 and every round-1 item that an earlier verification had found unfinished, against the repository as it was while the last test maintenance was still in progress (verdicts: done, partial, not_done, cannot_verify).  Their reports are kept verbatim, except that local paths of the build machine are shortened.  'responses' holds what the coordinator did about every item that was not found done, and 'new_defects' what was done about every additional defect; a response is the coordinator's own statement and was not verified again.",
+ "groups": [
+  {
+   "group": "l2b",
+   "new_defects": [
+    {
+     "description": "The committed tree is not testable and the working tree is not green, while README.md:9 says Session 00 is submitted for review. At HEAD f516499, four test modules fail to import because the tests still call identity.run_id with three arguments after the change to run_id derivation. The working tree, with uncommitted test edits, has 23 failures, e.g. test_schema_lock::test_published_identity_rule_of_the_run_id_is_the_manifest_hash, test_compatibility::test_a_new_optional_field_with_x_gie_since_is_minor_in_a_generated_top_level_schema and test_gie_registers::test_sync_on_a_copy_of_the_real_register_changes_only_the_intended_entries.",
+     "file": "tests/gie/contracts/test_journal.py",
+     "reproducer": "git archive HEAD | tar -x -C $(mktemp -d); in that directory run python -B -m pytest -p no:cacheprovider -q --collect-only, which ends '11519 tests collected, 4 errors' with ERROR tests/gie/contracts/test_causality.py, test_clock_reading.py, test_journal.py and test_run.py: TypeError: run_id() takes 2 positional arguments but 3 were given. In <repository>, python -B -m pytest -p no:cacheprovider -q gives '23 failed, 12351 passed, 5 skipped'.",
+     "response": "Timing: the verifier examined the repository while the maintained test suites and the new scan rules were still uncommitted work in progress. They are committed since (commit 455ec8a and later); the full suite passes and the scans pass on the reviewed commit (see the CI results of this package).",
+     "severity": "major"
+    },
+    {
+     "description": "The field documentation of OrderEvent.fill_tick_source, generated into specifications/contracts/FIELDS.md:133, gives the tick stream as tick/<symbol>/<source>. The real stream name, and FIELDS.md:65 itself, is tick/<source>/<symbol>. A QA tool following this text to trace a fill to its quote would look up the wrong stream.",
+     "file": "gie/contracts/order_event.py",
+     "reproducer": "order_event.py:440 reads 'Feed of the quote this fill was matched against (stream tick/<symbol>/<source>).' Running python -B -c \"import tests.gie.samples as S; from gie.contracts.ordering import stream_name; print(stream_name(S.tick()))\" prints tick/fixture/XAUUSD.",
+     "response": "Fixed: the field text names the stream tick/<source>/<symbol>; schema and field reference regenerated.",
+     "severity": "minor"
+    }
+   ],
+   "scope": "round 2, findings L2B-01..20 (backtesting, dashboard, quality assurance lens)",
+   "summary": "Twenty dispositions checked against the repository while it was changing. HEAD moved from e65f73a to f516499 during the check, and the working tree has uncommitted edits by someone else in about 35-42 files. Verdicts: 13 done, 7 partial, none not_done.\n\nMost serious first:\n(1) L2B-17, partial. CI cannot pass at the committed state or in the working tree. At HEAD f516499, pytest stops with 4 collection errors (TypeError: run_id() takes 2 positional arguments) in test_causality, test_clock_reading, test_journal and test_run. In the working tree, pytest gives 23 failed, 12351 passed. tools.check_docs_paths fails on both because reviews/session_00/evidence/benchmark.json is named but missing. README still says 'submitted for owner review'.\n(2) L2B-07, partial. Model labels are still self-declared, now in the manifest. A SYNTHETIC_FIXTURE run can pin a model as ACTIVE and validated=True while that model's own ModelVersion entry in the same journal says RESEARCH and validated=False. The journal accepts that entry, an ACTIVE candidate and a RiskDecision with quality_validated=True.\n(3) L2B-14, partial. Deleting a requirement from the matrix, from requirements_lock.json and from minimum_requirement_count together still gives 'registers valid: 583', exit 0. 'Append-only' is not checked against git history.\n(4) L2B-12, partial. Out-of-sample scoring is not enforced (the journal accepts a candidate scored by a model trained on data up to T0+30 d), and the claimed CX-12 record of that enforcement is not written anywhere.\n(5) L2B-18, partial. The 're-pricing for session 12' item is recorded nowhere. The journal also accepts a fill whose fill_tick_seq (999) was never journaled.\n(6) L2B-08, partial. ClockView and SchedulerView can be bypassed through their private attributes (ctx.clock._clock.advance_to and ctx.scheduler._scheduler.advance_to both move the replay clock).\n(7) L2B-06, partial. CX-12 does not name session 01 as the disposition says.\n\nThe other thirteen were confirmed by re-running the reviewers' reproducers. One thing to know for L2B-04: with a clocked journal (D-024), two reports with different receive times returned in one poll are refused. Each report has to come back in its own step, as the gateway's documentation says.\n\nEverything ran read-only with python -B and -p no:cacheprovider. Mutations were done only in my own temporary copies (git archive and tar), which have been removed.",
+   "verdicts": [
+    {
+     "evidence": "The tools exist and are run by tools/ci.py (check_docs_paths is step 92). But `python -B -m tools.check_docs_paths` on the working tree and on a git-archive of HEAD f516499 prints 'DP001 `reviews/session_00/evidence/benchmark.json` is named but does not exist' at docs/ARCHITECTURE.md:234, docs/DECISION_LOG.md:397 and specifications/SHARED_CONTRACTS.md:270, ending 'check_docs_paths: FAILED - 3 violation(s)'. pytest at HEAD f516499: '11519 tests collected, 4 errors' (TypeError run_id() takes 2 positional arguments but 3 were given). pytest on the working tree: '23 failed, 12351 passed, 5 skipped'.",
+     "id": "L2B-17",
+     "remaining": "Neither the committed tree nor the working tree passes the documented CI: the docs-paths gate fails and the test suite errors at collection or fails. README.md:9 still says 'submitted for owner review' although the CI run would show FAILED. ci_results.json and the review PDF are absent (the procedure produces them later).",
+     "verdict": "partial"
+    },
+    {
+     "evidence": "The journal provenance checks work (journal.py:194-233). Evidence claiming BROKER_FEED or HISTORICAL in a fixture run is refused. A candidate marked ACTIVE for a model pinned as RESEARCH is refused ('model_status is the status the run manifest pins'). A candidate for an unpinned model is refused.",
+     "id": "L2B-07",
+     "remaining": "Labels are still self-declared, now in the manifest. Reproducer: m=S.run_manifest(models=(S._pinned(S.MODEL_ID, ModelStatus.ACTIVE, validated=True),)); the journal accepts m, then S.model_version() (status RESEARCH, validated False), tick, evidence, candidate and plan with model_status ACTIVE, and S.risk_decision(plan, quality_validated=True, quality_model_version_id=S.MODEL_ID) - all accepted (journal_seq 1..6). The pin is never compared with the registry entry in the same journal. CX-10 in the dependency graph defers 'refusing to start a run whose pins disagree' to the step driver, but the disposition calls this item fixed.",
+     "verdict": "partial"
+    },
+    {
+     "evidence": "On a scratch copy, each of the reviewer's edits now fails `tools.gie_registers validate` with exit 1: deleting S12-ASG-05 ('locked ... missing from the requirements matrix'), rewording its text ('words that are not in its source_clause' and 'changed since it was locked'), setting source_clause 'Anything.' ('not verbatim'), and status verified/approved without contributions.",
+     "id": "L2B-14",
+     "remaining": "Append-only is not anchored. Deleting S12-ASG-05 from requirements_matrix.yaml, from requirements_lock.json (atoms) and lowering minimum_requirement_count to 583 in one edit gives 'registers valid: 583 requirements', exit 0. Nothing compares the lock with the base commit (gie_registers.py:117 'Nothing here reads ... git'; check_protected_paths protects only Start).",
+     "verdict": "partial"
+    },
+    {
+     "evidence": "RunManifest.models is a schedule: RunModel has valid_from_ns/valid_until_ns, MAX_RUN_MODELS=4096 and a canonical sort (run.py:43,191-205); a manifest with 200 models builds. The journal refuses a candidate whose model has valid_from_ns=T0+60s ('a scoring model is one the run manifest pins and is valid for the record's watermark').",
+     "id": "L2B-12",
+     "remaining": "As the disposition says, out-of-sample scoring is not enforced. A model with training_information_end_ns=T0+30d is accepted in the registry stream and scores a candidate at T0 (journal_seq 4; is_out_of_sample returns False). The claimed record is missing: grep for 'out of sample' or 'out-of-sample' in docs/, SHARED_CONTRACTS.md and dependency_graph.yaml finds nothing. CX-12 (dependency_graph.yaml:148-150, CHANGE_REQUESTS.md:122) names a 'split specification' but not enforcement.",
+     "verdict": "partial"
+    },
+    {
+     "evidence": "OEV-9 requires fill_tick_source and fill_tick_seq on every fill (order_event.py:521-528). OEV-16 requires reference_price on every MARKET order (578-585). OEV-13 refuses a fill at or after valid_until_ns (_expiry_rules, 290-292).",
+     "id": "L2B-18",
+     "remaining": "(a) The 'recorded' part (re-pricing fills against the tick store as a QA helper of session 12) is in no document: grep for re-pric, reprice, fill_tick or 'tick store' in docs/, dependency_graph.yaml and SHARED_CONTRACTS.md finds nothing. (b) The new reference is not checked even where it could be: with run_story records 0-7 and a PARTIALLY_FILLED fill rewritten to fill_tick_seq=999 (tick seq 1 never journaled), MemoryJournal accepts it.",
+     "verdict": "partial"
+    },
+    {
+     "evidence": "RunContext wraps clock and scheduler in ClockView/SchedulerView (run.py:333-334), and hasattr(ctx.clock,'advance_to') is False, so the reviewer's exact reproducer fails. RecordListener exists (interfaces.py:100-113). SHARED_CONTRACTS section 10 states the step, cascade, round-bound and failed-sink rules. CX-10 is in dependency_graph.yaml:139-144 and CHANGE_REQUESTS.md:120.",
+     "id": "L2B-08",
+     "remaining": "The views are not read-only in effect, and ClockView's docstring claims a component cannot 'reach the object that can'. With RunContext(clock=c, scheduler=c) on a ReplayClock: ctx.clock._clock.advance_to(T0+3600s) moved the clock and fired a +60 s timer, and ctx.scheduler._scheduler.advance_to(T0+7200s) moved it as well.",
+     "verdict": "partial"
+    },
+    {
+     "evidence": "run_id is derived from every field (RUN-1, derive_run_id, run.py:258-292). Changing seed, code_commit, data_end_ns, data_sources, data_origin, contract_set_version, parameters_sha256, code_tree_dirty, models, risk_regime or role each gives a different run_id, and claiming the old run_id fails RUN-1. code_tree_dirty, derive_seed (ids.py:118) and RunContext.seed_for exist. The journal refuses a tick from an undeclared source and one received after data_end_ns.",
+     "id": "L2B-06",
+     "remaining": "The disposition says the configuration document and data digests are recorded as 'CX-12, session 10 with 01', but CX-12 (dependency_graph.yaml:148-150) has proposed_by [S10] and consumed_by [S04, S09, S11, S12]: session 01, owner of the tick store needed for per-stream digests, is not named.",
+     "verdict": "partial"
+    },
+    {
+     "evidence": "MemoryJournal (journal.py:235-272). Ran: (A) manifest, then S.evidence() -> FutureDataError (input_watermark_ns=None). (B) with ReplayClock at T0+10s, evidence stamped T0 -> OutOfOrderError 'stamped earlier than the step'. (C) an XAGUSD tick at T0-50s after an XAUUSD tick at T0+10s -> OutOfOrderError 'tick receive times never decrease across the streams'. After a ClockReading only, evidence is accepted (watermark advanced). SHARED_CONTRACTS.md:449-451 states that the guard judges declared watermarks and that prefix invariance remains mandatory.",
+     "id": "L2B-01",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "evidence": "advance_daily_risk (risk_decision.py:347-397) applied by LifecycleLedger per run_id (ledger.py:370,402). Ran the reviewer's sequence with a LifecycleLedger and S.risk_decision. A NORMAL decision after floor 5000 is refused ('profit floor, once established, may not disappear'). Floor 5000 -> 1000 is refused ('may not decrease'). Approval at exactly the floor fails RSK-7. After an EMERGENCY_HALT, approvals by producer 'risk.gate_b' are refused ('halt stays in force'); a decision on the next trading day is admitted; decision time going backwards is refused.",
+     "id": "L2B-02",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "evidence": "In a mktemp dir with an injected opener whose write raises OSError(28) after writing 10 bytes: publish -> JournalCorruptError and len stays 1; a retry is refused as 'failed state'; a second FileJournal on the path -> ConfigError 'already open for writing'. Reopening -> 'incomplete line (torn write)'. open_for_restart repaired 10 bytes and the next publish got journal_seq 1. JournalReader has no publish.",
+     "id": "L2B-03",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "evidence": "guarded.py: the gateway takes the journal and uses journal.ledger only. Requests are journaled before the adapter call (lines 214-215). Reports go through _admit_report, which lets a BROKER SUBMIT_REQUESTED in (233-241). ledger.py:234-243 checks broker protection against the entry's attached prices. With an unclocked journal, ACCEPTED and PARTIALLY_FILLED returned by one poll were both admitted. Tests test_the_run_story_runs_through_the_gateway and test_a_broker_created_protective_stop_enters_through_poll_after_the_entry_filled cover the documented flow. Note: with a clocked journal (D-024), reports with different receive times in one poll are refused (OutOfOrderError, then SEQ.GAP), so an adapter must return each report in its own step, as the gateway's documentation requires.",
+     "id": "L2B-04",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "evidence": "RUN-2 (run.py:225-237) forbids created_time_ns in a replay, so manifests built at different times are identical. Candidate and TradePlan model_status must equal the pinned status (journal.py:212-225, verified with an ACTIVE-on-RESEARCH candidate -> refused). Reopening a FileJournal and publishing a freshly built manifest returned 0 (idempotent) instead of SEQ.CONFLICT. D-027 is in docs/DECISION_LOG.md:529, and the RunManifest docstring states that a restart continues with the journal's manifest.",
+     "id": "L2B-05",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "evidence": "CX-05 in dependency_graph.yaml now reads 'AccountSnapshot ... and daily risk state', consumed_by [S05, S06, S07, S10, S11, S12], with must_define covering daily state and result, profit floor, reference equity, breach flags, emission on every state change, at every trading-day boundary and periodically, and the sequence rule advance_daily_risk. docs/CHANGE_REQUESTS.md:115 lists the same consumers.",
+     "id": "L2B-09",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "evidence": "journal.publish, codec.to_json and to_wire each raise UnknownContractError (a GieError) for StaleDataError(...).to_dict(), the error object, a dict and None. SHARED_CONTRACTS.md section 5 item 5 says there is no error record yet (CX-11) and that encoding a non-record is an UnknownContractError. CX-11, CX-13 (S01) and CX-14 (S01, consumers 06/07/11/12) are in dependency_graph.yaml:145-157 and CHANGE_REQUESTS.md:121-124. Line 345 still says details 'can always be journaled' (wording only).",
+     "id": "L2B-10",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "evidence": "RiskRegime is in run.py:59-71. RUN-5 allows UNCONSTRAINED_RESEARCH only with role RESEARCH. Role and risk_regime are part of the run_id hash: role PRIMARY and risk regime UNCONSTRAINED_RESEARCH each gave a run_id different from the base. CX-12 records the run catalogue and experiment / trial / holdout bookkeeping (dependency_graph.yaml:148; CHANGE_REQUESTS.md:122).",
+     "id": "L2B-11",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "evidence": "JournalReader (journal.py:558-632) opens the file read-only per poll, takes no lock, has no publish, verifies each complete line, ignores a torn last line (poll returned 0 new entries after a partial line was appended, length still 3), follows appended records and keeps only offsets in memory. The dashboard rule is AR009 in tools/check_architecture.py. In a scratch copy, a dashboard/gie module importing MemoryJournal and FileJournal produced two AR009 violations. Note: AR009 is an uncommitted working-tree change; check_architecture at HEAD f516499 covers only AR000-AR007 and has no read_only rule.",
+     "id": "L2B-13",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "evidence": "tests/conftest.py records commit, tree_dirty and collection_errors (lines 54-68, 183-189). In a scratch copy, sync-evidence with exit_status 2 -> 'the test run did not complete (nothing was written)', exit 1. A hand-edited AT-S10-ACC-02 'passing' with a nonexistent evidence file -> validate exit 1. tools/ci.py runs sync-evidence --check (lines 123-127) and records working_tree_clean at start and after, with the evidence directory ignored (198-254). build_review.check_evidence refuses evidence from another commit or a dirty tree (lines 484-502). .gitignore has ci-evidence/ and out/.",
+     "id": "L2B-15",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "evidence": "routing_lock.register_simulated_adapter checks the declared module, the registering frame's module and each method's __globals__ (lines 268-308). The reviewer's class defined in __main__ with __module__='gie.execution.simulated' is refused ('may only be registered from the execution or backtesting packages'). tools/check_live_lock.py, specifications/lock_pins.json and tests/gie/tools/test_check_live_lock.py exist, and check_live_lock reports OK (LL000-LL015). A class built with exec() under forged globals still registers at runtime; ARCHITECTURE.md section 6 states this limit and the scan forbids exec in GIE code.",
+     "id": "L2B-16",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "evidence": "In dependency_graph.yaml contract_extensions: S10 is a consumer of CX-02, CX-04, CX-05, CX-08 and CX-09. S11 consumes CX-05, CX-08 and CX-11..CX-16. S12 consumes CX-05, CX-11, CX-12, CX-14 and CX-17. CX-10..CX-16 exist with owners, and CX-15 (S10 run results) is consumed by S09.",
+     "id": "L2B-19",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "evidence": "CX-17 'Display projection of records for browsers' (proposed_by S11, consumed_by S12) has must_define 'decimal and 64-bit integer values as strings (never parsed as doubles)' (dependency_graph.yaml) and appears in CHANGE_REQUESTS.md:127. SHARED_CONTRACTS section 7 states 'Canonical JSON MUST NOT be parsed with a double-precision JSON parser (JSON.parse ...)', pointing to CX-17.",
+     "id": "L2B-20",
+     "remaining": "",
+     "verdict": "done"
+    }
+   ]
+  },
+  {
+   "group": "l2e",
+   "new_defects": [
+    {
+     "description": "Broker reports can grow or fill a reduce-only order (here the protective stop) far beyond the open volume of its position, and the ledger admits it. The only volume bound is on the first event of the order (_check_new_order, against the entry's cumulative fill). REPLACED/RECONCILED from the adapter are never checked against the position. This contradicts SHARED_CONTRACTS 9.2 ('a protective stop that covers the whole open volume', enforced by 'LifecycleLedger, validate_reducing_order') and interfaces.ExecutionAdapter ('A reduce-only order never fills beyond the open volume of its position'). A 5-lot SELL fill on a 0.20-lot long becomes journaled history: an opposite exposure no plan or approval authorised.",
+     "file": "gie/contracts/ledger.py",
+     "reproducer": "On a clean HEAD copy: from tests.gie import samples as S; story=S.run_story(); L=LifecycleLedger(); admit every non-Tick/non-RunManifest record of story[:15]; big = story[15] rebuilt with volume_lots=Decimal('5.00') (new order_event_id via S.order_event) -> L.admit(big) returns True; then a FILLED event of that stop with cumulative_filled_lots=last_fill_lots=5.00 -> L.admit returns True; L.order(stop).cumulative_filled_lots == 5.00 while L.position(pos).volume_lots == 0.20. The same goes through GuardedExecutionAdapter.poll, which publishes into this ledger.",
+     "response": "Fixed: see L2E-01 / SF-06.",
+     "severity": "major"
+    },
+    {
+     "description": "At the committed HEAD (e65f73a) the test suite does not run. Collection fails with 8 errors (identity.run_id() called with 3 positional arguments in test_candidate, test_causality, test_clock_reading, test_evidence, test_identity, test_journal, test_run, test_trade_plan). test_guarded_adapter builds the gateway with GuardedExecutionAdapter(..., ledger=ledger), which the reworked constructor no longer accepts (TypeError). The rework-2 behaviour (one ledger per run, PollResult, broker originator, reduce-only aggregates, open_for_restart) therefore has no committed, passing tests, contrary to the CI gate in docs/ARCHITECTURE.md 9 and the CLAUDE.md rule that a green run is not obtained by stale tests. Uncommitted edits to these test files were being made in the working tree while I worked.",
+     "file": "tests/gie/contracts/test_guarded_adapter.py",
+     "reproducer": "git archive HEAD | tar -x -C $(mktemp -d); cd there; python -B -m pytest -p no:cacheprovider -q -> 'Interrupted: 8 errors during collection'; python -B -m pytest -p no:cacheprovider -q -x tests/gie/contracts/test_guarded_adapter.py -> TypeError: GuardedExecutionAdapter.__init__() got an unexpected keyword argument 'ledger'.",
+     "response": "Fixed: see L2E-01 / SF-06.",
+     "severity": "major"
+    },
+    {
+     "description": "The 'judged by where the registering code and the method functions really live' check (docstring lines 17-20, register_simulated_adapter lines 248-314) reads frame/function globals['__name__'], which any code chooses freely with exec(). The same frame check guards Record subclass creation (rework_2_change_notice section 12). The module allow-list is therefore still self-declared.",
+     "file": "gie/core/routing_lock.py",
+     "reproducer": "python -B - <<'EOF'\nsrc='''from gie.core.routing_lock import ExecutionVenue, register_simulated_adapter\n@register_simulated_adapter\nclass Spoof:\n    __slots__=()\n    venue=ExecutionVenue.SIMULATED\n    sends_real_orders=False\n    def submit(self,r): pass\n    def cancel(self,r): pass\n    def replace(self,r): pass\n    def on_tick(self,t): pass\n    def poll(self): return []\n    def open_positions(self): return []\n'''\ng={'__name__':'gie.execution.not_a_real_module'}; exec(src,g)\nfrom gie.core.routing_lock import RoutingGuard, RunMode\nRoutingGuard(RunMode.PAPER).authorize(g['Spoof']()); print('passed')\nEOF  -> prints 'passed'; the module is not in sys.modules.",
+     "response": "Limit, recorded: see L2E-15.",
+     "severity": "major"
+    }
+   ],
+   "scope": "round 2, findings L2E-01..20 (reflex, execution, risk lens)",
+   "summary": "I checked all twenty L2E items against commit e65f73a. Someone else was editing gie/, docs/, specifications/ and tests/ in the working tree while I worked, so I ran every experiment on a clean copy of HEAD made with git archive into my own temp directory, which I deleted afterwards. Nothing in the repository was touched.\n\nResults: 17 done, 3 partial, none not_done.\n\nMost serious problems first:\n1. L2E-15 (via L2B-16), partial. Adapter registration can still be spoofed. Running the class source with exec() and a fake globals name ('gie.execution.not_a_real_module') gets an adapter registered, and RoutingGuard('PAPER').authorize() passes, although that module does not exist. The same trick creates a Record subclass named 'tests.spoof'. The 'tests.' prefix is also still accepted unconditionally. Layer 4 (tools/check_live_lock.py, lock_pins.json and its test) does exist and passes at HEAD.\n2. New defect. The committed test suite does not run at HEAD. pytest stops at collection with 8 errors (identity.run_id() called with 3 arguments). test_guarded_adapter.py still builds the gateway with a `ledger=` keyword that no longer exists. So no committed test exercises the reworked gateway, ledger or journal behaviour. Updated tests were being edited, uncommitted, in the working tree.\n3. L2E-01 partial, plus a related new defect. A partially filled entry now works: the 28-record run trace goes through the gateway and journal, and a position that grows before its fill is refused. But a protective stop's volume is not checked against the position when the broker reports it. A RECONCILED report can raise the stop to 5.00 lots on a 0.20-lot position, and a FILLED of 5.00 lots is then admitted. The gateway only checks volume on engine requests.\n4. L2E-12 partial. CX-18 is recorded, but no repository text says the gateway check comes with it. That appears only in the disposition.\n\nConfirmed by running code:\n- **Gateway (L2E-02, 04, 05):** one ledger per run; a re-sent request is forwarded again. Poll results are judged one by one: an older duplicate is counted and dropped, a conflicting one is returned as an error, and later reports are kept. The gateway reads plan and position from the ledger. It refuses an exit on a CLOSED position, exit plus take-profit volume above the open volume, a second protective stop, and cancelling the stop of an open position.\n- **Order events (L2E-03, 06, 07, 08):** broker-created stops enter through poll and are refused before the entry fills, and a protective stop cannot expire. A single writer is documented (D-025, ProtectionPort), and seq is compared only within one producer. All four cancel races are accepted, and a second pending replace is refused as documented. Fills that gap through the stop are accepted.\n- **Positions, risk, journal (L2E-09, 10, 11, 13, 18, 20):** a peak can carry the receive time of the quote that made it. Within a trading day the profit floor cannot disappear or fall, a halt holds across producers, and reference equity is frozen. RSK-8 and RSK-13 reject over-commitment and missing aggregates. fraction_of(104.00, 99987.33) is exact. A RECONCILED event can carry a fill with its cost. Two replays produce identical journals (created_time_ns is null for replay). open_for_restart removes a torn tail (22 bytes) and keeps the open order.\n- **Checked in code and documents (L2E-14, 16, 17, 19):** the per-step commit, the per-step benchmark and the stated limits; trigger side, max_slippage and take-profit targets; protective_client_order_id and ledger.plan; CR-007.",
+   "verdicts": [
+    {
+     "evidence": "Layer 4 exists at HEAD: tools/check_live_lock.py, specifications/lock_pins.json and tests/gie/tools/test_check_live_lock.py. `python -m tools.check_live_lock` on the HEAD snapshot prints 'OK - 93 Python files scanned'. register_simulated_adapter (routing_lock.py:248-314) now also checks _calling_module() and function.__globals__['__name__'].",
+     "id": "L2E-15",
+     "remaining": "Both new checks read f_globals['__name__'], which is self-declared just like __module__. Running the adapter class with exec(src, {'__name__': 'gie.execution.not_a_real_module'}) registers it and RoutingGuard(RunMode.PAPER).authorize(instance) passes, although the module is not in sys.modules. The same exec trick with __name__='tests.spoof' creates a Produced/Record subclass. The 'tests.' prefix is still accepted unconditionally (ALLOWED_ADAPTER_MODULE_PREFIXES, routing_lock.py:68). The reviewer's other suggestions (module in sys.modules, file under the package directory, getattr(module, qualname) is the class) are not done.",
+     "verdict": "partial"
+    },
+    {
+     "evidence": "validate_position_transition (position.py:397-413) lets initial_volume_lots grow, with volume growing only by as much. The ledger (ledger.py:276-281) refuses a position larger than the entry's cumulative fill: admitting position revision 1 (0.50 lots) before the FILLED event raises 'a position holds at most what its entry order has filled'. The golden trace run_story (PARTIALLY_FILLED 0.20, then FILLED 0.50) passes through the gateway and journal; poll returned 4 and 2 events, the second with one duplicate. Partial fill followed by cancel is also admitted.",
+     "id": "L2E-01",
+     "remaining": "The claim that the stop's volume follows the position 'checked against the position' holds only for engine REPLACE_REQUESTED requests at the gateway. A broker RECONCILED report changing the stop's volume is not checked against the position (_check_no_added_risk does not bound reduce-only volume; _check_new_order runs only on the first event). Reproducer: ledger fed run_story()[:15], then the stop's RECONCILED event with volume_lots=5.00 is admitted, then FILLED with cumulative_filled_lots 5.00 is admitted while the position holds 0.20 lots. The trace has one partial and one final fill, not 'submit -> partial -> partial -> filled'. The committed tests do not run at HEAD (see new defects).",
+     "verdict": "partial"
+    },
+    {
+     "evidence": "CX-18 'Reservation life-cycle record' is in specifications/dependency_graph.yaml:159 and docs/CHANGE_REQUESTS.md:128. The RiskGate docstring (interfaces.py:148-160) says what happens to a reservation is learned from the order events and that the record is an S08 extension. 'Already enforced' holds: an ENTRY must have attempt 0 and an id derived from decision_id (order_event.py _origin_and_identity), and validate_entry_authorization raises StaleDataError after valid_until_ns.",
+     "id": "L2E-12",
+     "remaining": "The disposition says 'the gateway check is added with it', but neither CX-18 (no must_define, consumed_by only S07) nor the CHANGE_REQUESTS row ('reservation rules are the design task of session 08') records that the gateway must refuse an entry whose reservation is no longer RESERVED. The states RESERVED/CONSUMED/RELEASED/EXPIRED and a reason code for release() are not recorded either.",
+     "verdict": "partial"
+    },
+    {
+     "evidence": "guarded.py: the gateway takes the journal (no ledger of its own); submit publishes then forwards (lines 210-211). On the HEAD snapshot a second gw.submit of the same request reached the adapter again (calls: two 'submit' entries, journal length unchanged). The rule is normative in SHARED_CONTRACTS 9.3 step 3 and D-021.",
+     "id": "L2E-02",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "evidence": "poll() returns PollResult(events, duplicates, errors) and handles each report on its own (guarded.py:256-278). Run: poll of [old duplicate ACCEPTED, FILLED, stop RECONCILED] gave events=2, duplicates=1, errors=(). A conflicting re-delivery gave events=0 and one GIE.SEQ.CONFLICT error, without aborting the batch.",
+     "id": "L2E-04",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "evidence": "The gateway reads plan, decision and position from the ledger, newest plan revision only (guarded.py:187-209). validate_reducing_order takes protective= and other_reducing_lots=. Runs on a journal at the reduced position (0.25 open): EXIT 0.25 accepted; a second EXIT 0.25 and a TAKE_PROFIT 0.25 refused with 'working exit and take-profit orders together do not exceed the open volume'; EXIT 0.50 refused; a second PROTECTIVE_STOP refused; an EXIT on the CLOSED position refused 'the position is not open'. Reduce-only semantics are stated in SHARED_CONTRACTS 9.2/9.3 and in ExecutionAdapter's docstring.",
+     "id": "L2E-05",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "evidence": "OrderEvent.originator exists, with OEV-15. poll admits a BROKER SUBMIT_REQUESTED (guarded.py:236-243), and the ledger requires a filled entry and the attached price (ledger.py:218-243): a broker stop before the entry fill is refused. Position.protective_client_order_id and unprotected_reason exist (POS-9). Run: EXPIRED on a working protective stop is refused with 'a protective stop never expires'.",
+     "id": "L2E-03",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "evidence": "D-025 and the OrderEvent docstring state that order events have one writer (session 07). ProtectionPort (interfaces.py:234-250) has tighten_stop and exit. SHARED_CONTRACTS section 1 lists '07 execution (the only writer)' and shows reflex going through ProtectionPort. validate_order_transition compares seq only when the producer is the same (order_event.py:~760).",
+     "id": "L2E-06",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "evidence": "ORDER_TRANSITIONS includes PENDING_CANCEL with ACCEPTED, REJECTED, REPLACED and REPLACE_REJECTED. Runs: a late ACCEPTED or REJECTED after CANCEL_REQUESTED is admitted; a fill whose event_time_ns is 2 ms before the cancel request is admitted; REPLACED and REPLACE_REJECTED after a cancel issued while a replace was pending are admitted; a second REPLACE_REQUESTED while one is pending is refused, as the OrderEvent docstring now states (one outstanding replacement).",
+     "id": "L2E-07",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "evidence": "OEV-11 (_protection_geometry) uses only requested prices. Runs: a BUY LIMIT 2649.80 with stop 2647.80 filled at 2647.00 is admitted; a MARKET entry filled exactly at its stop 2650.05 is admitted; S.position(average_entry_price=2647.00) with initial stop 2647.80 constructs (POS-4 now checks only that the stop does not widen).",
+     "id": "L2E-08",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "evidence": "peak_time_ns is the receive time of the quote that made the peak (position.py:202-206, 385-389). Run: a snapshot at T0+60s whose peak is stamped T0+30s is accepted. Snapshot cadence is in the Position docstring; the order 'simulated broker first, then position keeping, then the reflex engine' and RecordListener are in interfaces.py and SHARED_CONTRACTS 10. CX-04 must_define includes 'executable net P&L of a position from a quote'.",
+     "id": "L2E-09",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "evidence": "advance_daily_risk is keyed by run_id in the ledger. Runs: PROFIT_PROTECTION with floor 5000, then a NORMAL decision without floor, is refused ('may not disappear'); a lower floor 2000 is refused; the same from producer risk.gate_b is refused; a different reference equity is refused; a halt followed by an approval from another producer is refused. CX-05 must_define lists the daily state, floor, reference equity and per-transition emission.",
+     "id": "L2E-10",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "evidence": "RSK-8 (_within_surplus) and RSK-13 (_aggregates_stated) are in risk_decision.py. Runs: surplus 1200 with open 1200, pending 1200 and risk 1200 violates RSK-8; a null equity or gap stress violates RSK-13; margin required 5000 against free 100 violates RSK-13; an approval exactly at the floor violates RSK-7.",
+     "id": "L2E-11",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "evidence": "_fill_consistency lets RECONCILED carry fill fields and cost; run: WORKING -> RECONCILED FILLED with last_fill_cost_amount 2.00 is admitted. ledger.open_positions() exists (ledger.py:132). The gateway refuses a report with receive_time_ns later than now, and the docstring tells the adapter to schedule its own wake-up. CX-19 records the adapter queries, checkpoints and eviction.",
+     "id": "L2E-13",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "evidence": "RecordSink.commit (interfaces.py:94) and FileJournal(fsync=False).commit() (journal.py:514) exist. tools/benchmark_foundation.py has _step_cases (tick + position + stop tightening, MemoryJournal and FileJournal with one fsync per step). docs/ARCHITECTURE.md section 10 states the in-memory limit and the measurements. CX-19 covers checkpoints, eviction and raw-tick storage.",
+     "id": "L2E-14",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "evidence": "The OrderEvent docstring and SHARED_CONTRACTS 9.2 state the trigger side (SELL against bid, BUY against ask). OrderEvent.max_slippage is immutable and validate_entry_authorization checks it equals plan.max_entry_slippage (authorization.py:113) and that an attached take profit is one of plan.targets (:109-112). The order broker -> position keeping -> reflex is in SHARED_CONTRACTS 10 step 2.",
+     "id": "L2E-16",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "evidence": "Position.protective_client_order_id exists (position.py:164) and the ledger checks it names a working stop of that position (ledger.py:282-299). SHARED_CONTRACTS section 1 lists 06 as a TradePlan consumer; LifecycleLedger.plan and newest_plan exist.",
+     "id": "L2E-17",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "evidence": "RiskDecision has daily_pnl_amount and profit_floor_amount; RSK-7 and RSK-8 decide on amounts; RSK-9 requires fractions from gie.core.canonical.fraction_of (floor for P&L, ceiling for floor and risk, 12 digits). Run: fraction_of(104.00, 99987.33, round_up=True) = 0.001040131785, and a decision with reference equity 99987.33 constructs.",
+     "id": "L2E-18",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "evidence": "docs/CHANGE_REQUESTS.md:187-202 has CR-007 (OPEN): exposure gross/net, correlated risk, base size and quality value as new optional RiskDecision fields (MINOR) from session 08, which reads the candidate through the ledger meanwhile, as the disposition says.",
+     "id": "L2E-19",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "evidence": "RUN-2 makes created_time_ns null for REPLAY (run.py:216-239). Run: two MemoryJournals of run_story() give identical canonical_lines. A FileJournal with a torn tail: plain open raises JournalCorruptError; FileJournal.open_for_restart removed 22 bytes (repaired_bytes=22), kept 8 records with 1 open order, and republishing the manifest returned 0 (no conflict).",
+     "id": "L2E-20",
+     "remaining": "",
+     "verdict": "done"
+    }
+   ]
+  },
+  {
+   "group": "r1a",
+   "new_defects": [],
+   "scope": "round 1, open items of groups RM, RB and DI",
+   "summary": "I checked the 20 RM/RB/DI items that the round-1 verification had left not done. 11 are now done: RM-02, RM-17, RM-19, RB-06, RB-10, DI-01, DI-03, DI-04, DI-06, DI-15, DI-21. 7 are partial: RM-22, RB-03, RB-09, DI-02, DI-05, DI-10, DI-25. 2 are not done: RM-21 and RB-02, because every one of the 584 requirements is still not_started and reviews/session_00/status_patch.yaml does not exist. RM-22 is fixed only in the uncommitted working tree: the extra test markers are not in HEAD. The working tree has uncommitted changes to tests and tools that I did not make, and I judged the repository as it stands on disk. I found no new reproduced defect beyond what the verdicts record. Nothing in the repository was modified; scratch work ran with python -B and -p no:cacheprovider, plus one temporary directory that was removed afterwards.",
+   "verdicts": [
+    {
+     "evidence": "specifications/source/OWNER_DIRECTIVE_2026-11-27.md:5 now reads \"requirements `OWN-01` .. `OWN-27`\", which matches the matrix (584 requirements, last OWN-27). OWN-15 holds the verbatim sentence. `sha256sum -c SHA256SUMS` passes for every PDF (the directive .md is not in that list).",
+     "id": "RM-02",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "evidence": "specifications/baselines/claims.yaml:28,36,44 are now keyed to G09-11, G09-12 and G09-13. docs/DECISION_LOG.md:604 U-05 lists 'G09-02, G09-11, G09-12, G09-13, G09-07, G09-08'. The G09-02 note now names G09-11, G09-12 and G09-13 as split-off siblings.",
+     "id": "RM-17",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "evidence": "tools/gie_registers.py:910 `words_not_in_clause` is applied in validate at :989-992, and tests/gie/tools/test_gie_registers.py:3459 and :3501 cover it (9 passed). Reproduced: 'Aggregate margin (into risk).' on G04-05 reports ['into']. The coordinator wording is gone: M-DOC-01 is the verbatim header/footer, G04-15/16 read 'Monotonic profit ratchet.'/'Fast profit ratchet.', OWN-22 says 'me'. `validate` exits 0 with no text defects. Limitation: the check works word by word, so 'Treat the owner as...' on OWN-22 passes because 'owner' occurs elsewhere in the clause.",
+     "id": "RM-19",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "evidence": "In-memory Counter over specifications/requirements_matrix.yaml gives {'not_started': 584}, and every entry has contributions []. M-AUTH-01, G01-11, G03-13 and OWN-15 carry 'Informational' notes but are still not_started. reviews/session_00/status_patch.yaml, which README.md:22 and :47 name, does not exist. `python -B -m tools.gie_registers validate` exits 0 with the NOTE that B-001's 12 requirements must be blocked or partial 'when statuses are set'.",
+     "id": "RM-21",
+     "remaining": "Nothing of the remaining part was done. No status or contribution is set, the informational clauses are not marked not_applicable, and no status patch exists.",
+     "verdict": "not_done"
+    },
+    {
+     "evidence": "D-011 (docs/DECISION_LOG.md:186) and tools/ci.py (lock step S00-ACC-04 with M-AUTH-19, M-DIR-07, COM-11, OWN-14) now name all sibling ids. M-DIR-01 has a note pointing to OWN-07 and G01-01 one pointing to G06-07. The working-tree tests/gie/core/test_routing_lock.py:68 marks every test with G08-03, G08-10, M-AUTH-13, M-AUTH-19, OWN-14, M-DIR-07 and COM-11, with a corrected docstring. But `git show HEAD:tests/gie/core/test_routing_lock.py` still has only (\"G08-03\",\"G08-10\",\"M-AUTH-13\",\"M-AUTH-19\",\"OWN-14\") at :67: the marker fix is an uncommitted change.",
+     "id": "RM-22",
+     "remaining": "Commit the marker change to test_routing_lock.py: as committed, M-DIR-07 and COM-11 are still not credited by any test.",
+     "verdict": "partial"
+    },
+    {
+     "evidence": "All 584 statuses are not_started, so the 12 requirements of B-001 are not blocked or partial. `validate` still prints 'no requirement has a status yet, so this does not fail' and exits 0. reviews/session_00/status_patch.yaml is missing. The validator rules tying open blockers to status exist, as reported before.",
+     "id": "RB-02",
+     "remaining": "The statuses that should reflect B-001, CR-001, CR-002 and D-001/D-002 are not set and no Session 00 contribution is recorded. CI still passes with the matrix unchanged.",
+     "verdict": "not_done"
+    },
+    {
+     "evidence": "There is now one start rule: dependency_graph.yaml:11-29 has start_gate ('contract_only dependencies never delay a start') and a separate extension_gate (consumers start with their wave but write no code against the type). docs/WORKTREES.md:17-29 and the CR-003 body (docs/CHANGE_REQUESTS.md:101-108) say the same. `required_before_start_of` is gone. CX-06 is proposed by S01 only (consumed by S03) and CX-09 by S04 (consumed by S09/S10). But the CR-003 heading at docs/CHANGE_REQUESTS.md:88 still reads 'Additional shared contracts are needed before later sessions can start'.",
+     "id": "RB-03",
+     "remaining": "Correct the CR-003 heading. It contradicts the adopted rule that consuming sessions start with their wave.",
+     "verdict": "partial"
+    },
+    {
+     "evidence": "tools/check_architecture.py is committed (HEAD version has AR007 ownership coverage) and runs in tools/ci.py:82. `python -B -m tools.check_architecture` prints 'OK - ... 231 tracked files owned'. In a temp copy of HEAD with git init, adding unowned_file.txt prints 'AR007 tracked file is not owned by any session'. docs/WORKTREES.md:24-29 rule 2 now lists gie/__init__.py, gie/app, .github/, README.md, .gitignore, .gitattributes, tests/conftest.py, tests/gie/samples.py, golden, core, contracts and tools tests.",
+     "id": "RB-06",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "evidence": "The matrix note on S06-ACC-06 now reads 'each needs its own marked test and both must be reported; the status is the worse of the two', in line with S06-ACC-02, S11-ACC-02 and S12-ACC-02. But specifications/acceptance_tests.yaml AT-S06-ACC-06 still has the old note 'Two measures (p99; max): both must be reported.', while the other three register entries carry the rule.",
+     "id": "RB-09",
+     "remaining": "Align the AT-S06-ACC-06 note in acceptance_tests.yaml. The rule is still prose only, though the disposition did not claim a check.",
+     "verdict": "partial"
+    },
+    {
+     "evidence": "Notes are now present: S12-ASG-02 'Two objects (code; tests); the status is the minimum over both.' S12-ASG-03, S12-ASG-04, S12-ASG-07 and S02-ASG-08 have the same 'minimum over both' notes (read from requirements_matrix.yaml).",
+     "id": "RB-10",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "evidence": "dependency_graph.yaml CX-06 is 'Observation with release vintage / news and calendar events / futures data', proposed_by [S01], consumed_by [S03], requirements [S01-ASG-12], must_define [release vintage, futures last and volume, contract month, expiry and roll]. docs/CHANGE_REQUESTS.md:116 names the futures data too. Under extension_gate a CX is the proposing session's first deliverable, so it comes before S01 implements S01-ASG-12, and S03 writes no code against it before integration.",
+     "id": "DI-01",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "evidence": "WORKTREES.md rule 1 now has the extension gate: S02, as a consumer of CX-01/CX-02, writes no code against Candle or the calendar before they are integrated. This matches dependency_graph.yaml gates. CX-01 must_define lists open/close instant, availability instant, price series, stream name and rank, quiet-interval rule and DST. But CX-01 still omits the revision rule for late ticks and the CandleSink interface. CX-02 (BrokerCalendar) has no must_define: is_open(t), session(t) with overlapping sessions, next close/rollover/weekend and holiday-table version are recorded nowhere.",
+     "id": "DI-02",
+     "remaining": "Record the missing CX-01 items (late-tick revision, CandleSink) and the calendar query content of CX-02.",
+     "verdict": "partial"
+    },
+    {
+     "evidence": "Re-run at the same instant on ReplayClock(now) and PollingScheduler(PaperClock()): delay MAX_TIME_NS-now is accepted by both. MAX_TIME_NS-now+1 raises ContractValidationError on both, and -1 raises ClockRegressionError on both. Both reject 2**63. The previously failing test_call_after_beyond_the_largest_instant_behaves_the_same_in_replay_and_paper passes (pytest -k 'beyond_the_largest or feed_silence': 42 passed).",
+     "id": "DI-03",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "evidence": "Using a Tick from samples.run_story(): feed_silence_ns(tick, float(receive-30)), True and 2**63 each raise ContractValidationError. An int now before receive raises FutureDataError, and receive+5 returns 5. The four tests named in the remaining part pass.",
+     "id": "DI-04",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "evidence": "SHARED_CONTRACTS.md:301-310 now says the per-kind identity levels and anchor are 'the first deliverable of session 02, together with the location and canonical format of the feature dictionary (CR-008), and no engine may emit evidence before the coordinator has integrated it'. CR-008 item 2 (docs/CHANGE_REQUESTS.md:215-218) records location and format. But CR-008 does not mention the identity table and says sessions 02 and 04 propose 'with their first review packages', not as a first deliverable. There is no contract_extensions entry for the feature dictionary, so the machine-readable extension_gate does not cover it.",
+     "id": "DI-05",
+     "remaining": "Record the identity table and feature dictionary consistently, as a CX entry or in CR-008 with the 'first deliverable / no evidence before integration' gate. The contract still cannot detect engines that disagree on identity flags.",
+     "verdict": "partial"
+    },
+    {
+     "evidence": "SHARED_CONTRACTS.md section 11 (:712-715) now states the slot rule. After each evaluation an engine emits one current record per declared slot (engine, kind, symbol, timeframe, anchor): ACTIVE or CONTRA, INACTIVE or MISSING. A consumer treats a slot without an unexpired current record as MISSING. The engine-scoped evaluation_slot_id is at :311-313.",
+     "id": "DI-06",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "evidence": "dependency_graph.yaml CX-07 is now consumed_by [S05, S08], with docs/CHANGE_REQUESTS.md:117 '03 | 05, 08 | ... account rules (U-04)'. Integration gate (2) makes S08 wait for it, and the account rule is tied to U-04 / session 08 (DECISION_LOG.md:267). But CX-07 has no must_define. The fail-closed content (a MISSING state when the calendar is unavailable means no new risk, plus kind, window and valid_until) is recorded nowhere: grep for 'restriction' in CHANGE_REQUESTS, DECISION_LOG and SHARED_CONTRACTS finds only the table row and the list mention at :60.",
+     "id": "DI-10",
+     "remaining": "Record the required content of CX-07, at least the fail-closed MISSING state. Also say which session owns the calendar side as distinct from the account rule.",
+     "verdict": "partial"
+    },
+    {
+     "evidence": "SHARED_CONTRACTS.md:716-722 (section 11, provisional) now states the paragraph. The pending limit is anchored at the close of the breakout candle and names the breakout in related_market_event_id, with exactly one PENDING_LIMIT level and one directional score (EVD-12). The proposed stage/state mapping is ARMED / TRIGGERED / COMPLETED / INVALIDATED / EXPIRED at valid_until_ns. An ACTIVE pending_limit with stage NONE is still accepted (reproduced with dataclasses.replace on the samples variant), but the mapping is explicitly provisional, to be confirmed by S02.",
+     "id": "DI-15",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "evidence": "(d) SHARED_CONTRACTS.md:723-725 says CANDLE_CLOSE's price series is fixed by CX-01, and CX-01 must_define includes 'price series (bid / ask / mid)'. (f) gie/contracts/evidence.py:435-439 refuses a stage that goes back. tests test_the_stage_never_goes_back and the CONTRA/closing variant pass (pytest -k 'stage_never_goes_back or pending': 50 passed).",
+     "id": "DI-21",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "evidence": "Storage encoding freedom is at SHARED_CONTRACTS.md:521. The third-party allow-list rule is at dependency_graph.yaml:211-217, and the feature dictionary location/format is now in CR-008 item 2. But the disposition still cites CR-003, which contains neither. Keeping the raw source timestamp / applied UTC offset and the broker symbol name is still stated nowhere: grep for 'offset|source symbol|raw source' finds only the feed-delay definitions at SHARED_CONTRACTS.md:148 and :243.",
+     "id": "DI-25",
+     "remaining": "State whether S01 keeps the raw source timestamp/offset and source symbol, in the Tick or in its own store. Correct the disposition's CR-003 reference to CR-008 and the dependency graph.",
+     "verdict": "partial"
+    }
+   ]
+  },
+  {
+   "group": "r1b",
+   "new_defects": [
+    {
+     "description": "RegistryHistory.check (line ~468-469) raises a bare TypeError for a non-ModelVersion argument, so validate_registry_history and RegistryHistory.admit do too. This contradicts the CLAUDE.md code rule 'Errors derive from gie.core.errors.GieError' and change notice section 13, which says identity and contract functions fail with a GieError only.",
+     "file": "gie/contracts/model_version.py",
+     "reproducer": "cd <repository> && python -B -c \"from gie.contracts.model_version import RegistryHistory; RegistryHistory().check(None)\" -> TypeError: the model registry holds ModelVersion records. Also: python -B -m pytest -p no:cacheprovider -q tests/gie/contracts/test_model_version.py -> 4 failed (test_the_registry_refuses_what_is_not_a_model_version_with_a_gie_error[none|text|wire-dict|tick]). Note: that test file has uncommitted working-tree changes.",
+     "response": "Fixed: a non-ModelVersion argument is a contract error (GieError).",
+     "severity": "minor"
+    },
+    {
+     "description": "Section 14 says run_story() returns 28 records including a 'model' record, but the trace has no ModelVersion: record 0 is the RunManifest, followed by ticks, evidence, candidate and so on. The model is only pinned in the manifest, so the story never exercises the journal's registry stream.",
+     "file": "reviews/session_00/rework_2_change_notice.md",
+     "reproducer": "cd <repository> && python -B -c \"import sys; sys.path.insert(0,'.'); from tests.gie import samples as s; print([type(r).__name__ for r in s.run_story()].count('ModelVersion'))\" -> 0",
+     "response": "Fixed: the change notice no longer says so.",
+     "severity": "minor"
+    }
+   ],
+   "scope": "round 1, open items of group PD",
+   "summary": "I checked the 9 PD items that the round-1 verifier had left not fully done. 6 are now done: PD-06, PD-08, PD-09, PD-19, PD-20 and PD-23. 3 are partial: PD-04, PD-05 and PD-17.\n- PD-04: the role-based status gate is real, but the model status a run manifest pins is never checked against the model registry.\n- PD-05: the disposition still says \"required before wave 3\", but the recorded gate is S09, S10 and S11.\n- PD-17: whether a destination may lie on the adverse side of the entry is still not stated.\nI found two new minor defects:\n- RegistryHistory.check raises a bare TypeError instead of a GieError. Four tests in the uncommitted working-tree version of tests/gie/contracts/test_model_version.py fail on this.\n- The change notice says run_story() contains a model record, but it does not.\nI changed nothing in the repository. Every experiment was an inline `python -B` script, and pytest ran with `-p no:cacheprovider`.",
+   "verdicts": [
+    {
+     "evidence": "Fixed: gie/contracts/authorization.py:31-35 EXECUTABLE_MODEL_STATUSES and :79 refuse an entry whose plan.model_status is not allowed for the run role (REJECTED, RETIRED and ROLLED_BACK never pass). gie/contracts/journal.py:212-224 refuses a Candidate or TradePlan whose model is not pinned in the manifest or whose model_status differs from the pinned status. D-026 (docs/DECISION_LOG.md:508-523) records the rule as the proposal for U-17. Reproducer (inline script): I put s.model_version() (RESEARCH) and a revision 1 with status REJECTED right after the manifest of s.run_story(), and published everything into a MemoryJournal. All records were accepted; the ledger then reports the model REJECTED, yet the candidate, the plan scored RESEARCH, the approval and the ENTRY order were all accepted. Without any ModelVersion record the run is accepted too. validate_entry_authorization(..., role=RESEARCH) passes.",
+     "id": "PD-04",
+     "remaining": "model_status is now checked against the manifest pin, but the pin itself (RunModel.status / validated, gie/contracts/run.py:76-110) is never reconciled with the registry. A run can pin a model that was never registered, or that its own journal shows as REJECTED, and still reach an approved entry. Whether this should be enforced or is accepted as pin-at-configuration semantics is not stated.",
+     "verdict": "partial"
+    },
+    {
+     "evidence": "(2) Done: specifications/dependency_graph.yaml:124-127 CX-08 must_define lists 'one ranking pass (candidates considered, scores, selected plan or no trade), candidate-level rejections with reason codes'; CR-003 (docs/CHANGE_REQUESTS.md, paragraph after the table) says the same. (3) Done: specifications/SHARED_CONTRACTS.md:364-368 now says a scored candidate that fails a gate is a REJECTED revision; a rejection of a whole ranking pass, or of a candidate that was never scored, has no record yet (CX-08). CandidateStatus.REJECTED exists (gie/contracts/candidate.py:63).",
+     "id": "PD-05",
+     "remaining": "(1) Still unchanged: reviews/session_00/review_round1_dispositions.yaml still says 'required before wave 3', while the recorded gate is consumed_by [S09, S10, S11] with proposer S05 (a wave-3 session). Neither the disposition nor the record was reconciled. PD-05 is not cited anywhere.",
+     "verdict": "partial"
+    },
+    {
+     "evidence": "specifications/dependency_graph.yaml:128-131 CX-09: proposed_by [S04], consumed_by [S09, S10] (S10 is now named), and must_define lists the label specification id, the instant at which a label becomes available (purging), and realised versus counterfactual outcomes of rejected and missed setups. CR-003 says the same. gates.extension_gate (dependency_graph.yaml:22-28) makes the type S04's first deliverable, which covers 'before S04 trains'.",
+     "id": "PD-06",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "evidence": "gie/contracts/model_version.py:494-504 RegistryHistory.check requires rollback_of_model_version_id to equal the family's last ACTIVE version and that version to be ROLLED_BACK. The LifecycleLedger uses RegistryHistory (gie/contracts/ledger.py:76, :338, :376). pytest -k 'rolled_back or rollback or reactivat' on test_model_version.py: 37 passed (it previously failed on this gap). Ledger reproducer: model_lifecycle() then RETIRED then re-ACTIVE citing a never-registered id, both with the reused approval and with a fresh one -> IllegalTransitionError both times.",
+     "id": "PD-08",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "evidence": "Sub-defect (5) is now recorded: docs/CHANGE_REQUESTS.md CR-008 point 3 (raised for PD-23, PD-09, DI-25) says the models of a run are pinned in its manifest (D-026, RunManifest.models), giving replay and paper one consistent view. A registry snapshot API is added only if S04 or S05 shows the need. journal.py:213 enforces the pin for paper as well as replay.",
+     "id": "PD-09",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "evidence": "gie/contracts/trade_plan.py:124-129 Target.scenario (optional) links a target to the candidate's (scenario, label) destination at the same price. The referential ledger enforces it (gie/contracts/ledger.py:317-327). Reproducer: run_story() plan with the 'reversal/prior_high' target moved to 2656.00 -> refused by the run ledger. The reach probability is therefore reachable through the linked Destination.",
+     "id": "PD-17",
+     "remaining": "Whether adverse destinations are allowed is still not stated. The Destination docstring (gie/contracts/candidate.py:89-95) only says 'a price the market may travel to', and no rule or text says whether such a destination may lie on the stop side. The link is optional, so a target without one carries no predicted probability.",
+     "verdict": "partial"
+    },
+    {
+     "evidence": "gie/contracts/interfaces.py:100-111 RecordListener: the run loop delivers every journaled record to subscribed listeners in tier order within the step (this is how candidates reach decision and order events and positions reach reflex and risk). specifications/SHARED_CONTRACTS.md:682-697 step steps 2-3 state the same; dependency_graph.yaml:132-136 CX-10 must_define 'delivery of journaled records to listeners'.",
+     "id": "PD-19",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "evidence": "specifications/dependency_graph.yaml: CX-11 health / error event (:137), CX-14 latency summary record (:145-148), and CX-04 must_define now includes 'cost schedule' with consumed_by [S04, S05, S06, S08, S10] (:107-111). CX-02 consumed_by is [S02, S04, S05, S06, S08, S10] (:101-103). The FeatureDictionary is recorded in docs/CHANGE_REQUESTS.md CR-008 point 2, owned by S02 and S04, with the statement that feature_schema_sha256 is only meaningful once it exists.",
+     "id": "PD-20",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "evidence": "docs/CHANGE_REQUESTS.md CR-008 point 1 (cites PD-23) records that no rule yet relates baseline_r and contributions to expected_net_r, and that S04 proposes the rule (additive with a stated tolerance, or another method) with its first model.",
+     "id": "PD-23",
+     "remaining": "",
+     "verdict": "done"
+    }
+   ]
+  },
+  {
+   "group": "r1c",
+   "new_defects": [
+    {
+     "description": "At the committed HEAD (e65f73a) the test suite does not collect. Eight test modules still call identity.run_id(mode, config_sha, label) with three arguments, but rework 2 changed the signature to run_id(mode, manifest_sha256). So the 'tests with requirement evidence' CI step cannot pass on any committed state. Only the uncommitted working-tree edits fix the calls, and even then 29 tests fail, for example test_guarded_adapter.py::test_the_run_story_runs_through_the_gateway and tests/gie/tools/test_check_live_lock.py::test_real_repository_passes_the_rule[LL015].",
+     "file": "tests/gie/contracts/test_identity.py",
+     "reproducer": "T=$(mktemp -d); git -C <repository> archive HEAD | tar -x -C $T; cd $T && python -B -m pytest -p no:cacheprovider -q tests -> '8 errors during collection', e.g. ERROR tests/gie/contracts/test_identity.py - TypeError: run_id() takes 2 positional arguments but 3 were given (also test_candidate, test_causality, test_clock_reading, test_evidence, test_journal, test_run, test_trade_plan).",
+     "response": "Timing: the verifier examined the repository while the maintained test suites and the new scan rules were still uncommitted work in progress. They are committed since (commit 455ec8a and later); the full suite passes and the scans pass on the reviewed commit (see the CI results of this package).",
+     "severity": "major"
+    },
+    {
+     "description": "Broker reports that remove protection from an open GIE position are admitted. A RECONCILED event that shrinks the working protective stop from the full open volume (0.50) to 0.01, or a CANCELED event for that stop, passes validate_order_transition and the run ledger, so poll() returns clean. This contradicts SHARED_CONTRACTS 9.2 ('a protective stop that covers the whole open volume'; 'the protective stop of an open position cannot be cancelled'). The simulated broker is GIE code, so this is an unguarded path to an unprotected position.",
+     "file": "gie/contracts/ledger.py",
+     "reproducer": "In a copy of the working tree, register tests.gie.contracts.test_guarded_adapter._SimulatedAdapter (exec('register_simulated_adapter(_SimulatedAdapter)', t.__dict__)), then: rig, held, stop = t._holding_rig(); rig.report(rig.next(stop, E.RECONCILED, S.WORKING, volume_lots=Decimal('0.01'), reason_code='FIXTURE_REASON')).clean -> True; the same with rig.next(stop, E.CANCELED, S.CANCELED, reason_code='FIXTURE_REASON') -> True.",
+     "response": "Fixed: see L2E-01 / SF-06.",
+     "severity": "major"
+    }
+   ],
+   "scope": "round 1, open items of group SF",
+   "summary": "I checked the 17 SF items that the first verifier found not fully done (SF-01, 02, 05, 06, 07, 08, 10, 11, 13, 14, 15, 16, 18, 21, 22, 23, 24). Verdicts: 10 done, 7 partial (SF-01, 06, 10, 14, 15, 18, 21), none not_done and none cannot_verify. SF-10 is partial on a documentation gap only.\n\nHow I tested: committed HEAD e65f73a went into one temporary directory (git archive) and a copy of the working tree into another. All runs used python -B with -p no:cacheprovider. Nothing in the repository was written, and both temporary directories have been removed.\n\nThe working tree is being edited by someone else while I worked (uncommitted changes in tests/, in tools/check_live_lock.py, check_architecture.py, check_no_secrets.py and build_review.py, plus untracked baseline files). The git status count went from 35 to 42 lines during my run, and none of those changes are mine. Several remaining gaps (SF-01 file-drop rule LL015, SF-21 rule AR008) exist only in that uncommitted work.\n\nFixes that are real and that I reproduced:\n- Registering an adapter class from __main__ (whose __module__ can be spoofed) is refused.\n- Aliases of the run-mode enum and a tampered _member_names_ raise LiveRoutingLockedError.\n- The gateway reads plan, approval and position from journal.ledger. Withdrawn plans, decisions spoofed under an existing id, entry requests older than their approval, and a second EXIT on the same position are all refused.\n- PLN-14 / OEV-17 refuse a marketable resting entry.\n- advance_daily_risk keeps the daily profit floor across a NORMAL decision, and the floor amount must be > 0.\n- OEV-13 refuses a fill after the entry's expiry.\n- Fixture models are never validated, and models now carry evaluation_data_origin.\n- RegistryHistory runs inside the ledger.\n- The journal refuses origin labels better than the run's.\n- U-18 now has a gate and the full scope.\n- tools/check_no_secrets.py works and covers reviews/.\n\nWhat is still open:\n- **SF-01:** at HEAD the scan has no file-write rule, although DECISION_LOG D-011 already says it has one. In the working tree the new rule LL015 makes the scan fail.\n- **SF-06:** the simulated broker can shrink or cancel a position's protective stop through poll(), against SHARED_CONTRACTS 9.2.\n- **SF-10:** the missing minimum stop distance is recorded as CX-04, but SHARED_CONTRACTS 9.1 still does not say that no minimum is enforced yet.\n- **SF-14:** no approval range is reserved for fixtures, and nothing checks that an ACTIVE model cites a real decision.\n- **SF-15:** what it means to roll back a model that has no parent is still not documented.\n- **SF-18:** check_docs_paths fails, README mentions a PDF that is not there, and CHANGE_REQUESTS describes a baseline_freeze tool that is missing at HEAD.\n- **SF-21:** SHARED_CONTRACTS 3.3 cites a CI rule against the plain freshness helpers that does not exist at HEAD.\n\nNew defect: the committed test suite does not even collect (8 errors).",
+   "verdicts": [
+    {
+     "evidence": "HEAD: specifications/lock_pins.json exists and its hashes match sha256sum of gie/core/routing_lock.py and gie/contracts/guarded.py. The scan is tracked and `python -B -m tools.check_live_lock` printed 'OK - 93 Python files scanned, no violation of LL000-LL014'. tests/gie/tools/test_check_live_lock.py exists and passed 460 tests.",
+     "id": "SF-01",
+     "remaining": "The file-drop channel is still open at HEAD: no rule covers file-system writes, although committed docs/DECISION_LOG.md:217-220 (D-011 amendment) says 'the scan also forbids file-system writes below gie/ outside the journal module'. The rule (LL015) exists only as an uncommitted change to tools/check_live_lock.py. With it the scan is red on the working tree ('gie/contracts/schema_gen.py:202/219/225 LL015 ... FAILED - 3 violation(s)'), and tests/gie/tools/test_check_live_lock.py::test_real_repository_passes_the_rule[LL015] fails.",
+     "verdict": "partial"
+    },
+    {
+     "evidence": "SHARED_CONTRACTS.md:657-660 (9.3) and D-025 define the path: a broker-created stop enters through poll() as SUBMIT_REQUESTED with originator BROKER, and only for a position whose entry order has filled. The gateway accepts it (guarded.py:236-243). samples.run_story() has a broker stop that the journal accepts. In my own rig (story driven until the position is held), gateway.replace() of a tightening REPLACE_REQUESTED on the BROKER stop reached the adapter, and a widening RECONCILED was refused.",
+     "id": "SF-02",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "evidence": "The reproducer is now refused: a __main__ class with __module__='gie.execution.simulated' gets register_simulated_adapter -> LiveRoutingLockedError 'may only be registered from the execution or backtesting packages (or tests) (module=__main__)'. tests/gie/core/test_routing_lock.py passes 482 tests in the working tree (this includes the identity-keyed registry case). Writing directly into routing_lock._SIMULATED_ADAPTER_TYPES still authorises at run time, but that is the limit the disposition declared (sealing declined with a reason). The scan flags it: a planted getattr(rl, '_SIMULATED'+'_ADAPTER_TYPES') in gie/execution gave LL008.",
+     "id": "SF-05",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "evidence": "Points (1) and (2) are fixed. The gateway reads the position from journal.ledger, and the aggregate rule now holds: in a rig with the story held at 0.50 lots, the first EXIT of 0.50 was accepted and the second and third were refused ('working exit and take-profit orders together do not exceed the open volume'). A widening RECONCILED of the stop is refused.",
+     "id": "SF-06",
+     "remaining": "Point (3) is open. Broker reports can still strip protection: in the same rig, poll() of RECONCILED with volume_lots 0.50->0.01 on the working PROTECTIVE_STOP returned clean=True, and so did CANCELED of that stop. This contradicts SHARED_CONTRACTS 9.2 ('a protective stop that covers the whole open volume'; 'the protective stop of an open position cannot be cancelled').",
+     "verdict": "partial"
+    },
+    {
+     "evidence": "All three points are refused now. (1) test_an_entry_for_a_plan_the_ledger_knows_to_be_withdrawn_never_reaches_the_adapter passes. (2) Publishing a decision with the same decision_id and volume 500 -> 'a risk decision is written once'; an entry of 500 lots through the gateway -> 'order volume does not exceed the granted volume'. (3) A request stamped before the approval, through the gateway and through validate_entry_authorization -> 'the approval before the order'.",
+     "id": "SF-07",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "evidence": "`RunMode.LIVE = RunMode.PAPER`, then assert_live_routing_locked() -> LiveRoutingLockedError 'RunMode vocabulary has been changed'. Appending 'BOGUS' to _member_names_ of RunMode and of ExecutionVenue, and renaming entry 0 to 'LIVE', each raise LiveRoutingLockedError (not KeyError).",
+     "id": "SF-08",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "evidence": "Case P1 is refused now. samples.order_event(limit_price=2700, attached_stop_price=2660) -> OEV-17 'BUY LIMIT <= reference'. samples.trade_plan(entry_price=2700, stop_price=2660) is refused as well, but at PLN-6 (the targets are on the wrong side of the new entry), so this call does not exercise PLN-14 itself. The minimum stop distance is recorded as CX-04 (docs/CHANGE_REQUESTS.md:114, dependency_graph.yaml:107-110 'minimum stop distance').",
+     "id": "SF-10",
+     "remaining": "A stop 1E-12 below the entry still constructs as a TradePlan, which is expected until CX-04 is integrated. SHARED_CONTRACTS 9.1 (line 576) still does not say that no minimum stop distance is enforced yet, which was the documentation gap named in the earlier 'remaining'.",
+     "verdict": "partial"
+    },
+    {
+     "evidence": "advance_daily_risk (risk_decision.py:348-397) keeps a per-day summary across all producers: the floor may not disappear or decrease, and reference_equity_amount and account_currency are frozen. The ledger applies it (ledger.py:370, 402). profit_floor_amount is Opt(Dec(gt='0')) and the fraction is derived from it (RSK-9), so a negative floor cannot be stated. test_the_floor_cannot_be_lowered_by_leaving_and_re_entering_profit_protection_in_one_day and test_reference_equity_and_currency_are_frozen_within_the_day are present, and the full suite run showed no failure in test_risk_decision.py.",
+     "id": "SF-11",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "evidence": "A FILLED event built at valid_until_ns + 1 h for the story's entry is refused at construction: OEV-13 'an order is requested, and fills, strictly before valid_until_ns'. SHARED_CONTRACTS 9.1 line 579 states it, and the gateway requires that the order not outlive its plan or approval (line 640). An approval with valid_until 2^63-1 is still constructible, but an order cannot outlive the gateway's checks.",
+     "id": "SF-13",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "evidence": "A model without training data now carries evaluation_data_origin, and MDL-7 makes it mandatory for ACTIVE. A RULESET made ACTIVE with eval origin SYNTHETIC_FIXTURE -> validated=False; with None -> refused (MDL-7); the fixture ACTIVE sample has validated=False.",
+     "id": "SF-14",
+     "remaining": "The proposed controls are still missing. No approval-reference range is reserved for fixtures. Nothing checks that an ACTIVE record cites an existing approved decision: FIXTURE-OWNER / D-999 with eval origin HISTORICAL yields validated=True. The obligation is only a ModelRegistry docstring for session 09 (interfaces.py:266-269) and is not recorded as a CR or CX.",
+     "verdict": "partial"
+    },
+    {
+     "evidence": "RegistryHistory.check (model_version.py:466-504) requires rollback_of == the family's last ACTIVE version, and that version must be ROLLED_BACK. This rules out an unregistered id, the version itself and another family. It runs in the ledger (ledger.py:338, 376), so the journal path is covered.",
+     "id": "SF-15",
+     "remaining": "Point (3) is open. A first ACTIVE version can go to ROLLED_BACK with no predecessor (MODEL_STATUS_TRANSITIONS ACTIVE -> ROLLED_BACK), but what that means ('no active model, fail closed') is still documented nowhere. A grep for it over model_version.py, SHARED_CONTRACTS.md, FIELDS.md, DECISION_LOG.md and interfaces.py found nothing.",
+     "verdict": "partial"
+    },
+    {
+     "evidence": "The ledger holds a RegistryHistory. test_journal.py::test_a_second_active_version_of_a_model_family_is_refused_by_the_journal and ::test_a_reactivation_with_a_used_approval_is_refused_by_the_journal pass. The gateway has no ledger of its own and uses journal.ledger (SHARED_CONTRACTS 9.3). In my rig, ACCEPTED and PARTIALLY_FILLED of one order in a single poll() -> clean=True, 2 events. The test_transitions.py named in the finding does not exist, but the transition rules are tested in test_ledger.py and test_order_event.py.",
+     "id": "SF-16",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "evidence": "tools/check_docs_paths.py exists and runs in CI (tools/ci.py:92). lock_pins.json and tools/check_protected_paths.py exist.",
+     "id": "SF-18",
+     "remaining": "The check itself is red. At HEAD it reports 5 DP001 violations: tools/baseline_freeze.py, tests/gie/baseline/test_baseline_regression.py and reviews/session_00/evidence/benchmark.json are named but absent. In the working tree it still reports 3 (benchmark.json, which no earlier CI step produces). docs/CHANGE_REQUESTS.md:34 says 'harness built and self-tested' while tools/baseline_freeze.py is not committed (untracked only). README.md:15 says 'reviews/session_00/ (PDF + machine-readable evidence)', but reviews/session_00 holds no PDF.",
+     "verdict": "partial"
+    },
+    {
+     "evidence": "Committed SHARED_CONTRACTS 3.3 now says the 1 s bound is 'a constant ..., not a research parameter' and that components MUST use the *_now helpers, with the plain functions reserved 'for gie.core and tests (CI rule)'.",
+     "id": "SF-21",
+     "remaining": "That CI rule does not exist at HEAD. A planted gie/reflex/probe.py calling is_fresh(..., future_tolerance_ns=10**9) passed both tools.check_architecture and tools.check_live_lock at HEAD, and is_fresh(now 1.0 s, reference 1.5 s, tolerance 1 s) returns True. The rule (AR008) exists only in the uncommitted tools/check_architecture.py.",
+     "verdict": "partial"
+    },
+    {
+     "evidence": "In a fixture run, publishing Evidence relabelled BROKER_FEED -> refused 'no record claims a better data origin than its run'. In a PAPER run with manifest data_origin BROKER_FEED, a SYNTHETIC_FIXTURE tick -> refused 'the run does not claim a better data origin than a tick it uses'. A PAPER run may still declare SYNTHETIC_FIXTURE, but that label is honest and checked against every record.",
+     "id": "SF-22",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "evidence": "docs/DECISION_LOG.md:722-736, U-18 (OPEN) now covers account-state reading and other systems' positions (CX-05), the alternative of an account with trading disabled, and excluding indirect driving of the existing bots. It has an explicit gate: 'must be answered before session 01 connects to any terminal and before the first PAPER run; until then paper runs use recorded or synthetic data only'. dependency_graph.yaml's start_gate does not reference U-18, but the gate is stated with the open item.",
+     "id": "SF-23",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "evidence": "tools/check_no_secrets.py is committed and runs in CI (ci.py:97). It passes at HEAD, and a planted reviews/session_00/evidence/ci_probe.json was reported (SC002, SC006). external_position_id('12345678') and ('acct12345') -> 'must be a configured alias, not an account number'. The external_ref pattern is in force. GieError.details still takes arbitrary text, but that was not part of the proposed change.",
+     "id": "SF-24",
+     "remaining": "",
+     "verdict": "done"
+    }
+   ]
+  },
+  {
+   "group": "r1d",
+   "new_defects": [
+    {
+     "description": "The locked, published behaviour of RunManifest still describes the run_id rule from before rework 2. behaviour.py:65 has IDENTITY_RULES['RunManifest'] = {'run_id': 'run_id(mode, config_sha256, label)'}, and the generated gie/contracts/schemas/RunManifest-1.0.0.schema.json:302 carries the same text under x-gie-behaviour. The actual rule (D-027, change notice section 2, identity.py:14) is run_id(mode, manifest_sha256), where the hash covers every other manifest field. schema_gen --check passes because the text is hand-written and not derived from identity.run_id, so the lock does not catch the mismatch (this is also an instance of DT-08).",
+     "file": "gie/contracts/behaviour.py",
+     "reproducer": "python -B -c \"import inspect; from gie.contracts import identity; from gie.contracts.behaviour import IDENTITY_RULES; print(inspect.signature(identity.run_id), IDENTITY_RULES['RunManifest'])\"  -> (mode: 'object', manifest_sha256: 'str') {'run_id': 'run_id(mode, config_sha256, label)'}; grep -n 'config_sha256, label' gie/contracts/schemas/RunManifest-1.0.0.schema.json -> line 302; python -B -m gie.contracts.schema_gen --check -> 'contract schemas consistent: 10 contracts'",
+     "response": "Fixed: the published identity rule of the run is run_id(mode, SHA-256 of every other field); schemas regenerated.",
+     "severity": "major"
+    }
+   ],
+   "scope": "round 1, open items of group DT",
+   "summary": "I checked the 14 DT items that the round-1 verifier left open, against the working tree as it is now. Another agent was committing and editing during my checks: HEAD moved to f516499 and about 30 files were uncommitted. Results: 7 done (DT-03, DT-06, DT-07, DT-09, DT-12, DT-19, DT-22) and 7 partial (DT-01, DT-05, DT-08, DT-16, DT-18, DT-21). The partial ones are mostly docstrings that were never corrected (gie/core/ordering.py, gie/core/canonical.py, gie/core/clock.py, gie/contracts/_spec.py). Code gaps: identity functions check enum fields only by pattern, not by value; SequenceTracker.restore raises a plain TypeError (not a GieError) for a list; the schema lock does not cover identity functions or validator code. One new defect: the locked RunManifest schema still describes the old run_id rule. All experiments were in memory or in mktemp directories I removed afterwards. Running the 9 relevant test files gave 3 failures, all in tests/gie/contracts/test_compatibility.py, which is uncommitted work in progress; I did not attribute them to anyone.",
+   "verdicts": [
+    {
+     "evidence": "The journal now checks references. Publishing RiskDecision, TradePlan and Candidate before their inputs is refused with IllegalTransitionError ('a candidate refers to evidence that is part of the run', etc.). A report at the same instant as its request is refused ('a report is observed strictly later than the request it follows'). SHARED_CONTRACTS.md 6.1/6.2 (l.391-394, 428-429) now says EventKey is not monotonic in seq inside an order-event stream and must not be used to order derived records across journals.",
+     "id": "DT-01",
+     "remaining": "gie/core/ordering.py:21-24 still says EventKey is a fallback 'to order records of different journals' that 'is causal for a chain that shares one instant'. That is false. Reproducer on samples.run_story(): publish st[:11], then st[12] (Position naming the broker-created protective stop) with decision_time_ns set to st[10].receive_time_ns. The journal accepts it, and ordering_key(position) < ordering_key(st[10]) (rank 30 < 80), so the position sorts before the order it refers to.",
+     "verdict": "partial"
+    },
+    {
+     "evidence": "gie/core/clock.py:328-344 now counts every backward step of the wall source. Wall readings [100,90,91,92,99,100,101,50,102] give (now, regressions) ending in (107,2),(108,2). Readings [100,90,80,85,70] give regressions 1,2,2,3. Time keeps advancing by monotonic pace. SHARED_CONTRACTS.md l.204-207 matches.",
+     "id": "DT-03",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "evidence": "Identity functions now fail with GieError only. NaN, sNaN, Infinity, 1E+999999 and 1E-999999 prices, an anchor of 10**5000, a bool anchor, 'm5', 'Liquidity Sweep!!' and 'xauusd ' are all refused with ContractValidationError (gie/contracts/identity.py:58-87,129-152).",
+     "id": "DT-05",
+     "remaining": "Enumeration parts are checked only against the generic _TERM_RE pattern (identity.py:66), not against the enum values. market_event_id(kind,'XAUUSD','M7',...), opportunity_id('sweep_reversal','SIDEWAYS','FOREVER',[m]) and plan_id(cnd,'BOGUS',0,0) all return identifiers. This contradicts SHARED_CONTRACTS.md:282-284 ('validates every part with the vocabulary of the corresponding record field (... enumeration values ...)') and identity.py:60-61 ('only from parts that a valid record could carry'). There is no Timeframe value check, which the earlier verifier named.",
+     "verdict": "partial"
+    },
+    {
+     "evidence": "SHARED_CONTRACTS.md:285-291 now states the scope by prefix: rsk/rsv/ord/brk/oev/pos/run are global; mev/slot/model ids are equal across runs by design; evd/opp/cnd/grp/pln contain no run and must be keyed by (run_id, id). It points to the per-identifier table in the gie/contracts/identity.py docstring (l.11-40), which now has a 'names one ... in' column ('one run' vs 'everywhere'). Decision D-008 was amended to match (DECISION_LOG.md:144-152).",
+     "id": "DT-06",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "evidence": "gie/core/freshness.py:121-130 grants a tolerance only when clock.mode is ClockMode.SYSTEM. In my run, mode 'REPLAY', 'SYSTEM', None, ClockMode.REPLAY and ReplayClock were all refused with ContractValidationError; only PaperClock was accepted. SHARED_CONTRACTS.md:156-162 redefines end-to-end delay as wall-clock time from the triggering input to the order request (extension CX-14, whose must_define names it). The age of the oldest input is defined separately (decision_time minus that input's as_of_time_ns).",
+     "id": "DT-07",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "evidence": "A golden run trace now exists (tests/gie/golden/traces/run_story.jsonl), and make_golden --check replays it through the journal ('50 files and the run trace (28 records)').",
+     "id": "DT-08",
+     "remaining": "The identity rules are still a hand-written text dict (gie/contracts/behaviour.py:32-66). Replacing identity.plan_id in memory leaves schema_gen.check() == []. Replacing validate_order_transition with a no-op leaves schema_gen.check() == [] and make_golden.check() with 0 problems. So validator code and identity functions are outside the lock, although SHARED_CONTRACTS.md:559-561 says the trace locks 'the lifecycle rules together with the messages' and behaviour.py:7-9 says changing an identity rule changes the schema. The trace is positive-only.",
+     "verdict": "partial"
+    },
+    {
+     "evidence": "PollingScheduler.call_after is now relative to the step instant (gie/core/clock.py:449-451). Reviewer scenario (input at 100 processed at wall 105, call_after(10), next input at 112, poll at wall 115): paper gives [input 100, timer 110, input 112], identical to ReplayClock. call_after(MAX_TIME_NS) is refused with ContractValidationError in both modes. A full record-and-replay conformance test is recorded as extension CX-10 (dependency_graph.yaml).",
+     "id": "DT-09",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "evidence": "In a mktemp directory I wrote a FileJournal with run_story()[:6], then reopened it with Tick.VERSION set to '1.0.1' and to '1.1.0'. Both reopened without error (before: JournalCorruptError at line 1). The fingerprint excludes MINOR and PATCH (SHARED_CONTRACTS.md:508-509).",
+     "id": "DT-12",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "evidence": "SHARED_CONTRACTS.md:487-492 now states the integer-token rule explicitly (a token with a fraction or exponent such as 1.0 or 1e3 is refused for an integer field). l.514-519 separates the rules carried as x-gie-* annotations from those enforced by the decoder only (integer-token, float-literal, printable-text, calendar validity of trading_day, strict parsing, lifecycle).",
+     "id": "DT-15",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "evidence": "Round-trip is fixed. 2006 doubles in [2^53, 2^63), including float(T0+123456789), 1e19 and 2^63-1024, all survive from_json(to_json(evidence)), and a FileJournal holding such a feature reopens. Golden tests/gie/golden/TradePlan-1.0.0/float_edge_values.json contains 10000000000000000000 and 1234567890123456800.",
+     "id": "DT-16",
+     "remaining": "The gie/core/canonical.py:22-25 docstring is still not corrected. It says strict_loads returns a float for 'a larger literal that is exactly a double', but strict_loads('18446744073709555712') is refused ('not the canonical form of a double'), although int(float(18446744073709555712)) == 18446744073709555712. The rule actually implemented is 'the canonical rendering of a double'.",
+     "verdict": "partial"
+    },
+    {
+     "evidence": "restore(stream, last_seq, recent, last_time_ns) now exists (gie/core/ordering.py:202-231). After restore('s',5,{4:'f',5:'g'},last_time_ns=100), observe('s',6,'h',time_ns=1) raises OutOfOrderError. restore('s',5,{5:'g','4':'f'}) now raises ContractValidationError, not TypeError.",
+     "id": "DT-18",
+     "remaining": "recent of the wrong container type still escapes as a non-GieError: SequenceTracker().restore('s',5,[1,2]) raises TypeError 'cannot convert dictionary update sequence element' from dict(recent or {}) at ordering.py:220.",
+     "verdict": "partial"
+    },
+    {
+     "evidence": "tools/make_golden.py:107-110,155 now lists directories of another MAJOR instead of decoding them. In a mktemp copy with Tick.VERSION='2.0.0', other_major_directories() == ['Tick-1.0.0'], and there are no 'no longer decodes' errors for the old files, only 'golden file is missing' for Tick-2.0.0 and the expected trace mismatch. SHARED_CONTRACTS.md:554-563 now says golden files must decode 'with every later reader of the same MAJOR' and keeps the record that a MAJOR bump needs a migration tool and journal cut-over, which is where the disposition put it.",
+     "id": "DT-19",
+     "remaining": "",
+     "verdict": "done"
+    },
+    {
+     "evidence": "is_fresh, is_expired and age_ns with 10**5000 now raise ContractValidationError. trading_day_bounds_ns('1969-12-31') and ('2262-04-13') are refused. The inclusive upper bound of the last day (MAX_TIME_NS) is documented in gie/core/timeutil.py:95-102.",
+     "id": "DT-21",
+     "remaining": "Both docstrings the disposition said were corrected are unchanged. gie/core/clock.py:179-180 still says 'advancing to the current instant is a no-op', but ReplayClock(100) with call_at(100, cb) and advance_to(100) fires the timer (fired=[100]). gie/contracts/_spec.py:470 still says canonical_sort is 'a key function over encoded items', but it is applied to in-memory items (l.505-506; e.g. candidate.py:279 sorts by (item.scenario, item.label)).",
+     "verdict": "partial"
+    },
+    {
+     "evidence": "specifications/dependency_graph.yaml:96-100: CX-01 Candle now has consumed_by [S02, S03, S04, S10] and must_define [open and close instant, availability instant (its ordering time), price series, stream name and rank relative to ticks and order events, rule for a quiet interval (timer-closed candle), daylight-saving behaviour]. docs/CHANGE_REQUESTS.md:112 lists consumers 02, 03, 04, 10.",
+     "id": "DT-22",
+     "remaining": "",
+     "verdict": "done"
+    }
+   ]
+  }
+ ],
+ "responses": {
+  "DI-02": "Recorded now: CX-01 must also settle the revision rule for a late tick and the sink interface; CX-02 the calendar queries (open at an instant, session of an instant with overlapping sessions, next close / rollover / weekend, version of the holiday table).",
+  "DI-05": "Recorded now as extension CX-20 (feature dictionary and per-kind identity table, first deliverable of session 02; no engine emits evidence before it is integrated); CR-008 and SHARED_CONTRACTS section 4 refer to it. The contract cannot detect engines that disagree on identity levels until that table exists - stated in CR-008.",
+  "DI-10": "Recorded now: CX-07 must define a MISSING state that fails closed and which part belongs to session 03 (market information), session 01 (calendar, CX-02) and session 08 (account rule).",
+  "DI-25": "Recorded now: the raw source timestamp with its offset and the broker's symbol name are kept by session 01 in its tick store, not in the Tick contract (CX-19, must_define); the disposition refers to CX-20 / CR-008 for the feature dictionary.",
+  "DT-01": "Fixed: the docstring of gie.core.ordering no longer calls EventKey a causal fallback; it orders inputs only.",
+  "DT-05": "Fixed by correcting the statement: identity functions check the form of every part; an enumeration-valued part is checked for the form of an enumeration value and the record that carries the identifier checks the value (SHARED_CONTRACTS section 4). Checking the enumerations inside the identity module would make it depend on the contract modules that depend on it.",
+  "DT-08": "Accepted as a limit and stated (SHARED_CONTRACTS section 8): the lock covers schemas and golden messages, not the code of validators and identity functions; the published behaviour texts are hand-written; the golden trace is positive only. Such a change is caught by the tests, not by the lock.",
+  "DT-16": "Fixed: the docstring of gie.core.canonical describes the implemented rule (a literal beyond 64 bits is accepted only as the canonical rendering of a double).",
+  "DT-18": "Fixed: SequenceTracker.restore refuses a 'recent' argument that is not a mapping with a contract error.",
+  "DT-21": "Fixed: both docstrings are corrected (advancing to the current instant fires the timers due at it; canonical_sort is a key over the items as held in memory).",
+  "L2B-06": "Fixed: CX-12 is proposed by session 10 with session 01 (dependency graph and change request table).",
+  "L2B-07": "Accepted as a limit and re-recorded: every record is checked against the pins of the run manifest, the pins are not checked against the model registry. That check belongs to the start of a run (extension CX-10, must_define) and needs the registry of session 09 (status at the pinned period). Stated in decision D-026 and in SHARED_CONTRACTS 6.2; the disposition is corrected from 'fix' to 'record' for this part.",
+  "L2B-08": "Fixed in part, limit stated: the views now refuse every assignment and deletion (a component cannot redirect a view). Reading the private attribute behind a view is possible in Python and is detected by no tool; the docstring says so and no longer claims otherwise.",
+  "L2B-12": "Recorded now: extension CX-12 names the enforcement of out-of-sample scoring and the split specification as a record (dependency graph, must_define; change request table).",
+  "L2B-14": "Accepted as a limit and recorded (decision D-015, amendment): the requirement lock is append-only relative to itself and is not anchored in the git history; a consistent deletion from matrix, lock and count validates and shows only as removed lines in the diff of the lock file. Comparing the lock with the last owner-approved commit is a step of the integration gate once such a commit exists.",
+  "L2B-17": "Timing: the verifier examined the repository while the maintained test suites and the new scan rules were still uncommitted work in progress. They are committed since (commit 455ec8a and later); the full suite passes and the scans pass on the reviewed commit (see the CI results of this package). The README states the review status; the CI results and the PDF are produced by the gate procedure and are part of this package.",
+  "L2B-18": "(a) Recorded now: CX-19 requires the lookup of a tick by (source, seq) so that session 12 can re-price fills. (b) Fixed: where a run journals the tick stream, the journal refuses a fill that names a quote which is not part of the journal (tests added by the test maintainers).",
+  "L2E-01": "Fixed: the run ledger now applies the reduce-only rules to every later event of a reduce-only order, broker reports included - volume never above the entry's fill, reduce-only fills together never above the entry's fill, and a report can neither cancel a working protective stop of open volume nor shrink it below the open volume. The verifier's reproducers are refused; tests added by the test maintainers. The golden trace shows one partial and one final fill; a second partial fill is covered by the order and ledger tests, not by the trace.",
+  "L2E-12": "Recorded now: CX-18 names the reservation states, the reason code of a release and the gateway check that refuses an entry whose reservation is no longer reserved.",
+  "L2E-15": "Accepted as a limit and recorded (decision D-011, amendment; ARCHITECTURE section 6): a module name is self-declared, and code that builds a namespace with exec can declare any name. The static scan forbids exec, eval, compile and dynamic imports in GIE code, so the allow-lists hold for code that passes CI, not against a deliberate attacker. Checking sys.modules is not possible inside the lock module (it deliberately imports nothing that can read the environment).",
+  "PD-04": "Same limit as L2B-07: recorded in decision D-026 and as a requirement on extension CX-10; the role-based status gate itself is implemented and tested.",
+  "PD-05": "Fixed: the disposition states the recorded gate (CX-08: first deliverable of session 05, consumed by sessions 09, 10 and 11) and what the record must hold.",
+  "PD-17": "Fixed: SHARED_CONTRACTS 9.1 states that a destination may lie on either side of the market, that a target is always on the winning side, and that a target carries a predicted probability only when it names its destination.",
+  "RB-02": "Done at the gate with RM-21: the twelve requirements of blocker B-001 are blocked or partial in the reviewed commit, and validation enforces that while B-001 is open.",
+  "RB-03": "Fixed: the heading of CR-003 now reads 'Additional shared contracts are needed by later sessions'.",
+  "RB-09": "Fixed: the note of AT-S06-ACC-06 carries the same rule as the other three entries.",
+  "RM-21": "Done at the gate: the status patch reviews/session_00/status_patch.yaml is applied in the reviewed commit; every Session 00 requirement has a status and a contribution, informational clauses are not_applicable.",
+  "RM-22": "Timing: the verifier examined the repository while the maintained test suites and the new scan rules were still uncommitted work in progress. They are committed since (commit 455ec8a and later); the full suite passes and the scans pass on the reviewed commit (see the CI results of this package).",
+  "SF-01": "Timing: the verifier examined the repository while the maintained test suites and the new scan rules were still uncommitted work in progress. They are committed since (commit 455ec8a and later); the full suite passes and the scans pass on the reviewed commit (see the CI results of this package). Rule LL015 is committed and the schema generator no longer writes below gie/ (its writing command moved to tools/write_schemas.py), so the exemption list is exactly the journal module.",
+  "SF-06": "Fixed: see L2E-01 - a broker report can no longer shrink or cancel the protective stop of open volume.",
+  "SF-10": "Fixed: SHARED_CONTRACTS 9.1 states that no minimum stop distance is enforced until the instrument specification (CX-04) exists.",
+  "SF-14": "Recorded now (CR-008, point 4): no reference range is reserved for fixture approvals and nothing compares an approval reference with the decision log; the registry of session 09 must refuse an activation that cites no approved decision. Until then a fixture model is recognised only by its data origins (never validated).",
+  "SF-15": "Fixed: SHARED_CONTRACTS 9.2 states that a family whose only active version is rolled back has no active model and that consumers fail closed.",
+  "SF-18": "Timing: the verifier examined the repository while the maintained test suites and the new scan rules were still uncommitted work in progress. They are committed since (commit 455ec8a and later); the full suite passes and the scans pass on the reviewed commit (see the CI results of this package). The benchmark file and the PDF named by the documents exist in the reviewed commit; the documentation-path check passes there.",
+  "SF-21": "Timing: the verifier examined the repository while the maintained test suites and the new scan rules were still uncommitted work in progress. They are committed since (commit 455ec8a and later); the full suite passes and the scans pass on the reviewed commit (see the CI results of this package). Rule AR008 is committed."
+ },
+ "schema_version": 1,
+ "totals": {
+  "done": 65,
+  "not_done": 2,
+  "partial": 33
+ }
+}

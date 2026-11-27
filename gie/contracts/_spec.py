@@ -467,8 +467,8 @@ class Opt(FieldType):
 class ListOf(FieldType):
     """Homogeneous immutable sequence, held in memory as a ``tuple``.
 
-    ``canonical_sort`` (a key function over encoded items) makes the order part
-    of the canonical form: producers may supply any order, the record stores and
+    ``canonical_sort`` (a key function over the items as held in memory) makes
+    the order part of the canonical form: producers may supply any order, the record stores and
     emits the sorted order.  ``unique_key`` rejects duplicates.
     """
 

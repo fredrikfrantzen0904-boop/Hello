@@ -205,7 +205,11 @@ static scan forbids adapter calls anywhere else. The hashes of the lock module a
 are pinned in `specifications/lock_pins.json`; changing either file fails CI until the pin is
 updated together with a decision-log entry.
 Honest limit, unchanged: Python cannot stop a person who rewrites the lock module or lies inside an
-adapter method; that is what the scan, the pins, the tests and review are for.
+adapter method; that is what the scan, the pins, the tests and review are for. The same holds for
+the module allow-lists: a module name is something code declares about itself, and code that
+builds a namespace with `exec` can declare any name. The static scan forbids `exec`, `eval`,
+`compile` and dynamic imports in GIE code, so the allow-lists hold for code that passes CI - not
+against someone who sets out to defeat them (final verification, item L2E-15).
 
 *Amended 2026-11-27 after review round 2 (findings L2B-16, L2E-15; verification items SF-01,
 SF-08).* A class body can assign `__module__` freely, so the allow-lists no longer trust it alone:
@@ -303,6 +307,14 @@ validates the requirements matrix (no requirement can disappear, no status `veri
 existing evidence file, no `blocked` without a blocker id) and renders the human-readable
 registers. `tools/ci.py` runs every check and writes one machine-readable result file. The review
 PDF is generated from those files.
+
+*Amended 2026-11-27 (final verification, item L2B-14).* Requirements are locked by hash
+(`specifications/requirements_lock.json`): deleting or rewording one fails validation. The lock is
+append-only relative to itself; it is not anchored in the git history. An edit that removes a
+requirement from the matrix, from the lock and from the minimum count at once still validates and
+is visible only as removed lines in the diff of the lock file. Comparing the lock with the last
+commit the owner approved is a step of the integration gate once a first approved commit exists
+(session 12 verifies reports against commits, S12-ASG-07).
 
 ## D-016 - Branching
 
@@ -527,7 +539,13 @@ by the journal: the manifest of a run pins its models with status and validity p
 status; an entry rests on a model whose status is allowed for the role of the run - `PRIMARY`:
 `ACTIVE` only; `SHADOW`: `ACTIVE` or `SHADOW`; `RESEARCH`: additionally `RESEARCH`. A `REJECTED`,
 `ROLLED_BACK` or `RETIRED` model never leads to an order. A promotion therefore takes effect in a
-new run, never in the middle of one. This is the coordinator's proposal for open item U-17; until
+new run, never in the middle of one.
+Limit, stated plainly (final verification, items L2B-07 and PD-04): the pins are a declaration of
+the run. Session 00 checks every record against the pins; it does not check the pins against the
+model registry. That check belongs to the start of a run - the composition root builds the pins
+from the registry and refuses to start a run whose pins disagree with it (extension CX-10) - and
+needs the registry of session 09 (status at the pinned period). Until both exist, a manifest that
+overstates the standing of a model is caught only by review of the manifest. This is the coordinator's proposal for open item U-17; until
 the owner has promoted a first model, a primary paper run trades only what approved rule sets
 propose.
 

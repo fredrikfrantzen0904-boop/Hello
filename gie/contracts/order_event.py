@@ -437,7 +437,7 @@ class OrderEvent(RunScoped):
     )
     fill_tick_source: str | None = fld(
         Opt(Str(pattern=SOURCE_PATTERN, max_len=64, label="feed id")),
-        "Feed of the quote this fill was matched against (stream tick/<symbol>/<source>).",
+        "Feed of the quote this fill was matched against (stream tick/<source>/<symbol>).",
     )
     fill_tick_seq: int | None = fld(
         Opt(Int(ge=0, label="sequence number")),

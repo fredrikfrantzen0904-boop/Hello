@@ -119,13 +119,13 @@ types it consumes are.
 | CX-09 | Outcome / label record | 04 | 09, 10 | label definitions are a research deliverable of session 04 |
 | CX-10 | Step driver: the one run loop of replay and paper, with a replay / paper conformance test | 00 | 01, 06, 07, 10 | needs the first tick source and adapter to be proven against; required before any subsystem is integrated (D-024) |
 | CX-11 | Health / error event and heartbeat rule | 00 | 01, 06, 07, 11, 12 | defined together with the step driver |
-| CX-12 | Run configuration document, per-stream data digests, run catalogue, experiment / trial / holdout bookkeeping, split specification | 10 | 04, 09, 11, 12 | research procedure is the design task of session 10 (D-027) |
+| CX-12 | Run configuration document, per-stream data digests, run catalogue, experiment / trial / holdout bookkeeping, split specification, enforcement of out-of-sample scoring | 10 with 01 | 04, 09, 11, 12 | research procedure is the design task of session 10 (D-027) |
 | CX-13 | Feed status record | 01 | 06, 07, 08, 11 | depends on the real feed (U-09) |
 | CX-14 | Latency summary record | 01 | 06, 07, 11, 12 | measured quantities are defined with the feed benchmark of session 01 |
 | CX-15 | Run result records (trades, daily metrics, comparison with baselines) | 10 | 09, 11 | metric definitions depend on the baseline reconciliation (U-05, U-07) |
 | CX-16 | Learning result records (experiments, candidate models, promotion requests) | 09 | 11 | design task of session 09 |
 | CX-17 | Display projection of records for browsers | 11 | 12 | design task of session 11 |
-| CX-18 | Reservation life-cycle record | 08 | 07 | reservation rules are the design task of session 08 |
+| CX-18 | Reservation life-cycle record (and the gateway check that an entry's reservation is still reserved) | 08 | 07 | reservation rules are the design task of session 08 |
 | CX-19 | Adapter queries for reconciliation, journal checkpoints, ledger eviction, storage of raw ticks | 07 | 01, 10 | depends on the persistence design of sessions 07 and 01 |
 | CX-20 | Feature dictionary and per-kind identity table of evidence (identity levels, anchor) | 02 | 03, 04, 09 | the six engines could not be inspected (B-001); no engine emits evidence before it is integrated |
 
@@ -221,3 +221,10 @@ their content belongs to session 04:
 3. A scoring pass in a paper run reads the model registry once: the models of a run are pinned in
    its manifest (D-026), which gives replay and paper the same consistent view; a registry
    snapshot API beyond that is added only if session 04 or 05 shows the need.
+4. A model is ACTIVE only with a recorded owner approval, but the contract cannot know whether
+   the cited approval is a real decision of the owner: no reference range is reserved for
+   fixtures and nothing compares the reference with `docs/DECISION_LOG.md`. The registry of
+   session 09 (`interfaces.ModelRegistry`) must refuse an activation whose approval reference is
+   not an APPROVED decision, and session 09 proposes the reserved form of fixture references
+   with its first review package. Until then a fixture model can only be recognised by its data
+   origins (it is never *validated*).

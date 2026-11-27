@@ -50,7 +50,8 @@ before editing anything.
 | `docs/ARCHITECTURE.md`, `docs/WORKTREES.md`, `docs/BASELINE_AUDIT.md` | architecture, branch/worktree procedure, audit status |
 | `gie/core/` | clock, ids, canonical JSON, freshness, ordering, latency, routing lock, errors (stdlib only) |
 | `gie/contracts/` | the ten shared contracts, codec, schemas, compatibility checker, journal, lifecycle ledger, order gateway, interfaces |
-| `tools/` | audit, CI checks, register and review tooling |
+| `tools/` | audit, baseline freeze, CI checks, schema / golden writers, register and review tooling |
+| `specifications/baselines/` | baseline registry (nothing frozen yet: B-001) and the unverified claims of the specification |
 | `specifications/lock_pins.json` | pinned hashes of the routing lock and the order gateway |
 | `tests/gie/<area>/` | tests; `tests/gie/samples.py` holds labelled synthetic sample records; `tests/gie/golden/` the golden messages of every contract version |
 | `reviews/session_NN/` | review package (PDF + machine-readable evidence) per session |
@@ -91,6 +92,7 @@ python -m pytest --gie-evidence=out.json   # tests + machine-readable evidence
 python -m ruff check . && python -m ruff format --check .
 python -m mypy
 python -m gie.contracts.schema_gen --check # schemas match code, lock intact, evolution rules hold
+python -m tools.write_schemas              # coordinator only: regenerate schemas and lock after a contract change
 python -m tools.render_contract_docs --check
 python -m tools.make_golden --check        # golden messages of every contract still round-trip
 python -m tools.check_live_lock            # static scan of the paper-only routing lock

@@ -251,6 +251,67 @@ class LifecycleLedger:
                 position_id=event.position_id,
             )
 
+    def _open_by_fills(self, position_id: str, newest: OrderEvent) -> Decimal | None:
+        """What the journaled fills leave open of a position, counting *newest* for its own order.
+
+        Entry fills minus the fills of the position's reduce-only orders.  ``None`` when the entry
+        order is not known (a fragment that is examined on its own).
+        """
+        entry_id = self._entry_by_position.get(position_id)
+        entry = None if entry_id is None else self._orders.get(entry_id)
+        if entry is None:
+            return None
+        reduced = _ZERO
+        for order_id in self._position_orders.get(position_id, ()):
+            event = newest if order_id == newest.client_order_id else self._orders[order_id]
+            reduced = EXACT.add(reduced, event.cumulative_filled_lots)
+        return EXACT.subtract(entry.cumulative_filled_lots, reduced)
+
+    def _check_reducing_order_event(self, previous: OrderEvent, event: OrderEvent) -> None:
+        """Rules for every later event of a reduce-only order - requests and broker reports alike.
+
+        A report is a fact of the simulated broker, but the simulated broker is GIE code: a report
+        that would enlarge a reduce-only order beyond what was opened, fill more than was opened,
+        or take the protection away from volume that is still open is refused (and surfaces in
+        ``PollResult.errors``), so such a state can never become part of a run.
+        """
+        assert event.position_id is not None
+        order_id = event.client_order_id
+        entry = self.entry_order_of(event)
+        if entry is None:
+            return
+        if event.volume_lots > entry.cumulative_filled_lots:
+            raise _fail(
+                "a reduce-only order does not exceed what the entry order has filled",
+                client_order_id=order_id,
+            )
+        still_open = self._open_by_fills(event.position_id, event)
+        assert still_open is not None
+        if still_open < _ZERO:
+            raise _fail(
+                "reduce-only orders together never fill more than the entry order has filled",
+                client_order_id=order_id,
+                position_id=event.position_id,
+            )
+        if event.intent is not OrderIntent.PROTECTIVE_STOP or event.is_request or still_open == _ZERO:
+            return
+        if event.order_state is OrderState.CANCELED and previous.order_state is not OrderState.PENDING_CANCEL:
+            raise _fail(
+                "the simulated broker does not cancel the protective stop of volume that is still open",
+                client_order_id=order_id,
+                position_id=event.position_id,
+            )
+        if (
+            event.order_state not in TERMINAL_ORDER_STATES
+            and event.volume_lots != previous.volume_lots
+            and EXACT.subtract(event.volume_lots, event.cumulative_filled_lots) < still_open
+        ):
+            raise _fail(
+                "a protective stop whose volume changes still covers the whole open volume",
+                client_order_id=order_id,
+                position_id=event.position_id,
+            )
+
     # ------------------------------------------------------------------ position rules
     def _check_position(self, snapshot: Position) -> None:
         if snapshot.owner is not PositionOwner.GIE:
@@ -344,6 +405,8 @@ class LifecycleLedger:
             validate_order_transition(previous, record)
             if previous is None:
                 self._check_new_order(record)
+            elif record.intent is not OrderIntent.ENTRY:
+                self._check_reducing_order_event(previous, record)
             self._check_alternative_group(record)
         elif isinstance(record, Position):
             assert previous is None or isinstance(previous, Position)
