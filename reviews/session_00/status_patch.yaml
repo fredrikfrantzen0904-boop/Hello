@@ -1,0 +1,1543 @@
+# Session 00 status of every requirement it touches (applied with
+#   python -m tools.gie_registers apply --patch reviews/session_00/status_patch.yaml).
+# 'contribution.status' is what Session 00 delivered; 'status' is the state of the whole requirement.
+updates:
+- ids:
+  - S00-DEP-01
+  status: verified
+  contribution:
+    session: S00
+    summary: Session 00 was started first and alone; no other session has been started and no other package exists.
+    status: verified
+    evidence:
+    - specifications/dependency_graph.yaml
+    - docs/ARCHITECTURE.md
+- ids:
+  - S00-DEP-02
+  status: verified
+  contribution:
+    session: S00
+    summary: Session 00 owns gie/core, gie/contracts and specifications (brief paths core/, contracts/, specifications/
+      mapped by D-002; layout awaits approval, CR-002). Ownership of every file is checked in CI.
+    status: verified
+    evidence:
+    - specifications/dependency_graph.yaml
+    - tools/check_architecture.py
+    - tests/gie/tools/test_check_architecture.py
+- ids:
+  - S00-ASG-01
+  - S00-ASG-02
+  - S00-ASG-03
+  - S00-ASG-04
+  - S00-ASG-05
+  - S00-ASG-06
+  - S00-ASG-07
+  status: blocked
+  contribution:
+    session: S00
+    summary: 'NOT PERFORMED. The production tree D:\ftmo_eurusd cannot be reached from this cloud session (blocker
+      B-001); nothing about it was assumed or invented. Delivered instead: a read-only, standard-library audit tool
+      for the owner to run, tested to leave the audited tree byte-identical and to emit no credentials and no file
+      contents beyond package names and versions, CSV column names and Python version strings.'
+    status: blocked
+    evidence:
+    - docs/BASELINE_AUDIT.md
+    - tools/audit/gie_baseline_audit.py
+    - tools/audit/README.md
+    - tests/gie/tools/test_baseline_audit.py
+    blockers:
+    - B-001
+  blockers:
+  - B-001
+- ids:
+  - S00-ASG-08
+  status: implemented
+  contribution:
+    session: S00
+    summary: Repository structure, development branch and the branch / worktree procedure with start gate and integration
+      gate are defined. No session worktree has been created yet because only Session 00 has run; the procedure
+      is therefore documented but not yet exercised.
+    status: implemented
+    evidence:
+    - docs/WORKTREES.md
+    - specifications/dependency_graph.yaml
+    - README.md
+- ids:
+  - S00-ASG-09
+  status: verified
+  contribution:
+    session: S00
+    summary: Every path has exactly one owning session (owns lists); shared files are coordinator-only; CI fails
+      on an unowned or doubly owned file.
+    status: verified
+    evidence:
+    - specifications/dependency_graph.yaml
+    - tools/check_architecture.py
+    - tests/gie/tools/test_check_architecture.py
+- ids:
+  - S00-ASG-10
+  status: verified
+  contribution:
+    session: S00
+    summary: Dependency graph of the 13 sessions with waves, hard / contract-only / optional dependencies, gates,
+      import rules and the shared types still to be proposed (contract_extensions); validated in CI (no cycle, wave
+      order, import rules enforced on the code).
+    status: verified
+    evidence:
+    - specifications/dependency_graph.yaml
+    - tools/check_architecture.py
+    - tests/gie/tools/test_check_architecture.py
+    - docs/ARCHITECTURE.md
+- ids:
+  - S00-ASG-11
+  status: verified
+  contribution:
+    session: S00
+    summary: 'Tick 1.0.0 (PROPOSED, awaiting owner approval): raw bid/ask quote with event and receive time, per-stream
+      sequence number, data origin and quality flags. Declared once; validation, canonical encoding, strict decoding
+      and the JSON Schema are derived from the declaration; locked by hash; golden messages; tests written by engineers
+      who did not write the contract.'
+    status: verified
+    evidence:
+    - gie/contracts/tick.py
+    - gie/contracts/schemas/Tick-1.0.0.schema.json
+    - tests/gie/contracts/test_tick.py
+    - tests/gie/contracts/test_roundtrip.py
+    - reviews/session_00/evidence/test_results.json
+- ids:
+  - S00-ASG-12
+  status: verified
+  contribution:
+    session: S00
+    summary: 'Evidence 1.0.0 (PROPOSED, awaiting owner approval): engine evidence with bullish / bearish scores,
+      market-event identity for exact de-duplication, stages, levels, invalidation, freshness, missing / inactive
+      / contra states; vocabularies are provisional until the six engines can be inspected (D-014, B-001). Declared
+      once; validation, canonical encoding, strict decoding and the JSON Schema are derived from the declaration;
+      locked by hash; golden messages; tests written by engineers who did not write the contract.'
+    status: verified
+    evidence:
+    - gie/contracts/evidence.py
+    - gie/contracts/schemas/Evidence-1.0.0.schema.json
+    - tests/gie/contracts/test_evidence.py
+    - tests/gie/contracts/test_roundtrip.py
+    - reviews/session_00/evidence/test_results.json
+- ids:
+  - S00-ASG-13
+  status: verified
+  contribution:
+    session: S00
+    summary: 'Candidate 1.0.0 (PROPOSED, awaiting owner approval): scored or unscored trading opportunity with expected
+      net R, uncertainty, quantiles, destinations and contributions. Declared once; validation, canonical encoding,
+      strict decoding and the JSON Schema are derived from the declaration; locked by hash; golden messages; tests
+      written by engineers who did not write the contract.'
+    status: verified
+    evidence:
+    - gie/contracts/candidate.py
+    - gie/contracts/schemas/Candidate-1.0.0.schema.json
+    - tests/gie/contracts/test_candidate.py
+    - tests/gie/contracts/test_roundtrip.py
+    - reviews/session_00/evidence/test_results.json
+- ids:
+  - S00-ASG-14
+  status: verified
+  contribution:
+    session: S00
+    summary: 'TradePlan 1.0.0 (PROPOSED, awaiting owner approval): executable plan with entry style, hard stop,
+      targets, expiry, expected net R and uncertainty, alternative group. Declared once; validation, canonical encoding,
+      strict decoding and the JSON Schema are derived from the declaration; locked by hash; golden messages; tests
+      written by engineers who did not write the contract.'
+    status: verified
+    evidence:
+    - gie/contracts/trade_plan.py
+    - gie/contracts/schemas/TradePlan-1.0.0.schema.json
+    - tests/gie/contracts/test_trade_plan.py
+    - tests/gie/contracts/test_roundtrip.py
+    - reviews/session_00/evidence/test_results.json
+- ids:
+  - S00-ASG-15
+  status: verified
+  contribution:
+    session: S00
+    summary: 'RiskDecision 1.0.0 (PROPOSED, awaiting owner approval): approval or rejection of one plan with granted
+      volume and risk, daily state, profit floor and reservation. Declared once; validation, canonical encoding,
+      strict decoding and the JSON Schema are derived from the declaration; locked by hash; golden messages; tests
+      written by engineers who did not write the contract.'
+    status: verified
+    evidence:
+    - gie/contracts/risk_decision.py
+    - gie/contracts/schemas/RiskDecision-1.0.0.schema.json
+    - tests/gie/contracts/test_risk_decision.py
+    - tests/gie/contracts/test_roundtrip.py
+    - reviews/session_00/evidence/test_results.json
+- ids:
+  - S00-ASG-16
+  status: verified
+  contribution:
+    session: S00
+    summary: 'OrderEvent 1.0.0 (PROPOSED, awaiting owner approval): one step in the life of a simulated order: requests,
+      reports, fills, replacement protocol, reconciliation. Declared once; validation, canonical encoding, strict
+      decoding and the JSON Schema are derived from the declaration; locked by hash; golden messages; tests written
+      by engineers who did not write the contract.'
+    status: verified
+    evidence:
+    - gie/contracts/order_event.py
+    - gie/contracts/schemas/OrderEvent-1.0.0.schema.json
+    - tests/gie/contracts/test_order_event.py
+    - tests/gie/contracts/test_roundtrip.py
+    - reviews/session_00/evidence/test_results.json
+- ids:
+  - S00-ASG-17
+  status: verified
+  contribution:
+    session: S00
+    summary: 'Position 1.0.0 (PROPOSED, awaiting owner approval): snapshot of a GIE or external position with stop,
+      executable net P&L, peak and trough. Declared once; validation, canonical encoding, strict decoding and the
+      JSON Schema are derived from the declaration; locked by hash; golden messages; tests written by engineers
+      who did not write the contract.'
+    status: verified
+    evidence:
+    - gie/contracts/position.py
+    - gie/contracts/schemas/Position-1.0.0.schema.json
+    - tests/gie/contracts/test_position.py
+    - tests/gie/contracts/test_roundtrip.py
+    - reviews/session_00/evidence/test_results.json
+- ids:
+  - S00-ASG-18
+  status: verified
+  contribution:
+    session: S00
+    summary: 'ModelVersion 1.0.0 (PROPOSED, awaiting owner approval): registry record of a model with training provenance,
+      status lifecycle, owner approval and rollback. Declared once; validation, canonical encoding, strict decoding
+      and the JSON Schema are derived from the declaration; locked by hash; golden messages; tests written by engineers
+      who did not write the contract.'
+    status: verified
+    evidence:
+    - gie/contracts/model_version.py
+    - gie/contracts/schemas/ModelVersion-1.0.0.schema.json
+    - tests/gie/contracts/test_model_version.py
+    - tests/gie/contracts/test_roundtrip.py
+    - reviews/session_00/evidence/test_results.json
+- ids:
+  - S00-ASG-19
+  status: verified
+  contribution:
+    session: S00
+    summary: 'Clock 1.0.0 (PROPOSED, awaiting owner approval): injected Clock and Scheduler with step time in replay
+      and paper (ReplayClock; PaperClock over SystemClock with PollingScheduler; read-only views for components)
+      and the ClockReading record. Declared once; validation, canonical encoding, strict decoding and the JSON Schema
+      are derived from the declaration; locked by hash; golden messages; tests written by engineers who did not
+      write the contract.'
+    status: verified
+    evidence:
+    - gie/core/clock.py
+    - tests/gie/core/test_clock.py
+    - gie/contracts/clock.py
+    - gie/contracts/schemas/Clock-1.0.0.schema.json
+    - tests/gie/contracts/test_clock_reading.py
+    - tests/gie/contracts/test_roundtrip.py
+    - reviews/session_00/evidence/test_results.json
+- ids:
+  - S00-ASG-20
+  status: verified
+  contribution:
+    session: S00
+    summary: 'Units defined and enforced: int64 nanoseconds UTC; prices, volumes, money and risk fractions as exact
+      decimals (strings on the wire); fractions not percent; R multiples net of costs; unknown is null, never 0.'
+    status: verified
+    evidence:
+    - specifications/SHARED_CONTRACTS.md
+    - specifications/contracts/FIELDS.md
+    - gie/core/canonical.py
+    - tests/gie/core/test_canonical.py
+    - tests/gie/contracts/test_spec_framework.py
+- ids:
+  - S00-ASG-21
+  status: verified
+  contribution:
+    session: S00
+    summary: Event time, receive time, decision time, market-data watermark and observable time defined; all time
+      from an injected clock; trading day = Europe/Prague calendar date (D-013; account reset instant to be confirmed,
+      U-04).
+    status: verified
+    evidence:
+    - specifications/SHARED_CONTRACTS.md
+    - gie/core/timeutil.py
+    - gie/core/clock.py
+    - tests/gie/core/test_timeutil.py
+    - tests/gie/core/test_clock.py
+- ids:
+  - S00-ASG-22
+  status: verified
+  contribution:
+    session: S00
+    summary: Deterministic content-derived identifiers (prefix + 128 bits of SHA-256 over documented identity parts);
+      records verify their own identifier; no random or clock-derived ids.
+    status: verified
+    evidence:
+    - specifications/SHARED_CONTRACTS.md
+    - gie/core/ids.py
+    - gie/contracts/identity.py
+    - tests/gie/core/test_ids.py
+    - tests/gie/contracts/test_identity.py
+- ids:
+  - S00-ASG-23
+  status: verified
+  contribution:
+    session: S00
+    summary: Freshness and expiry rules defined and fail closed at the boundary; future data is an error; expiry
+      propagates to derived records and orders. The numeric limits are research parameters requested by the consuming
+      sessions; none was invented here.
+    status: verified
+    evidence:
+    - specifications/SHARED_CONTRACTS.md
+    - gie/core/freshness.py
+    - gie/contracts/causality.py
+    - tests/gie/core/test_freshness.py
+    - tests/gie/contracts/test_causality.py
+- ids:
+  - S00-ASG-24
+  status: verified
+  contribution:
+    session: S00
+    summary: Typed errors with stable codes; fail closed; invalid input is never repaired; unknown vocabulary is
+      refused; normal rejections are records with reason codes.
+    status: verified
+    evidence:
+    - specifications/SHARED_CONTRACTS.md
+    - gie/core/errors.py
+    - tests/gie/core/test_errors.py
+- ids:
+  - S00-ASG-25
+  status: verified
+  contribution:
+    session: S00
+    summary: Input order (availability time, stream rank, stream, sequence) and the total order of a run (journal
+      order, run-to-completion step) defined; duplicate / gap / conflict detection; reference journal with look-ahead
+      guard.
+    status: verified
+    evidence:
+    - specifications/SHARED_CONTRACTS.md
+    - gie/core/ordering.py
+    - gie/contracts/ordering.py
+    - gie/contracts/journal.py
+    - tests/gie/core/test_ordering.py
+    - tests/gie/contracts/test_contract_ordering.py
+    - tests/gie/contracts/test_journal.py
+- ids:
+  - S00-ASG-26
+  status: verified
+  contribution:
+    session: S00
+    summary: 'CLAUDE.md created: binding working rules for every later session.'
+    status: verified
+    evidence:
+    - CLAUDE.md
+- ids:
+  - S00-ASG-27
+  status: verified
+  contribution:
+    session: S00
+    summary: Decision log with decisions (D), open items for the owner (U); blockers and change requests in a second
+      log; both parsed and cross-checked by the register tool.
+    status: verified
+    evidence:
+    - docs/DECISION_LOG.md
+    - docs/CHANGE_REQUESTS.md
+    - tools/gie_registers.py
+    - tests/gie/tools/test_gie_registers.py
+- ids:
+  - S00-ASG-28
+  status: verified
+  contribution:
+    session: S00
+    summary: Requirements matrix with 584 atomised requirements, each with the verbatim source clause (checked against
+      the extracted specification text); every requirement is locked by hash, so none can be deleted or reworded
+      unnoticed; validated in CI.
+    status: verified
+    evidence:
+    - specifications/requirements_matrix.yaml
+    - specifications/requirements_lock.json
+    - specifications/REQUIREMENTS_MATRIX.md
+    - tools/gie_registers.py
+    - tests/gie/tools/test_gie_registers.py
+- ids:
+  - S00-ASG-29
+  status: verified
+  contribution:
+    session: S00
+    summary: 'Integration CI: one entry point (python -m tools.ci) running lint, format, strict typing, schema lock,
+      generated docs, golden messages, live-lock scan, architecture, protected paths, documentation paths, secret
+      scan, tests with evidence, register validation and baseline verification; the same entry point runs in the
+      GitHub workflow on Linux and Windows.'
+    status: verified
+    evidence:
+    - tools/ci.py
+    - .github/workflows/gie-ci.yml
+    - reviews/session_00/evidence/ci_results.json
+- ids:
+  - S00-ACC-01
+  status: verified
+  contribution:
+    session: S00
+    summary: Round-trip of every contract and every sample variant, property-based round trips, strict decoding,
+      golden messages byte for byte, schema validation of the wire form.
+    status: verified
+    evidence:
+    - tests/gie/contracts/test_roundtrip.py
+    - tests/gie/contracts/test_roundtrip_property.py
+    - tests/gie/contracts/test_golden.py
+    - tests/gie/golden
+    - reviews/session_00/evidence/test_results.json
+- ids:
+  - S00-ACC-02
+  status: verified
+  contribution:
+    session: S00
+    summary: Reader rules for other versions, classification of schema changes (PATCH / MINOR / MAJOR), schema lock,
+      routing vocabulary can never change silently.
+    status: verified
+    evidence:
+    - tests/gie/contracts/test_compatibility.py
+    - tests/gie/contracts/test_schema_lock.py
+    - gie/contracts/compat.py
+    - gie/contracts/schemas/LOCK.json
+    - reviews/session_00/evidence/test_results.json
+- ids:
+  - S00-ACC-03
+  status: verified
+  contribution:
+    session: S00
+    summary: 'Replay clock: virtual time, never backwards, deterministic timers; the same component code observes
+      the same instants and timer order under the replay clock and under the paper step clock with its scheduler.'
+    status: verified
+    evidence:
+    - tests/gie/core/test_clock.py
+    - gie/core/clock.py
+    - reviews/session_00/evidence/test_results.json
+- ids:
+  - S00-ACC-04
+  status: verified
+  contribution:
+    session: S00
+    summary: 'Paper-only routing lock: no live vocabulary, literal constant, guard and order gateway, static scan
+      with pinned hashes; environment variables and files cannot unlock it.'
+    status: verified
+    evidence:
+    - tests/gie/core/test_routing_lock.py
+    - tests/gie/contracts/test_guarded_adapter.py
+    - tests/gie/tools/test_check_live_lock.py
+    - tools/check_live_lock.py
+    - specifications/lock_pins.json
+    - reviews/session_00/evidence/test_results.json
+- ids:
+  - S00-ACC-05
+  status: blocked
+  contribution:
+    session: S00
+    summary: 'NOT EXECUTED on real baselines: GCE-B, Round 1, Round 2 and the Cavemen trade sets are on the owner''s
+      machine (B-001). The freeze / verify harness exists and is self-tested on a labelled synthetic fixture; the
+      real regression test reports BLOCKED and never passes vacuously.'
+    status: blocked
+    evidence:
+    - tools/baseline_freeze.py
+    - specifications/baselines/registry.yaml
+    - tests/gie/baseline/test_baseline_regression.py
+    - tests/gie/tools/test_baseline_freeze.py
+    blockers:
+    - B-001
+  blockers:
+  - B-001
+- ids:
+  - S00-ACC-06
+  status: partial
+  contribution:
+    session: S00
+    summary: 'Shown for this repository: the pre-existing file Start is byte-identical to the base commit and branch
+      main was not advanced (checked in CI); the audit tool is tested to leave an audited tree byte-identical. NOT
+      shown for the production tree itself, which was never reached (B-001) - so it was also never written to; the
+      test that compares manifests of the production tree taken before and after reports BLOCKED until the owner
+      supplies them.'
+    status: partial
+    evidence:
+    - tools/check_protected_paths.py
+    - tests/gie/tools/test_protected_paths.py
+    - tests/gie/tools/test_baseline_audit.py
+    - tests/gie/baseline/test_baseline_regression.py
+    - reviews/session_00/evidence/ci_results.json
+    blockers:
+    - B-001
+  blockers:
+  - B-001
+- ids:
+  - S00-DEL-01
+  status: verified
+  contribution:
+    session: S00
+    summary: Architecture report.
+    status: verified
+    evidence:
+    - docs/ARCHITECTURE.md
+    - reviews/session_00/GIE_Session_00_Foundation_Review.pdf
+- ids:
+  - S00-DEL-02
+  status: verified
+  contribution:
+    session: S00
+    summary: Contract schemas (JSON Schema 2020-12) for ten contracts at 1.0.0, generated from the code, locked
+      by SHA-256 (lock status PROPOSED), with the normative rules and the generated field reference.
+    status: verified
+    evidence:
+    - gie/contracts/schemas/LOCK.json
+    - specifications/SHARED_CONTRACTS.md
+    - specifications/contracts/FIELDS.md
+    - tests/gie/contracts/test_schema_lock.py
+- ids:
+  - S00-DEL-03
+  status: verified
+  contribution:
+    session: S00
+    summary: Dependency graph (machine-readable, checked in CI) and its diagram in the review PDF.
+    status: verified
+    evidence:
+    - specifications/dependency_graph.yaml
+    - reviews/session_00/GIE_Session_00_Foundation_Review.pdf
+- ids:
+  - S00-DEL-04
+  status: blocked
+  contribution:
+    session: S00
+    summary: 'NOT DELIVERED: the baseline audit could not be performed (B-001). The document states exactly what
+      is and is not known and how the audit can be completed.'
+    status: blocked
+    evidence:
+    - docs/BASELINE_AUDIT.md
+    - tools/audit/README.md
+    blockers:
+    - B-001
+  blockers:
+  - B-001
+- ids:
+  - S00-DEL-05
+  status: verified
+  contribution:
+    session: S00
+    summary: Worktree instructions.
+    status: verified
+    evidence:
+    - docs/WORKTREES.md
+- ids:
+  - S00-DEL-06
+  status: verified
+  contribution:
+    session: S00
+    summary: 'Unresolved decisions: open items U-01..U-18 for the owner, blocker B-001, change requests CR-002..CR-008,
+      decisions D-002..D-028 awaiting approval.'
+    status: verified
+    evidence:
+    - docs/DECISION_LOG.md
+    - docs/CHANGE_REQUESTS.md
+    - reviews/session_00/GIE_Session_00_Foundation_Review.pdf
+- ids:
+  - OWN-01
+  status: in_progress
+  contribution:
+    session: S00
+    summary: Session 00 was coordinated and implemented in this session (D-001).
+    status: verified
+    evidence:
+    - docs/DECISION_LOG.md
+    - reviews/session_00/GIE_Session_00_Foundation_Review.pdf
+- ids:
+  - OWN-27
+  status: in_progress
+  contribution:
+    session: S00
+    summary: Session 00 implemented in this session; sessions 01-12 not started (review gate).
+    status: verified
+    evidence:
+    - reviews/session_00/GIE_Session_00_Foundation_Review.pdf
+- ids:
+  - OWN-02
+  status: verified
+  contribution:
+    session: S00
+    summary: All 14 PDFs (master specification and 13 briefs) were read in full; their text is extracted and hashed
+      in the repository.
+    status: verified
+    evidence:
+    - specifications/source/SHA256SUMS
+    - specifications/extracted/MASTER.txt
+    - specifications/requirements_matrix.yaml
+- ids:
+  - OWN-15
+  status: verified
+  contribution:
+    session: S00
+    summary: The ZIP held MASTER.pdf and the 13 briefs 00-12; all are preserved with SHA-256 sums.
+    status: verified
+    evidence:
+    - specifications/source/SHA256SUMS
+- ids:
+  - OWN-03
+  status: verified
+  contribution:
+    session: S00
+    summary: 584 atomised requirements with verbatim source clauses in the permanent matrix; decisions, blockers
+      and the owner's directive are permanent documents; CI detects a deleted requirement or a changed specification
+      text.
+    status: verified
+    evidence:
+    - specifications/requirements_matrix.yaml
+    - specifications/source/OWNER_DIRECTIVE_2026-11-27.md
+    - tools/gie_registers.py
+- ids:
+  - OWN-04
+  status: in_progress
+  contribution:
+    session: S00
+    summary: The review package is written for the supervisor's independent review; the supervisor cannot be contacted
+      from this session, so the owner is asked to forward it (open item U-13). An internal independent review (two
+      rounds) was performed in addition, not instead.
+    status: implemented
+    evidence:
+    - reviews/session_00/GIE_Session_00_Foundation_Review.pdf
+    - docs/DECISION_LOG.md
+    - reviews/session_00/evidence/independent_review.json
+- ids:
+  - OWN-22
+  status: in_progress
+  contribution:
+    session: S00
+    summary: Every decision of the coordinator is PROPOSED until the owner approves it; the contract lock is PROPOSED;
+      nothing is merged or started beyond Session 00.
+    status: verified
+    evidence:
+    - docs/DECISION_LOG.md
+    - gie/contracts/schemas/LOCK.json
+- ids:
+  - OWN-05
+  - OWN-09
+  - OWN-19
+  - OWN-20
+  - OWN-21
+  status: in_progress
+  contribution:
+    session: S00
+    summary: 'Session 00: no requirement was dropped or reduced; what could not be done is reported as blocked (B-001);
+      additions and deviations are change requests (CR-001..CR-008); no placeholder package exists; statuses are
+      derived from recorded evidence. The rule continues for all later sessions.'
+    status: verified
+    evidence:
+    - specifications/requirements_matrix.yaml
+    - docs/CHANGE_REQUESTS.md
+    - tools/gie_registers.py
+    - tools/check_docs_paths.py
+- ids:
+  - OWN-06
+  status: in_progress
+  contribution:
+    session: S00
+    summary: Sub-agents were used for independent tests, tooling and reviews under the shared rules (D-001, D-023);
+      integration was done by the coordinator only.
+    status: verified
+    evidence:
+    - docs/DECISION_LOG.md
+    - reviews/session_00/evidence/independent_review.json
+- ids:
+  - OWN-07
+  status: verified
+  contribution:
+    session: S00
+    summary: Only Session 00 was performed.
+    status: verified
+    evidence:
+    - reviews/session_00/GIE_Session_00_Foundation_Review.pdf
+    - specifications/dependency_graph.yaml
+- ids:
+  - OWN-08
+  - OWN-16
+  - OWN-17
+  - OWN-18
+  status: in_progress
+  contribution:
+    session: S00
+    summary: The four registers exist, are validated in CI and their readable forms are generated; they continue
+      through all sessions.
+    status: verified
+    evidence:
+    - specifications/requirements_matrix.yaml
+    - specifications/acceptance_tests.yaml
+    - docs/DECISION_LOG.md
+    - docs/IMPLEMENTATION_STATUS.md
+    - docs/ACCEPTANCE_TEST_REGISTER.md
+    - tools/gie_registers.py
+- ids:
+  - OWN-10
+  status: in_progress
+  contribution:
+    session: S00
+    summary: The one technical limitation met (no access to the production tree) is documented as B-001 with three
+      proposed solutions for approval.
+    status: verified
+    evidence:
+    - docs/CHANGE_REQUESTS.md
+    - docs/BASELINE_AUDIT.md
+- ids:
+  - OWN-11
+  status: partial
+  contribution:
+    session: S00
+    summary: Everything in the Session 00 brief that does not need the production tree is complete and verified.
+      The audit, the inventories, the baseline audit document and the real baseline regression are blocked (B-001).
+    status: partial
+    evidence:
+    - reviews/session_00/GIE_Session_00_Foundation_Review.pdf
+    - docs/CHANGE_REQUESTS.md
+    blockers:
+    - B-001
+  blockers:
+  - B-001
+- ids:
+  - OWN-12
+  status: verified
+  contribution:
+    session: S00
+    summary: Work stops at the architectural review gate; no remaining subsystem was started.
+    status: verified
+    evidence:
+    - reviews/session_00/GIE_Session_00_Foundation_Review.pdf
+- ids:
+  - OWN-13
+  status: in_progress
+  contribution:
+    session: S00
+    summary: 'Nothing of the existing systems was touched: the production tree was never accessed; in this repository
+      the pre-existing file Start is byte-identical and branch main is unchanged (checked in CI).'
+    status: verified
+    evidence:
+    - tools/check_protected_paths.py
+    - tests/gie/tools/test_protected_paths.py
+    - reviews/session_00/evidence/ci_results.json
+- ids:
+  - OWN-14
+  status: in_progress
+  contribution:
+    session: S00
+    summary: 'Live execution is impossible in the foundation: four-layer routing lock, tested and scanned in CI
+      (acceptance test S00-ACC-04).'
+    status: verified
+    evidence:
+    - gie/core/routing_lock.py
+    - gie/contracts/guarded.py
+    - tools/check_live_lock.py
+    - tests/gie/core/test_routing_lock.py
+    - reviews/session_00/evidence/test_results.json
+- ids:
+  - OWN-23
+  status: verified
+  contribution:
+    session: S00
+    summary: Foundation review PDF.
+    status: verified
+    evidence:
+    - reviews/session_00/GIE_Session_00_Foundation_Review.pdf
+- ids:
+  - OWN-24
+  status: verified
+  contribution:
+    session: S00
+    summary: 'Shared contracts: code, normative rules, field reference, schemas and lock.'
+    status: verified
+    evidence:
+    - gie/contracts/schemas/LOCK.json
+    - specifications/SHARED_CONTRACTS.md
+    - specifications/contracts/FIELDS.md
+- ids:
+  - OWN-25
+  status: verified
+  contribution:
+    session: S00
+    summary: 'Source files: pushed to the development branch; SHA-256 manifest of the reviewed commit.'
+    status: verified
+    evidence:
+    - reviews/session_00/evidence/file_manifest.json
+- ids:
+  - OWN-26
+  status: verified
+  contribution:
+    session: S00
+    summary: 'Test evidence: machine-readable results of every test with requirement ids, CI results, coverage,
+      benchmark.'
+    status: verified
+    evidence:
+    - reviews/session_00/evidence/test_results.json
+    - reviews/session_00/evidence/ci_results.json
+    - reviews/session_00/evidence/coverage.json
+    - reviews/session_00/evidence/benchmark.json
+- ids:
+  - M-AUTH-01
+  status: not_applicable
+  contribution:
+    session: S00
+    summary: Role statement; nothing to implement.
+    status: not_applicable
+    evidence:
+    - CLAUDE.md
+- ids:
+  - M-AUTH-02
+  - M-AUTH-03
+  status: partial
+  contribution:
+    session: S00
+    summary: 'Session 00: all material decisions are PROPOSED for the owner; the package is prepared for the supervisor''s
+      review (U-13).'
+    status: verified
+    evidence:
+    - docs/DECISION_LOG.md
+    - reviews/session_00/GIE_Session_00_Foundation_Review.pdf
+- ids:
+  - M-AUTH-04
+  status: partial
+  contribution:
+    session: S00
+    summary: Session 00 read the full specification before any work and created CLAUDE.md, the contracts and the
+      decision log that later sessions must read.
+    status: verified
+    evidence:
+    - CLAUDE.md
+    - specifications/SHARED_CONTRACTS.md
+    - docs/DECISION_LOG.md
+- ids:
+  - M-AUTH-05
+  status: partial
+  contribution:
+    session: S00
+    summary: Conflicts and missing dependencies are recorded as B-001, CR-001..CR-008 and the contract extensions
+      CX-01..CX-19.
+    status: verified
+    evidence:
+    - docs/CHANGE_REQUESTS.md
+- ids:
+  - M-AUTH-06
+  - M-AUTH-07
+  - M-AUTH-08
+  status: partial
+  contribution:
+    session: S00
+    summary: 'Session 00: nothing simplified silently; no data invented (all sample data is labelled SYNTHETIC_FIXTURE,
+      the quoted baseline figures are recorded as unverified claims); no placeholder marked complete (documents
+      may only name paths that exist, checked in CI).'
+    status: verified
+    evidence:
+    - tests/gie/samples.py
+    - specifications/baselines/claims.yaml
+    - tools/check_docs_paths.py
+    - docs/CHANGE_REQUESTS.md
+- ids:
+  - M-AUTH-09
+  - M-AUTH-10
+  - M-AUTH-11
+  status: partial
+  contribution:
+    session: S00
+    summary: Session 00 worked only on the development branch; nothing was merged; main is unchanged; the worktree
+      procedure for parallel sessions is defined.
+    status: verified
+    evidence:
+    - docs/WORKTREES.md
+    - tools/check_protected_paths.py
+- ids:
+  - M-AUTH-12
+  status: partial
+  contribution:
+    session: S00
+    summary: 'No existing bot, trader or baseline was modified: none was accessible (B-001) and the pre-existing
+      repository content is byte-identical.'
+    status: verified
+    evidence:
+    - tools/check_protected_paths.py
+    - tests/gie/tools/test_protected_paths.py
+    - reviews/session_00/evidence/ci_results.json
+- ids:
+  - M-AUTH-13
+  status: partial
+  contribution:
+    session: S00
+    summary: 'Only REPLAY and PAPER run modes exist; ''paper'' is in-process simulation, broker demo accounts are
+      treated as real routing (D-011, to be confirmed: U-06).'
+    status: verified
+    evidence:
+    - gie/core/routing_lock.py
+    - tests/gie/core/test_routing_lock.py
+- ids:
+  - M-AUTH-14
+  status: partial
+  contribution:
+    session: S00
+    summary: The execution interfaces exist (ExecutionAdapter, OrderGateway, order lifecycle contract, order gateway);
+      the simulated adapter and the design of a live adapter interface belong to session 07.
+    status: partial
+    evidence:
+    - gie/contracts/interfaces.py
+    - gie/contracts/guarded.py
+    - tests/gie/contracts/test_guarded_adapter.py
+- ids:
+  - M-AUTH-15
+  status: partial
+  contribution:
+    session: S00
+    summary: No credentials exist in the repository (secret scan in CI); the audit tool never emits credential values
+      and does not hash or read files with secret-like names.
+    status: verified
+    evidence:
+    - tools/check_no_secrets.py
+    - tests/gie/tools/test_check_no_secrets.py
+    - reviews/session_00/evidence/ci_results.json
+- ids:
+  - M-AUTH-16
+  - M-AUTH-20
+  - M-AUTH-21
+  - M-AUTH-22
+  - M-AUTH-23
+  - M-AUTH-24
+  - M-AUTH-25
+  - M-AUTH-26
+  status: partial
+  contribution:
+    session: S00
+    summary: The Session 00 review package records the exact commit, the files (SHA-256 manifest), the tests, the
+      commands, the results, the limitations and the requirement ids, as machine-readable evidence.
+    status: verified
+    evidence:
+    - reviews/session_00/GIE_Session_00_Foundation_Review.pdf
+    - reviews/session_00/evidence/ci_results.json
+    - reviews/session_00/evidence/test_results.json
+    - reviews/session_00/evidence/file_manifest.json
+- ids:
+  - M-AUTH-17
+  status: partial
+  contribution:
+    session: S00
+    summary: PDF review of Session 00.
+    status: verified
+    evidence:
+    - reviews/session_00/GIE_Session_00_Foundation_Review.pdf
+- ids:
+  - M-AUTH-18
+  status: partial
+  contribution:
+    session: S00
+    summary: Session 00 stops at the review gate.
+    status: verified
+    evidence:
+    - reviews/session_00/GIE_Session_00_Foundation_Review.pdf
+- ids:
+  - M-AUTH-19
+  status: partial
+  contribution:
+    session: S00
+    summary: Real order routing is disabled by the four-layer lock (acceptance test S00-ACC-04).
+    status: verified
+    evidence:
+    - gie/core/routing_lock.py
+    - tools/check_live_lock.py
+    - tests/gie/core/test_routing_lock.py
+    - reviews/session_00/evidence/test_results.json
+- ids:
+  - M-DIR-01
+  status: verified
+  contribution:
+    session: S00
+    summary: Started with Session 00 only.
+    status: verified
+    evidence:
+    - reviews/session_00/GIE_Session_00_Foundation_Review.pdf
+- ids:
+  - M-DIR-02
+  status: in_progress
+  contribution:
+    session: S00
+    summary: The contracts are submitted for approval (lock status PROPOSED); no parallel work was started. The
+      owner's approval is the open step.
+    status: implemented
+    evidence:
+    - gie/contracts/schemas/LOCK.json
+    - reviews/session_00/GIE_Session_00_Foundation_Review.pdf
+- ids:
+  - M-DIR-03
+  - M-DIR-04
+  - M-DIR-05
+  status: not_started
+  contribution:
+    session: S00
+    summary: The waves are encoded in the dependency graph with the start gate; no wave has been opened.
+    status: implemented
+    evidence:
+    - specifications/dependency_graph.yaml
+- ids:
+  - M-DIR-06
+  status: partial
+  contribution:
+    session: S00
+    summary: 'Session 00: only the coordinator integrated work; the rule and the procedure are in the worktree instructions.'
+    status: verified
+    evidence:
+    - docs/WORKTREES.md
+    - specifications/dependency_graph.yaml
+- ids:
+  - M-DIR-07
+  status: partial
+  contribution:
+    session: S00
+    summary: No live activation is possible (routing lock, S00-ACC-04).
+    status: verified
+    evidence:
+    - gie/core/routing_lock.py
+    - reviews/session_00/evidence/test_results.json
+- ids:
+  - M-DIR-08
+  status: partial
+  contribution:
+    session: S00
+    summary: All numerical settings of the specification are in one file labelled PROPOSED_RESEARCH_PARAMETERS,
+      loaded strictly; none is hard-coded or treated as an approved limit.
+    status: verified
+    evidence:
+    - specifications/research_parameters.toml
+    - gie/core/params.py
+    - tests/gie/core/test_params.py
+- ids:
+  - M-DIR-09
+  status: not_started
+  contribution:
+    session: S00
+    summary: Sessions 10 and 12 are marked early_scaffolding in the dependency graph; neither has been started.
+    status: implemented
+    evidence:
+    - specifications/dependency_graph.yaml
+- ids:
+  - M-GATE-01
+  - M-GATE-02
+  - M-GATE-03
+  - M-GATE-04
+  - M-GATE-07
+  - M-GATE-11
+  status: partial
+  contribution:
+    session: S00
+    summary: The Session 00 review package delivers requirement ids, code paths, test commands and outputs, the
+      commit hash, blockers and change requests.
+    status: verified
+    evidence:
+    - reviews/session_00/GIE_Session_00_Foundation_Review.pdf
+    - reviews/session_00/evidence/ci_results.json
+    - reviews/session_00/evidence/test_results.json
+    - docs/CHANGE_REQUESTS.md
+- ids:
+  - M-GATE-05
+  status: partial
+  contribution:
+    session: S00
+    summary: 'Data provenance of Session 00: no market data was used; every sample record is labelled SYNTHETIC_FIXTURE;
+      every record carries its data origin and every run a manifest.'
+    status: verified
+    evidence:
+    - tests/gie/samples.py
+    - gie/contracts/run.py
+    - gie/contracts/common.py
+- ids:
+  - M-GATE-06
+  status: partial
+  contribution:
+    session: S00
+    summary: Measured performance of the foundation primitives and of the enforcement path (p50 / p95 / p99 / max),
+      labelled as micro-benchmarks on synthetic records on the development container.
+    status: verified
+    evidence:
+    - reviews/session_00/evidence/benchmark.json
+    - tools/benchmark_foundation.py
+- ids:
+  - M-GATE-08
+  status: partial
+  contribution:
+    session: S00
+    summary: Session 00 is submitted with review status 'unverified'; the owner sets approved, conditional or rejected.
+    status: verified
+    evidence:
+    - reviews/session_00/GIE_Session_00_Foundation_Review.pdf
+    - specifications/requirements_matrix.yaml
+- ids:
+  - M-GATE-09
+  status: not_started
+  contribution:
+    session: S00
+    summary: No merge has been requested; nothing is merged without the owner's authorisation.
+    status: not_started
+    evidence:
+    - docs/WORKTREES.md
+- ids:
+  - M-GATE-10
+  status: partial
+  contribution:
+    session: S00
+    summary: The ModelVersion contract makes ACTIVE unreachable without a recorded owner approval, evaluation evidence
+      and shadow runs; the promotion process itself belongs to session 09.
+    status: partial
+    evidence:
+    - gie/contracts/model_version.py
+    - tests/gie/contracts/test_model_version.py
+- ids:
+  - M-DOC-01
+  status: partial
+  contribution:
+    session: S00
+    summary: Specification version V1.0 of 27 Nov 2026 is recorded with the hashes of its text; the review PDF carries
+      the 'Paper / research only' label on every page.
+    status: verified
+    evidence:
+    - specifications/requirements_matrix.yaml
+    - reviews/session_00/GIE_Session_00_Foundation_Review.pdf
+- ids:
+  - COM-01
+  status: partial
+  contribution:
+    session: S00
+    summary: 'Replaced for the whole project by the owner''s directive: one coordinating session with sub-agents
+      and worktrees (D-001, CR-001, approved).'
+    status: verified
+    evidence:
+    - docs/DECISION_LOG.md
+    - docs/CHANGE_REQUESTS.md
+- ids:
+  - COM-02
+  status: partial
+  contribution:
+    session: S00
+    summary: MASTER.pdf and its extracted text were read in full.
+    status: verified
+    evidence:
+    - specifications/extracted/MASTER.txt
+- ids:
+  - COM-03
+  status: in_progress
+  contribution:
+    session: S00
+    summary: Repository layout proposed (D-002) with the mapping from brief paths; awaits the owner's approval (CR-002).
+    status: implemented
+    evidence:
+    - specifications/dependency_graph.yaml
+    - docs/DECISION_LOG.md
+- ids:
+  - COM-04
+  status: not_applicable
+  contribution:
+    session: S00
+    summary: Instruction to the owner on how to hand over a brief; nothing to implement.
+    status: not_applicable
+    evidence:
+    - CLAUDE.md
+- ids:
+  - COM-05
+  status: partial
+  contribution:
+    session: S00
+    summary: Session 00 applied the master requirements relevant to the foundation (see the G-rows of this matrix).
+    status: verified
+    evidence:
+    - specifications/requirements_matrix.yaml
+- ids:
+  - COM-06
+  status: partial
+  contribution:
+    session: S00
+    summary: Shared contracts can only be defined in gie.contracts (the framework refuses any other module), are
+      locked by hash, and change only under the version rules; missing shared types are routed through the coordinator
+      (CR-003, CR-005).
+    status: verified
+    evidence:
+    - gie/contracts/_spec.py
+    - gie/contracts/schemas/LOCK.json
+    - tests/gie/contracts/test_schema_lock.py
+    - docs/CHANGE_REQUESTS.md
+- ids:
+  - COM-07
+  status: partial
+  contribution:
+    session: S00
+    summary: Session 00 used only explicitly labelled synthetic fixtures (DataOrigin.SYNTHETIC_FIXTURE); a derived
+      record cannot claim a better origin than its inputs.
+    status: verified
+    evidence:
+    - tests/gie/samples.py
+    - gie/contracts/causality.py
+    - tests/gie/contracts/test_causality.py
+- ids:
+  - COM-08
+  status: partial
+  contribution:
+    session: S00
+    summary: 'Session 00 claims no integration: no subsystem exists.'
+    status: verified
+    evidence:
+    - reviews/session_00/GIE_Session_00_Foundation_Review.pdf
+- ids:
+  - COM-09
+  status: partial
+  contribution:
+    session: S00
+    summary: Session 00 review package submitted; nothing merged.
+    status: verified
+    evidence:
+    - reviews/session_00/GIE_Session_00_Foundation_Review.pdf
+- ids:
+  - COM-10
+  status: partial
+  contribution:
+    session: S00
+    summary: Every test that did not pass (failed, skipped, blocked) is listed in the review package.
+    status: verified
+    evidence:
+    - reviews/session_00/GIE_Session_00_Foundation_Review.pdf
+    - reviews/session_00/evidence/test_results.json
+- ids:
+  - COM-11
+  status: partial
+  contribution:
+    session: S00
+    summary: No live trading (routing lock, S00-ACC-04).
+    status: verified
+    evidence:
+    - gie/core/routing_lock.py
+    - reviews/session_00/evidence/test_results.json
+- ids:
+  - COM-12
+  status: partial
+  contribution:
+    session: S00
+    summary: Unimplemented and blocked requirements of Session 00 are listed explicitly in the review package.
+    status: verified
+    evidence:
+    - reviews/session_00/GIE_Session_00_Foundation_Review.pdf
+    - specifications/requirements_matrix.yaml
+- ids:
+  - G01-01
+  - G06-07
+  status: partial
+  contribution:
+    session: S00
+    summary: Plans, GIE orders and GIE positions can only be XAUUSD (contract invariants); other symbols can only
+      be observed. Foundation part only; the behaviour belongs to the sessions named for this requirement.
+    status: verified
+    evidence:
+    - gie/contracts/trade_plan.py
+    - gie/contracts/order_event.py
+    - gie/contracts/position.py
+    - tests/gie/contracts/test_trade_plan.py
+    - tests/gie/contracts/test_order_event.py
+- ids:
+  - G01-11
+  - G03-13
+  - G09-05
+  status: partial
+  contribution:
+    session: S00
+    summary: Session 00 presents the specification's numbers only as research parameters and unverified claims;
+      no performance and no zero latency is claimed anywhere.
+    status: verified
+    evidence:
+    - specifications/research_parameters.toml
+    - specifications/baselines/claims.yaml
+    - reviews/session_00/GIE_Session_00_Foundation_Review.pdf
+- ids:
+  - G02-01
+  status: partial
+  contribution:
+    session: S00
+    summary: The Evidence contract admits exactly the six engines as strategy producers with bullish / bearish scores.
+      The engines themselves could not be inspected (B-001); their adapters belong to session 02. Foundation part
+      only; the behaviour belongs to the sessions named for this requirement.
+    status: partial
+    evidence:
+    - gie/contracts/evidence.py
+    - tests/gie/contracts/test_evidence.py
+    blockers:
+    - B-001
+  blockers:
+  - B-001
+- ids:
+  - G02-02
+  status: partial
+  contribution:
+    session: S00
+    summary: 'Exact de-duplication is defined by the contract: records of different engines about the same market
+      event share one market_event_id and are grouped deterministically. Foundation part only; the behaviour belongs
+      to the sessions named for this requirement.'
+    status: verified
+    evidence:
+    - gie/contracts/evidence.py
+    - gie/contracts/identity.py
+    - tests/gie/contracts/test_evidence.py
+- ids:
+  - G02-03
+  - G02-04
+  - G02-05
+  - G02-06
+  status: partial
+  contribution:
+    session: S00
+    summary: The Candidate and TradePlan contracts carry expected net R, both kinds of uncertainty (open item U-16),
+      destinations and alternative plans per opportunity. Foundation part only; the behaviour belongs to the sessions
+      named for this requirement.
+    status: verified
+    evidence:
+    - gie/contracts/candidate.py
+    - gie/contracts/trade_plan.py
+    - tests/gie/contracts/test_candidate.py
+    - tests/gie/contracts/test_trade_plan.py
+- ids:
+  - G02-08
+  - G02-09
+  status: blocked
+  contribution:
+    session: S00
+    summary: The baselines are not accessible (B-001) and were therefore neither modified nor frozen. The freeze
+      / verify harness is ready and self-tested on a labelled fixture.
+    status: blocked
+    evidence:
+    - tools/baseline_freeze.py
+    - specifications/baselines/registry.yaml
+    - tests/gie/tools/test_baseline_freeze.py
+    blockers:
+    - B-001
+  blockers:
+  - B-001
+- ids:
+  - G03-05
+  - G03-06
+  status: partial
+  contribution:
+    session: S00
+    summary: The foundation contains no network, LLM or training call; the architecture and live-lock scans forbid
+      network clients in decision and protection packages. Foundation part only; the behaviour belongs to the sessions
+      named for this requirement.
+    status: verified
+    evidence:
+    - tools/check_architecture.py
+    - tools/check_live_lock.py
+    - tests/gie/tools/test_check_architecture.py
+- ids:
+  - G03-07
+  status: partial
+  contribution:
+    session: S00
+    summary: The target is a research parameter. Measured cost of the foundation primitives on the development container
+      is reported; whether tick processing meets the target must be measured by sessions 01 / 06 on the owner's
+      hardware with real ticks.
+    status: partial
+    evidence:
+    - specifications/research_parameters.toml
+    - reviews/session_00/evidence/benchmark.json
+- ids:
+  - G03-10
+  - G03-11
+  status: partial
+  contribution:
+    session: S00
+    summary: Latency recorder with exact nearest-rank p50 / p95 / p99 / max; event, receive and decision time on
+      every record make end-to-end delays measurable. Foundation part only; the behaviour belongs to the sessions
+      named for this requirement.
+    status: verified
+    evidence:
+    - gie/core/latency.py
+    - tests/gie/core/test_latency.py
+    - reviews/session_00/evidence/benchmark.json
+- ids:
+  - G03-12
+  - G06-04
+  status: partial
+  contribution:
+    session: S00
+    summary: Freshness and expiry helpers fail closed at the boundary; the order gateway refuses an entry whose
+      plan or approval has expired. Foundation part only; the behaviour belongs to the sessions named for this requirement.
+    status: verified
+    evidence:
+    - gie/core/freshness.py
+    - gie/contracts/authorization.py
+    - tests/gie/core/test_freshness.py
+    - tests/gie/contracts/test_authorization.py
+- ids:
+  - G04-11
+  - G04-12
+  status: partial
+  contribution:
+    session: S00
+    summary: 'Every plan and position has a hard stop on the losing side; a stop can only be tightened and never
+      removed (transition validators, ledger, journal, order gateway); interpretation to confirm: U-12. Foundation
+      part only; the behaviour belongs to the sessions named for this requirement.'
+    status: verified
+    evidence:
+    - gie/contracts/position.py
+    - gie/contracts/order_event.py
+    - gie/contracts/ledger.py
+    - tests/gie/contracts/test_position.py
+    - tests/gie/contracts/test_order_event.py
+    - tests/gie/contracts/test_ledger.py
+- ids:
+  - G04-13
+  - G04-15
+  status: partial
+  contribution:
+    session: S00
+    summary: Position carries executable net P&L with a peak that can never decrease across revisions. The ratchet
+      itself belongs to session 06. Foundation part only; the behaviour belongs to the sessions named for this requirement.
+    status: verified
+    evidence:
+    - gie/contracts/position.py
+    - tests/gie/contracts/test_position.py
+- ids:
+  - G05-01
+  - G05-05
+  status: partial
+  contribution:
+    session: S00
+    summary: Daily states and the four levels are contract vocabulary and research parameters (ordering halt < defensive
+      < recovery < 0 < profit protection enforced by the loader); limits are decided on exact amounts and the sequence
+      rule of a trading day is enforced by the run ledger (D-028); open items U-03, U-14. The state machine belongs
+      to session 08. Foundation part only; the behaviour belongs to the sessions named for this requirement.
+    status: verified
+    evidence:
+    - gie/contracts/risk_decision.py
+    - specifications/research_parameters.toml
+    - gie/core/params.py
+    - tests/gie/contracts/test_risk_decision.py
+    - tests/gie/core/test_params.py
+- ids:
+  - G05-10
+  status: partial
+  contribution:
+    session: S00
+    summary: Trading day = Europe/Prague calendar date with exact DST handling; RiskDecision verifies its trading
+      day. The account's real reset instant is open item U-04. Foundation part only; the behaviour belongs to the
+      sessions named for this requirement.
+    status: verified
+    evidence:
+    - gie/core/timeutil.py
+    - tests/gie/core/test_timeutil.py
+    - tests/gie/contracts/test_risk_decision.py
+- ids:
+  - G05-12
+  status: partial
+  contribution:
+    session: S00
+    summary: Positions of other systems on the account are representable (owner EXTERNAL) as observations; GIE never
+      sends orders for them. Tracking them belongs to sessions 07 / 08. Foundation part only; the behaviour belongs
+      to the sessions named for this requirement.
+    status: verified
+    evidence:
+    - gie/contracts/position.py
+    - gie/contracts/authorization.py
+    - tests/gie/contracts/test_position.py
+- ids:
+  - G07-10
+  - G07-11
+  status: partial
+  contribution:
+    session: S00
+    summary: 'ModelVersion: ACTIVE only through SHADOW and with a recorded owner approval and evidence; rollback
+      and re-activation rules; one ACTIVE version per family; a run pins its models and an entry needs a model status
+      the role of the run allows (D-026, open item U-17). The registry belongs to session 09. Foundation part only;
+      the behaviour belongs to the sessions named for this requirement.'
+    status: verified
+    evidence:
+    - gie/contracts/model_version.py
+    - tests/gie/contracts/test_model_version.py
+- ids:
+  - G08-01
+  status: partial
+  contribution:
+    session: S00
+    summary: Order lifecycle contract with state machine, replacement protocol, idempotency and the order gateway.
+      The lifecycle engine belongs to session 07. Foundation part only; the behaviour belongs to the sessions named
+      for this requirement.
+    status: partial
+    evidence:
+    - gie/contracts/order_event.py
+    - gie/contracts/guarded.py
+    - tests/gie/contracts/test_order_event.py
+- ids:
+  - G08-03
+  - G08-10
+  status: partial
+  contribution:
+    session: S00
+    summary: Live lock with four layers; acceptance test S00-ACC-04. Later sessions must keep it intact; CI enforces
+      that.
+    status: verified
+    evidence:
+    - gie/core/routing_lock.py
+    - gie/contracts/guarded.py
+    - tools/check_live_lock.py
+    - specifications/lock_pins.json
+    - tests/gie/core/test_routing_lock.py
+    - tests/gie/tools/test_check_live_lock.py
+    - reviews/session_00/evidence/test_results.json
+- ids:
+  - G08-06
+  status: partial
+  contribution:
+    session: S00
+    summary: Feed silence is measurable from receive time; timers for silence detection come from the injected scheduler;
+      stale data raises and forbids new risk. Detection and reaction belong to sessions 01 / 06 / 07. Foundation
+      part only; the behaviour belongs to the sessions named for this requirement.
+    status: verified
+    evidence:
+    - gie/contracts/tick.py
+    - gie/core/clock.py
+    - gie/core/freshness.py
+    - tests/gie/contracts/test_tick.py
+- ids:
+  - G08-07
+  status: partial
+  contribution:
+    session: S00
+    summary: Orders are idempotent by a client_order_id derived from the risk decision or position; the journal
+      treats an identical repeat as a duplicate and refuses conflicting content; the gateway journals a request
+      before the adapter sees it and forwards a repeated request again (the adapter is idempotent per order event).
+      Foundation part only; the behaviour belongs to the sessions named for this requirement.
+    status: verified
+    evidence:
+    - gie/contracts/identity.py
+    - gie/contracts/guarded.py
+    - gie/contracts/journal.py
+    - tests/gie/contracts/test_guarded_adapter.py
+    - tests/gie/contracts/test_journal.py
+- ids:
+  - G09-01
+  - G09-02
+  - G09-07
+  - G09-11
+  - G09-12
+  - G09-13
+  status: not_started
+  contribution:
+    session: S00
+    summary: Recorded as an unverified claim with its open questions (U-05); nothing in the repository treats it
+      as verified. Reconciliation belongs to sessions 02 and 10 and needs the baselines (B-001).
+    status: implemented
+    evidence:
+    - specifications/baselines/claims.yaml
+    blockers:
+    - B-001
+  blockers:
+  - B-001
+- ids:
+  - G10-17
+  status: partial
+  contribution:
+    session: S00
+    summary: Every test outcome and every blocked item of Session 00 is reported; evidence is generated, never selected
+      by hand. Foundation part only; the behaviour belongs to the sessions named for this requirement.
+    status: verified
+    evidence:
+    - reviews/session_00/evidence/test_results.json
+    - reviews/session_00/GIE_Session_00_Foundation_Review.pdf

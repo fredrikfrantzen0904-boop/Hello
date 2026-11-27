@@ -1,0 +1,59 @@
+{
+  "generated_by": "tools/summarize_reviews.py",
+  "rounds": [
+    {
+      "by_reviewer": {
+        "lens:data-intel": 25,
+        "lens:determinism": 23,
+        "lens:predict-decide-learn": 25,
+        "lens:safety": 24,
+        "req:briefs": 17,
+        "req:master": 22
+      },
+      "by_severity": {
+        "blocker": 5,
+        "major": 64,
+        "minor": 58,
+        "note": 9
+      },
+      "declined": 0,
+      "dispositions_file": "reviews/session_00/review_round1_dispositions.yaml",
+      "findings": 136,
+      "findings_file": "reviews/session_00/evidence/review_round1_findings.json",
+      "fixed": 123,
+      "recorded": 13,
+      "round": 1,
+      "source": "review round 1: 6 independent reviewers"
+    },
+    {
+      "by_reviewer": {
+        "lens:backtest-dash-qa": 20,
+        "lens:reflex-exec-risk": 20
+      },
+      "by_severity": {
+        "blocker": 1,
+        "major": 31,
+        "minor": 8
+      },
+      "declined": 0,
+      "dispositions_file": "reviews/session_00/review_round2_dispositions.yaml",
+      "findings": 40,
+      "findings_file": "reviews/session_00/evidence/review_round2_findings.json",
+      "fixed": 27,
+      "recorded": 13,
+      "round": 2,
+      "source": "review round 2: 2 independent reviewers"
+    },
+    {
+      "declined": 2,
+      "findings": 76,
+      "fixed": 72,
+      "recorded": 2,
+      "reports_file": "reviews/session_00/evidence/test_author_reports.json",
+      "source": "defect reports of 18 independent test authors"
+    }
+  ],
+  "schema_version": 1,
+  "session": "S00",
+  "summary": "Inside the session, independence was obtained by separation of roles (decision D-023): the foundation code was written by the coordinator; the tests were derived from the specification by engineers who did not write the code and who reported defects instead of fixing them; reviewers examined the contracts against the owner's specification from the point of view of the sessions that must build on them, and of safety and determinism. Every finding is kept verbatim with its disposition."
+}

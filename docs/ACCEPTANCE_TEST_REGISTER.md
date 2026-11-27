@@ -10,23 +10,23 @@ One entry per acceptance requirement of the session briefs. 'status' is maintain
 
 | status | acceptance tests |
 |---|---:|
-| planned | 91 |
-| passing | 0 |
+| planned | 85 |
+| passing | 4 |
 | failing | 0 |
 | blocked | 0 |
-| partial | 0 |
+| partial | 2 |
 | **total** | 91 |
 
 ## S00
 
 | id | acceptance test | status | tests passed/failed/skipped | test modules | blockers |
 |---|---|---|---|---|---|
-| AT-S00-ACC-01 | Contract round-trip tests | planned | - | `tests/gie/contracts/test_roundtrip.py`<br>`tests/gie/contracts/test_roundtrip_property.py`<br>`tests/gie/contracts/test_golden.py` |  |
-| AT-S00-ACC-02 | Contract compatibility tests | planned | - | `tests/gie/contracts/test_compatibility.py`<br>`tests/gie/contracts/test_schema_lock.py` |  |
-| AT-S00-ACC-03 | Replay clock | planned | - | `tests/gie/core/test_clock.py` |  |
-| AT-S00-ACC-04 | Paper-only routing lock | planned | - | `tests/gie/core/test_routing_lock.py`<br>`tests/gie/tools/test_check_live_lock.py`<br>`tests/gie/contracts/test_guarded_adapter.py` |  |
-| AT-S00-ACC-05 | Baseline regression | planned | - | `tests/gie/baseline/test_baseline_regression.py` | B-001 |
-| AT-S00-ACC-06 | No production changes | planned | - | `tests/gie/tools/test_protected_paths.py`<br>`tests/gie/tools/test_baseline_audit.py`<br>`tests/gie/baseline/test_baseline_regression.py` | B-001 |
+| AT-S00-ACC-01 | Contract round-trip tests | passing | 940 / 0 / 0<br>`reviews/session_00/evidence/test_results.json` | `tests/gie/contracts/test_roundtrip.py`<br>`tests/gie/contracts/test_roundtrip_property.py`<br>`tests/gie/contracts/test_golden.py` |  |
+| AT-S00-ACC-02 | Contract compatibility tests | passing | 2453 / 0 / 0<br>`reviews/session_00/evidence/test_results.json` | `tests/gie/contracts/test_compatibility.py`<br>`tests/gie/contracts/test_schema_lock.py`<br>`tests/gie/contracts/test_contract_ordering.py`<br>`tests/gie/contracts/test_identity.py` |  |
+| AT-S00-ACC-03 | Replay clock | passing | 182 / 0 / 0<br>`reviews/session_00/evidence/test_results.json` | `tests/gie/core/test_clock.py` |  |
+| AT-S00-ACC-04 | Paper-only routing lock | passing | 1086 / 0 / 0<br>`reviews/session_00/evidence/test_results.json` | `tests/gie/core/test_routing_lock.py`<br>`tests/gie/tools/test_check_live_lock.py`<br>`tests/gie/contracts/test_guarded_adapter.py`<br>`tests/gie/contracts/test_order_event.py` |  |
+| AT-S00-ACC-05 | Baseline regression | partial | 1 / 0 / 4<br>`reviews/session_00/evidence/test_results.json` | `tests/gie/baseline/test_baseline_regression.py` | B-001 |
+| AT-S00-ACC-06 | No production changes | partial | 81 / 0 / 1<br>`reviews/session_00/evidence/test_results.json` | `tests/gie/tools/test_protected_paths.py`<br>`tests/gie/tools/test_baseline_audit.py`<br>`tests/gie/baseline/test_baseline_regression.py` | B-001 |
 
 ## S01
 

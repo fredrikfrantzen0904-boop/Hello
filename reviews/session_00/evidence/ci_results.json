@@ -1,0 +1,247 @@
+{
+  "branch": "claude/gold-intelligence-engine-l9uw10",
+  "commit": "3965ccafcef907468fec4699c68ecc7e190dacce",
+  "counts": {
+    "blocked": 1,
+    "failed": 2,
+    "passed": 14
+  },
+  "generated_by": "tools/ci.py",
+  "overall": "failed",
+  "platform": "Linux-6.18.44-fc-v880-x86_64-with-glibc2.39",
+  "python": "3.13.18",
+  "schema_version": 1,
+  "steps": [
+    {
+      "command": "python -m ruff check .",
+      "duration_s": 0.042,
+      "exit_code": 0,
+      "name": "lint (ruff check)",
+      "note": "",
+      "output_tail": "All checks passed!\n",
+      "requirement_ids": [
+        "S00-ASG-29"
+      ],
+      "status": "passed"
+    },
+    {
+      "command": "python -m ruff format --check .",
+      "duration_s": 0.031,
+      "exit_code": 0,
+      "name": "format (ruff format --check)",
+      "note": "",
+      "output_tail": "124 files already formatted\n",
+      "requirement_ids": [
+        "S00-ASG-29"
+      ],
+      "status": "passed"
+    },
+    {
+      "command": "python -m mypy",
+      "duration_s": 0.148,
+      "exit_code": 0,
+      "name": "types (mypy --strict)",
+      "note": "",
+      "output_tail": "Success: no issues found in 56 source files\n",
+      "requirement_ids": [
+        "S00-ASG-29"
+      ],
+      "status": "passed"
+    },
+    {
+      "command": "python -m gie.contracts.schema_gen --check",
+      "duration_s": 0.136,
+      "exit_code": 0,
+      "name": "contract schemas, lock and evolution rules",
+      "note": "",
+      "output_tail": "contract schemas consistent: 10 contracts\n",
+      "requirement_ids": [
+        "S00-ACC-02",
+        "S00-DEL-02",
+        "COM-06"
+      ],
+      "status": "passed"
+    },
+    {
+      "command": "python -m tools.render_contract_docs --check",
+      "duration_s": 0.121,
+      "exit_code": 0,
+      "name": "generated contract reference is current",
+      "note": "",
+      "output_tail": "contract field reference is up to date\n",
+      "requirement_ids": [
+        "S00-DEL-02"
+      ],
+      "status": "passed"
+    },
+    {
+      "command": "python -m tools.make_golden --check",
+      "duration_s": 0.256,
+      "exit_code": 0,
+      "name": "golden contract messages still decode and re-encode byte for byte",
+      "note": "",
+      "output_tail": "golden messages consistent: 50 files and the run trace (28 records)\n",
+      "requirement_ids": [
+        "S00-ACC-01",
+        "S00-ACC-02"
+      ],
+      "status": "passed"
+    },
+    {
+      "command": "python -m tools.check_live_lock",
+      "duration_s": 2.141,
+      "exit_code": 0,
+      "name": "paper-only routing lock (static scan)",
+      "note": "",
+      "output_tail": "check_live_lock: OK - 97 Python files scanned, no violation of LL000-LL015; the paper-only routing lock is intact\n",
+      "requirement_ids": [
+        "S00-ACC-04",
+        "G08-03",
+        "G08-10",
+        "M-AUTH-19",
+        "M-DIR-07",
+        "COM-11",
+        "OWN-14"
+      ],
+      "status": "passed"
+    },
+    {
+      "command": "python -m tools.check_architecture",
+      "duration_s": 0.606,
+      "exit_code": 0,
+      "name": "architecture and dependency rules",
+      "note": "",
+      "output_tail": "check_architecture: OK - 38 Python files scanned, 240 tracked files owned; no violation of AR000-AR009\n",
+      "requirement_ids": [
+        "S00-ASG-10",
+        "COM-06"
+      ],
+      "status": "passed"
+    },
+    {
+      "command": "python -m tools.check_protected_paths",
+      "duration_s": 0.127,
+      "exit_code": 0,
+      "name": "protected paths unchanged (no production changes)",
+      "note": "",
+      "output_tail": "check_protected_paths: OK - 1 protected path(s) byte-identical to the record and to base commit 35e32cff311eef08294540fd88d9a01a5a2f7c41; no violation of PP000-PP006\n",
+      "requirement_ids": [
+        "S00-ACC-06",
+        "OWN-13",
+        "M-AUTH-12"
+      ],
+      "status": "passed"
+    },
+    {
+      "command": "python -m tools.check_docs_paths",
+      "duration_s": 0.127,
+      "exit_code": 1,
+      "name": "documents name only paths that exist",
+      "note": "",
+      "output_tail": "docs/ARCHITECTURE.md:237: DP001 `reviews/session_00/evidence/benchmark.json` is named but does not exist in the repository\ndocs/DECISION_LOG.md:409: DP001 `reviews/session_00/evidence/benchmark.json` is named but does not exist in the repository\nspecifications/SHARED_CONTRACTS.md:270: DP001 `reviews/session_00/evidence/benchmark.json` is named but does not exist in the repository\ncheck_docs_paths: FAILED - 3 violation(s)\n",
+      "requirement_ids": [
+        "M-AUTH-08",
+        "OWN-21"
+      ],
+      "status": "failed"
+    },
+    {
+      "command": "python -m tools.check_no_secrets",
+      "duration_s": 2.382,
+      "exit_code": 0,
+      "name": "no credentials in the repository",
+      "note": "",
+      "output_tail": "check_no_secrets: OK - 240 files scanned (15 binary or unopened, names checked only), 26 finding(s) allow-listed; no violation of SC000-SC006\n",
+      "requirement_ids": [
+        "M-AUTH-15"
+      ],
+      "status": "passed"
+    },
+    {
+      "command": "python -m pytest -q -p no:cacheprovider --gie-evidence=./ci-evidence/test_results.json --junitxml=./ci-evidence/junit.xml --cov=gie --cov-branch --cov-report=json:./ci-evidence/coverage.json --cov-report=term",
+      "duration_s": 414.969,
+      "exit_code": 0,
+      "name": "tests with requirement evidence",
+      "note": "",
+      "output_tail": "......................... [ 89%]\n........................................................................ [ 90%]\n........................................................................ [ 91%]\n........................................................................ [ 91%]\n........................................................................ [ 92%]\n........................................................................ [ 92%]\n........................................................................ [ 93%]\n........................................................................ [ 93%]\n........................................................................ [ 94%]\n........................................................................ [ 95%]\n........................................................................ [ 95%]\n........................................................................ [ 96%]\n........................................................................ [ 96%]\n........................................................................ [ 97%]\n........................................................................ [ 97%]\n........................................................................ [ 98%]\n........................................................................ [ 99%]\n........................................................................ [ 99%]\n..................................                                       [100%]\n================================ tests coverage ================================\n_______________ coverage: platform linux, python 3.13.18-final-0 _______________\n\nName                             Stmts   Miss Branch BrPart  Cover   Missing\n----------------------------------------------------------------------------\ngie/__init__.py                      1      0      0      0   100%\ngie/contracts/__init__.py           24      0      0      0   100%\ngie/contracts/_spec.py             443      3    166      1    99%   640-641, 652\ngie/contracts/authorization.py     113      2     82      2    98%   112, 172\ngie/contracts/behaviour.py          45      0     14      0   100%\ngie/contracts/candidate.py          89      0     18      0   100%\ngie/contracts/causality.py          49      0     24      0   100%\ngie/contracts/clock.py              23      0      0      0   100%\ngie/contracts/codec.py              43      0     14      0   100%\ngie/contracts/common.py            109      0      4      0   100%\ngie/contracts/compat.py            209     16    116      8    92%   96, 101, 162-165, 190-192, 194, 231, 243-244, 271, 311-312\ngie/contracts/evidence.py          111      1     32      1    99%   427\ngie/contracts/guarded.py           138      1     40      1    99%   145\ngie/contracts/identity.py           92      0     22      0   100%\ngie/contracts/interfaces.py         40      0      0      0   100%\ngie/contracts/journal.py           365      9    130      6    97%   234, 252->exit, 395-398, 506-507, 511, 635, 651\ngie/contracts/ledger.py            267      2    148      3    99%   148->147, 159, 263\ngie/contracts/model_version.py     173      1     56      1    99%   412\ngie/contracts/order_event.py       314      7    154      7    97%   259, 689, 693, 752, 838, 846, 859\ngie/contracts/ordering.py           39      0      8      0   100%\ngie/contracts/position.py          134      2     64      2    98%   93, 95\ngie/contracts/registry.py           46      0     10      0   100%\ngie/contracts/risk_decision.py     121      1     34      1    99%   376\ngie/contracts/run.py               108      0     22      0   100%\ngie/contracts/schema_gen.py        136      0     52      0   100%\ngie/contracts/tick.py               53      0      6      0   100%\ngie/contracts/trade_plan.py        137      0     30      0   100%\ngie/core/__init__.py                 0      0      0      0   100%\ngie/core/canonical.py              199      4     90      3    98%   102->106, 186, 188, 314-315\ngie/core/clock.py                  282      3     58      1    99%   487, 522, 557\ngie/core/errors.py                  83      1     18      1    98%   38\ngie/core/freshness.py               61      0     20      0   100%\ngie/core/ids.py                     58      1     24      1    98%   127\ngie/core/latency.py                 73      0     20      0   100%\ngie/core/ordering.py               136      2     62      2    98%   222, 238\ngie/core/params.py                 126      1     44      0    99%   109\ngie/core/routing_lock.py           150      4     60      2    97%   191, 232, 333, 336\ngie/core/timeutil.py                66      0     12      0   100%\n----------------------------------------------------------------------------\nTOTAL                             4656     61   1654     43    98%\nCoverage JSON written to file /home/user/Hello/ci-evidence/coverage.json\n=========================== short test summary info ============================\nSKIPPED [1] tests/gie/baseline/test_baseline_regression.py:50: BLOCKED: B-001 - baseline gce-b is not frozen yet: its files are unknown until the audit of the production tree\nSKIPPED [1] tests/gie/baseline/test_baseline_regression.py:50: BLOCKED: B-001 - baseline round-1 is not frozen yet: its files are unknown until the audit of the production tree\nSKIPPED [1] tests/gie/baseline/test_baseline_regression.py:50: BLOCKED: B-001 - baseline round-2 is not frozen yet: its files are unknown until the audit of the production tree\nSKIPPED [1] tests/gie/baseline/test_baseline_regression.py:50: BLOCKED: B-001 - baseline cavemen-trades is not frozen yet: its files are unknown until the audit of the production tree\nSKIPPED [1] tests/gie/baseline/test_baseline_regression.py:74: BLOCKED: B-001 - environment variable GIE_PRODUCTION_MANIFEST_BEFORE is not set: manifests of the production tree taken before and after the session are needed (tools/audit/gie_baseline_audit.py manifest, run by the owner)\n12485 passed, 5 skipped in 413.16s (0:06:53)\n",
+      "requirement_ids": [
+        "S00-ACC-01",
+        "S00-ACC-02",
+        "S00-ACC-03",
+        "S00-ACC-04",
+        "S00-ACC-05",
+        "S00-ACC-06"
+      ],
+      "status": "passed"
+    },
+    {
+      "command": "python -m tools.gie_registers sync-evidence --evidence ./ci-evidence/test_results.json --check",
+      "duration_s": 0.732,
+      "exit_code": 1,
+      "name": "acceptance register equals what this test run shows",
+      "note": "",
+      "output_tail": "specifications/acceptance_tests.yaml: 6 entries differ from what sync-evidence would write for /home/user/Hello/ci-evidence/test_results.json (nothing was written)\nAT-S00-ACC-01: the register records status 'planned' without recorded evidence, but /home/user/Hello/ci-evidence/test_results.json gives status 'passing' with 940 test(s) (940 passed, 0 failed, 0 skipped)\nAT-S00-ACC-02: the register records status 'planned' without recorded evidence, but /home/user/Hello/ci-evidence/test_results.json gives status 'passing' with 2453 test(s) (2453 passed, 0 failed, 0 skipped)\nAT-S00-ACC-03: the register records status 'planned' without recorded evidence, but /home/user/Hello/ci-evidence/test_results.json gives status 'passing' with 182 test(s) (182 passed, 0 failed, 0 skipped)\nAT-S00-ACC-04: the register records status 'planned' without recorded evidence, but /home/user/Hello/ci-evidence/test_results.json gives status 'passing' with 1086 test(s) (1086 passed, 0 failed, 0 skipped)\nAT-S00-ACC-05: the register records status 'planned' without recorded evidence, but /home/user/Hello/ci-evidence/test_results.json gives status 'partial' with 5 test(s) (1 passed, 0 failed, 4 skipped)\nAT-S00-ACC-06: the register records status 'planned' without recorded evidence, but /home/user/Hello/ci-evidence/test_results.json gives status 'partial' with 82 test(s) (81 passed, 0 failed, 1 skipped)\nNOTE: AT-S00-ACC-02: marked tests found in tests/gie/contracts/test_contract_ordering.py, tests/gie/contracts/test_identity.py, not listed in 'test_modules'\nNOTE: AT-S00-ACC-04: marked tests found in tests/gie/contracts/test_order_event.py, not listed in 'test_modules'\n7 problem(s)\n",
+      "requirement_ids": [
+        "OWN-18",
+        "M-AUTH-26",
+        "S12-ASG-07"
+      ],
+      "status": "failed"
+    },
+    {
+      "command": "python -m tools.summarize_reviews --check",
+      "duration_s": 0.089,
+      "exit_code": 0,
+      "name": "every independent review finding has a disposition",
+      "note": "",
+      "output_tail": "review round 1: 6 independent reviewers: 136 findings - fixed 123, recorded 13, declined 0\nreview round 2: 2 independent reviewers: 40 findings - fixed 27, recorded 13, declined 0\ndefect reports of 18 independent test authors: 76 findings - fixed 72, recorded 2, declined 2\n",
+      "requirement_ids": [
+        "OWN-09",
+        "COM-10"
+      ],
+      "status": "passed"
+    },
+    {
+      "command": "python -m tools.gie_registers validate",
+      "duration_s": 1.005,
+      "exit_code": 0,
+      "name": "registers are valid",
+      "note": "",
+      "output_tail": "registers valid: 584 requirements, 91 acceptance tests (log entries: D 28, U 18, B 1, CR 8)\nNOTE: B-001 is OPEN: when statuses are set, S00-ASG-01, S00-ASG-02, S00-ASG-03, S00-ASG-04, S00-ASG-05, S00-ASG-06, S00-ASG-07, S00-ACC-05, S00-ACC-06, S00-DEL-04, G02-08, G02-09 must be 'blocked' or 'partial' (no requirement has a status yet, so this does not fail)\n",
+      "requirement_ids": [
+        "OWN-08",
+        "S00-ASG-28"
+      ],
+      "status": "passed"
+    },
+    {
+      "command": "python -m tools.gie_registers render --check",
+      "duration_s": 0.646,
+      "exit_code": 0,
+      "name": "generated registers are current",
+      "note": "",
+      "output_tail": "specifications/REQUIREMENTS_MATRIX.md: up to date\ndocs/ACCEPTANCE_TEST_REGISTER.md: up to date\ndocs/IMPLEMENTATION_STATUS.md: up to date\n",
+      "requirement_ids": [
+        "OWN-08",
+        "S00-ASG-28"
+      ],
+      "status": "passed"
+    },
+    {
+      "command": "python -m tools.baseline_freeze verify",
+      "duration_s": 0.142,
+      "exit_code": 3,
+      "name": "baseline regression (frozen baselines byte-identical)",
+      "note": "baselines are not frozen or not accessible (blocker B-001)",
+      "output_tail": "UNVERIFIED gce-b: not frozen (blocker B-001)\nUNVERIFIED round-1: not frozen (blocker B-001)\nUNVERIFIED round-2: not frozen (blocker B-001)\nUNVERIFIED cavemen-trades: not frozen (blocker B-001)\nbaseline_freeze verify: exit 3\n",
+      "requirement_ids": [
+        "S00-ACC-05",
+        "G02-08",
+        "G02-09"
+      ],
+      "status": "blocked"
+    }
+  ],
+  "working_tree_clean": true,
+  "working_tree_clean_after": true
+}

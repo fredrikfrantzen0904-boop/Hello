@@ -8,7 +8,6 @@ until the owner sets it to approved, conditional or rejected. Paper / research o
 | `GIE_Session_00_Foundation_Review.pdf` | the review document; every table in it is generated from the files below and from the registers |
 | `evidence/ci_results.json` | every quality gate of `python -m tools.ci` with command, exit code, duration and output, and the commit it ran on |
 | `evidence/test_results.json` | outcome of every test with the requirement and acceptance ids it verifies |
-| `evidence/junit.xml` | the same test run in JUnit format |
 | `evidence/coverage.json` | statement and branch coverage of the `gie` package from the same run |
 | `evidence/benchmark.json` | micro-benchmarks of the foundation primitives and of the enforcement path (synthetic records, development container) |
 | `evidence/file_manifest.json` | SHA-256 of every file of the reviewed commit, read from git |
@@ -47,6 +46,10 @@ python -m tools.gie_registers sync-evidence --evidence out/test_results.json
 python -m tools.gie_registers apply --patch reviews/session_00/status_patch.yaml
 python -m tools.gie_registers render
 ```
+
+The JUnit file of the test run is written by the CI as well but is not committed: it repeats the
+fake fixtures of the secret scanner's own tests in forms that the secret scan rightly reports. It
+is kept as a workflow artifact of the hosted CI.
 
 ## What is not in this package
 

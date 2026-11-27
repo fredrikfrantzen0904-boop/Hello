@@ -22,7 +22,13 @@ acceptance_tests:
   - tests/gie/contracts/test_roundtrip.py
   - tests/gie/contracts/test_roundtrip_property.py
   - tests/gie/contracts/test_golden.py
-  status: planned
+  status: passing
+  evidence:
+    file: reviews/session_00/evidence/test_results.json
+    tests: 940
+    passed: 940
+    failed: 0
+    skipped: 0
   blockers: []
   notes: ''
 - id: AT-S00-ACC-02
@@ -33,7 +39,15 @@ acceptance_tests:
   test_modules:
   - tests/gie/contracts/test_compatibility.py
   - tests/gie/contracts/test_schema_lock.py
-  status: planned
+  - tests/gie/contracts/test_contract_ordering.py
+  - tests/gie/contracts/test_identity.py
+  status: passing
+  evidence:
+    file: reviews/session_00/evidence/test_results.json
+    tests: 2453
+    passed: 2453
+    failed: 0
+    skipped: 0
   blockers: []
   notes: ''
 - id: AT-S00-ACC-03
@@ -43,7 +57,13 @@ acceptance_tests:
   verification: pytest tests marked @pytest.mark.acceptance("S00-ACC-03")
   test_modules:
   - tests/gie/core/test_clock.py
-  status: planned
+  status: passing
+  evidence:
+    file: reviews/session_00/evidence/test_results.json
+    tests: 182
+    passed: 182
+    failed: 0
+    skipped: 0
   blockers: []
   notes: ''
 - id: AT-S00-ACC-04
@@ -55,7 +75,14 @@ acceptance_tests:
   - tests/gie/core/test_routing_lock.py
   - tests/gie/tools/test_check_live_lock.py
   - tests/gie/contracts/test_guarded_adapter.py
-  status: planned
+  - tests/gie/contracts/test_order_event.py
+  status: passing
+  evidence:
+    file: reviews/session_00/evidence/test_results.json
+    tests: 1086
+    passed: 1086
+    failed: 0
+    skipped: 0
   blockers: []
   notes: ''
 - id: AT-S00-ACC-05
@@ -65,7 +92,13 @@ acceptance_tests:
   verification: pytest tests marked @pytest.mark.acceptance("S00-ACC-05")
   test_modules:
   - tests/gie/baseline/test_baseline_regression.py
-  status: planned
+  status: partial
+  evidence:
+    file: reviews/session_00/evidence/test_results.json
+    tests: 5
+    passed: 1
+    failed: 0
+    skipped: 4
   blockers: [B-001]
   notes: ''
 - id: AT-S00-ACC-06
@@ -77,7 +110,13 @@ acceptance_tests:
   - tests/gie/tools/test_protected_paths.py
   - tests/gie/tools/test_baseline_audit.py
   - tests/gie/baseline/test_baseline_regression.py
-  status: planned
+  status: partial
+  evidence:
+    file: reviews/session_00/evidence/test_results.json
+    tests: 82
+    passed: 81
+    failed: 0
+    skipped: 1
   blockers: [B-001]
   notes: ''
 - id: AT-S01-ACC-01
