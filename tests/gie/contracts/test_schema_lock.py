@@ -111,7 +111,9 @@ def _read_lock(directory: Path) -> dict[str, Any]:
 
 
 def _write_lock(directory: Path, lock: dict[str, Any]) -> None:
-    (directory / "LOCK.json").write_text(json.dumps(lock, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    (directory / "LOCK.json").write_text(
+        json.dumps(lock, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n"
+    )
 
 
 def _edit_lock(directory: Path, mutate: Callable[[dict[str, Any]], None]) -> None:
@@ -131,7 +133,7 @@ def _edit_schema(
     path = directory / _filename(name, version)
     schema = json.loads(path.read_text(encoding="utf-8"))
     mutate(schema)
-    path.write_text(render(schema), encoding="utf-8")
+    path.write_text(render(schema), encoding="utf-8", newline="\n")
     if relock:
         _edit_lock(directory, lambda lock: lock["contracts"][name].__setitem__(version, _sha256(path)))
 
@@ -785,7 +787,7 @@ def test_missing_schema_file_is_reported(schema_copy: Path, name: str) -> None:
     ["Extra.json", "Tick-0.9.0.schema.json", "Tick-1.0.1.schema.json", "Tock-1.0.0.schema.json", "lock.json"],
 )
 def test_unexpected_json_file_is_reported(schema_copy: Path, extra: str) -> None:
-    (schema_copy / extra).write_text("{}\n", encoding="utf-8")
+    (schema_copy / extra).write_text("{}\n", encoding="utf-8", newline="\n")
     assert check(schema_copy) == [f"{extra}: unexpected file in the schema directory"]
 
 
@@ -847,7 +849,7 @@ def test_contract_missing_from_the_lock_is_reported(schema_copy: Path) -> None:
 
 def test_contract_that_disappeared_from_the_code_is_reported(schema_copy: Path) -> None:
     ghost = schema_copy / _filename("Ghost")
-    ghost.write_text("{}\n", encoding="utf-8")
+    ghost.write_text("{}\n", encoding="utf-8", newline="\n")
     _edit_lock(schema_copy, lambda lock: lock["contracts"].__setitem__("Ghost", {VERSION: _sha256(ghost)}))
     problems = check(schema_copy)
     assert any(
@@ -1025,7 +1027,9 @@ def test_field_reference_check_detects_a_stale_or_missing_file(
     stale = tmp_path / "FIELDS.md"
     monkeypatch.setattr(render_contract_docs, "OUTPUT", stale)
     assert render_contract_docs.main(["--check"]) == 1  # missing
-    stale.write_text(render_contract_docs.render().replace("OrderEvent", "OrderEvnt", 1), encoding="utf-8")
+    stale.write_text(
+        render_contract_docs.render().replace("OrderEvent", "OrderEvnt", 1), encoding="utf-8", newline="\n"
+    )
     assert render_contract_docs.main(["--check"]) == 1  # stale
     assert "stale" in capsys.readouterr().err
     assert render_contract_docs.main([]) == 0  # regenerate into the temporary file

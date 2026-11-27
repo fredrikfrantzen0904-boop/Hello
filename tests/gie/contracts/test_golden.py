@@ -100,7 +100,7 @@ def _rewrite(path: Path, change: Any) -> dict[str, Any]:
     """Apply *change* to the parsed message and store it again in canonical form."""
     message: dict[str, Any] = strict_loads(path.read_text(encoding="utf-8"))
     change(message)
-    path.write_text(canonical_dumps(message) + "\n", encoding="utf-8")
+    path.write_text(canonical_dumps(message) + "\n", encoding="utf-8", newline="\n")
     return message
 
 
@@ -320,13 +320,13 @@ def test_a_removed_optional_key_is_detected(path: Path, golden_copy: Path) -> No
             from_json(target.read_text(encoding="utf-8"))
         assert caught.value.details["path"] == name
         assert "explicit null" in str(caught.value.details["rule"])
-        target.write_text(original, encoding="utf-8")
+        target.write_text(original, encoding="utf-8", newline="\n")
     # ... and the checker reports the damaged file (shown for the first and the last optional key).
     for name in {optional[0], optional[-1]}:
         _rewrite(target, lambda message, name=name: message.pop(name))
         problems = _problems_for(golden_copy, target)
         assert any("no longer decodes" in problem and name in problem for problem in problems), name
-        target.write_text(original, encoding="utf-8")
+        target.write_text(original, encoding="utf-8", newline="\n")
     assert _problems_for(golden_copy, target) == []
 
 
@@ -410,7 +410,7 @@ def test_other_damage_to_a_golden_file_is_detected(
     original = target.read_text(encoding="utf-8")
     damaged = damage(original)
     assert damaged != original, "the damage applies to the fixture"
-    target.write_text(damaged, encoding="utf-8")
+    target.write_text(damaged, encoding="utf-8", newline="\n")
     if error is None:
         assert from_json(damaged) == samples.variants()["Tick"]["typical"], "still the same record ..."
         assert to_json(from_json(damaged)) + "\n" != damaged, "... but not its canonical bytes"
@@ -432,9 +432,9 @@ def test_missing_and_surplus_golden_files_are_detected(golden_copy: Path) -> Non
     assert make_golden.check(golden_copy) == [
         f"{directory.name}/typical.json: golden file is missing (run --write)"
     ]
-    typical.write_text(text, encoding="utf-8")
+    typical.write_text(text, encoding="utf-8", newline="\n")
     surplus = directory / "not_a_sample_variant.json"
-    surplus.write_text(text, encoding="utf-8")
+    surplus.write_text(text, encoding="utf-8", newline="\n")
     assert make_golden.check(golden_copy) == [
         f"{directory.name}/not_a_sample_variant.json: golden file has no sample variant"
     ]
@@ -498,8 +498,8 @@ def test_a_golden_file_must_be_a_message_of_the_contract_and_version_of_its_dire
     tick = (golden_copy / f"Tick-{_current_version('Tick')}" / "typical.json").read_text("utf-8")
     released = golden_copy / "Tick-1.0.1"
     released.mkdir()
-    (released / "wrong_contract.json").write_text(position, encoding="utf-8")
-    (released / "wrong_version.json").write_text(tick, encoding="utf-8")
+    (released / "wrong_contract.json").write_text(position, encoding="utf-8", newline="\n")
+    (released / "wrong_version.json").write_text(tick, encoding="utf-8", newline="\n")
     assert json.loads(position)["contract"] == "Position"
     assert json.loads(tick)["schema_version"] != "1.0.1"
     problems = make_golden.check(golden_copy)

@@ -124,7 +124,7 @@ def main(argv: list[str] | None = None) -> int:
         print("contract field reference is up to date")
         return 0
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
-    OUTPUT.write_text(text, encoding="utf-8")
+    OUTPUT.write_text(text, encoding="utf-8", newline="\n")
     print(f"wrote {OUTPUT}")
     return 0
 

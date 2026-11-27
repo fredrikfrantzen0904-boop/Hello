@@ -1495,7 +1495,7 @@ def test_interpreter_sees_only_read_opens_under_root(tree: Path, tmp_path: Path)
     assert seen.reads >= len(EXPECTED_PATHS)  # the recorder did observe the audit reading the tree
     # the recorder is not blind: it does see a write under the root made by the test itself
     with recording(tree) as seen:
-        (tree / "written_by_the_test.txt").write_text("SYNTHETIC FIXTURE")
+        (tree / "written_by_the_test.txt").write_text("SYNTHETIC FIXTURE", newline="\n")
         os.remove(tree / "written_by_the_test.txt")
     assert len(seen.writes) == 1
     assert seen.mutations == ["os.remove"]
@@ -1562,7 +1562,7 @@ def test_guard_blocks_every_attempt_to_change_the_root(tree: Path, tmp_path: Pat
             audit._create_new_file(str(tree / "created.txt"), str(tree))
         with open(target, "rb") as handle:  # reading stays possible
             assert handle.read() == VISIBLE["config.py"]
-        (tmp_path / "outside.txt").write_text("allowed: not under the root")
+        (tmp_path / "outside.txt").write_text("allowed: not under the root", newline="\n")
         assert len(guard.write_violations) == 16
         assert guard.other_violations == []
     assert snapshot(tree) == before
@@ -1617,7 +1617,7 @@ def test_guard_is_inactive_outside_a_scan(tree: Path, tmp_path: Path) -> None:
     assert code == 0
     assert audit._GUARD.active is False
     marker = tree / "written_after_the_audit.txt"
-    marker.write_text("SYNTHETIC FIXTURE")  # the test itself may change its own fixture again
+    marker.write_text("SYNTHETIC FIXTURE", newline="\n")  # the test itself may change its own fixture again
     marker.unlink()
     with contextlib.closing(socket.socket()) as probe:
         assert probe.fileno() >= 0
@@ -1654,9 +1654,9 @@ def test_output_overlapping_the_root_is_refused_and_nothing_is_written(
 def test_non_empty_or_non_directory_output_is_refused(tree: Path, tmp_path: Path) -> None:
     occupied = tmp_path / "occupied"
     occupied.mkdir()
-    (occupied / "keep.txt").write_text("existing owner file")
+    (occupied / "keep.txt").write_text("existing owner file", newline="\n")
     a_file = tmp_path / "a_file"
-    a_file.write_text("existing owner file")
+    a_file.write_text("existing owner file", newline="\n")
     before = snapshot(tmp_path)
     for out in (occupied, a_file):
         code, _stdout, stderr = run_audit(tree, out)
@@ -1705,7 +1705,7 @@ def test_non_empty_or_non_directory_output_is_refused(tree: Path, tmp_path: Path
     ],
 )
 def test_refused_arguments_exit_2_and_change_nothing(tree: Path, tmp_path: Path, argv: list[str]) -> None:
-    (tmp_path / "a_file").write_text("not a manifest\n")
+    (tmp_path / "a_file").write_text("not a manifest\n", newline="\n")
     values = {
         "root": str(tree),
         "out": str(tmp_path / "out"),
@@ -1896,7 +1896,7 @@ def test_write_and_read_manifest_round_trip_and_never_overwrite(tree: Path, tmp_
     assert audit.write_manifest(str(swapped), records) == len(records)  # (path, records) is accepted too
     assert swapped.read_bytes() == target.read_bytes()
     broken = tmp_path / "broken.jsonl"
-    broken.write_text('{"path": "a", "size": 1}\n[1, 2]\n')
+    broken.write_text('{"path": "a", "size": 1}\n[1, 2]\n', newline="\n")
     with pytest.raises(ValueError, match="line 2"):
         audit.read_manifest(broken)
 
@@ -1913,7 +1913,7 @@ def test_compare_detects_changed_added_removed_and_mtime_only(tree: Path, tmp_pa
     changed.write_bytes(bytes(data))
     os.utime(changed, ns=(FIXED_MTIME_NS, FIXED_MTIME_NS))  # even with the old modification time
     (tree / "data" / "ticks_xauusd.csv").write_bytes(TICKS_CSV.encode() + b"one more row\n")
-    (tree / "engines" / "added_engine.py").write_text("# SYNTHETIC FIXTURE\n")
+    (tree / "engines" / "added_engine.py").write_text("# SYNTHETIC FIXTURE\n", newline="\n")
     (tree / "models" / "net.onnx").unlink()
     os.utime(tree / "README.md", ns=(FIXED_MTIME_NS + 5, FIXED_MTIME_NS + 5))
     os.utime(tree / ".env", ns=(FIXED_MTIME_NS + 7, FIXED_MTIME_NS + 7))
@@ -2082,8 +2082,8 @@ def test_configuration_like_files_are_scanned_up_to_one_mebibyte(tmp_path: Path)
     root.mkdir()
     padding = "# SYNTHETIC FIXTURE padding line\n" * 34000  # a little over 1 MiB
     assert len(padding) > 1 << 20
-    (root / "big_export.json").write_text('"mt5.initialize()"\n' + padding + '"order_send()"\n')
-    (root / "big_module.py").write_text("mt5.initialize()\n" + padding + "order_send()\n")
+    (root / "big_export.json").write_text('"mt5.initialize()"\n' + padding + '"order_send()"\n', newline="\n")
+    (root / "big_module.py").write_text("mt5.initialize()\n" + padding + "order_send()\n", newline="\n")
     out = tmp_path / "out"
     assert run_audit(root, out)[0] == 0
     inventory = load_inventory(out)
@@ -2927,14 +2927,14 @@ def test_proc_scan_reads_names_and_memory_but_never_command_lines(tmp_path: Path
     }
     for pid, (comm, status) in entries.items():
         (proc / pid).mkdir(parents=True)
-        (proc / pid / "comm").write_text(comm)
-        (proc / pid / "status").write_text(status)
+        (proc / pid / "comm").write_text(comm, newline="\n")
+        (proc / pid / "status").write_text(status, newline="\n")
         (proc / pid / "cmdline").write_bytes(
             b"python\0run_bot.py\0--password\0FAKE-NOT-A-SECRET-taskarg-e1e1"
         )
     (proc / "505").mkdir()  # a process that ended: no files left
     (proc / "self").mkdir()
-    (proc / "meminfo").write_text("MemTotal: 1 kB\n")
+    (proc / "meminfo").write_text("MemTotal: 1 kB\n", newline="\n")
     result = audit._collect_processes_proc(str(proc))
     assert result["processes"] == {
         "status": "ok",

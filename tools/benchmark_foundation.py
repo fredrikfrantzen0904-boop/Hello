@@ -394,7 +394,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     payload = run(args.iterations)
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    args.out.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    args.out.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
     for row in payload["results"]:
         print(
             f"{row['name']:45s} p50 {row['p50_ns'] / 1000:8.1f} us  p99 {row['p99_ns'] / 1000:8.1f} us  "

@@ -201,7 +201,9 @@ def write_pins(root: Path, overrides: Mapping[str, str] | None = None) -> None:
     files.update(overrides or {})
     target = root / PINS
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(json.dumps({"schema_version": 1, "files": files}, indent=2) + "\n", encoding="utf-8")
+    target.write_text(
+        json.dumps({"schema_version": 1, "files": files}, indent=2) + "\n", encoding="utf-8", newline="\n"
+    )
 
 
 def write_tree(
@@ -2947,7 +2949,7 @@ def test_ll014_additional_pins_are_verified_too(tmp_path: Path) -> None:
     write_tree(tmp_path, {extra: "VALUE = 1\n"})
     write_pins(tmp_path, {extra: sha256(tmp_path / extra)})
     assert cll.check(tmp_path) == []
-    (tmp_path / extra).write_text("VALUE = 2\n", encoding="utf-8")
+    (tmp_path / extra).write_text("VALUE = 2\n", encoding="utf-8", newline="\n")
     assert [(v.rule, v.path) for v in cll.check(tmp_path)] == [("LL014", extra)]
     (tmp_path / extra).unlink()
     assert [(v.rule, v.path) for v in cll.check(tmp_path)] == [("LL014", extra)]
@@ -2960,7 +2962,9 @@ def test_update_pins_rewrites_the_pin_file_and_says_so_loudly(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     write_tree(tmp_path)
-    (tmp_path / LOCK).write_text(LOCK_SOURCE + "\n# SYNTHETIC FIXTURE: reviewed change\n", encoding="utf-8")
+    (tmp_path / LOCK).write_text(
+        LOCK_SOURCE + "\n# SYNTHETIC FIXTURE: reviewed change\n", encoding="utf-8", newline="\n"
+    )
     assert cll.main(["--root", str(tmp_path)]) == 1
     capsys.readouterr()
 
@@ -3026,7 +3030,7 @@ def test_update_pins_refuses_to_pin_a_weakened_lock(
     write_tree(tmp_path)
     before = (tmp_path / PINS).read_bytes()
     target = tmp_path / path
-    target.write_text(edit(target.read_text(encoding="utf-8"), change), encoding="utf-8")
+    target.write_text(edit(target.read_text(encoding="utf-8"), change), encoding="utf-8", newline="\n")
 
     assert cll.main(["--root", str(tmp_path), "--update-pins"]) == 1
     captured = capsys.readouterr()

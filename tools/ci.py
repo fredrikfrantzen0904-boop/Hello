@@ -257,7 +257,9 @@ def main(argv: list[str] | None = None) -> int:
         "steps": [asdict(result) for result in results],
     }
     (evidence_dir / "ci_results.json").write_text(
-        json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        json.dumps(payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+        newline="\n",
     )
     print()
     for result in results:
