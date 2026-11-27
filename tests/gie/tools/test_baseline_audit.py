@@ -1464,7 +1464,9 @@ class _Recorder:
     def inside(self, candidate: object) -> bool:
         if not self.root or not isinstance(candidate, (str, bytes, os.PathLike)):
             return False
-        full = os.path.abspath(os.fsdecode(candidate))
+        # The tool addresses files by extended-length paths on Windows; without stripping that
+        # prefix the recorder would see neither its reads nor - worse - a write under the root.
+        full = os.path.abspath(plain(candidate))
         return full == self.root or full.startswith(self.root + os.sep)
 
     def __call__(self, event: str, args: tuple[object, ...]) -> None:
