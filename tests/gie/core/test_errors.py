@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import ast
 import datetime as dt
+import enum
 import inspect
 import json
 import math
@@ -90,7 +91,9 @@ def test_all_error_types_is_exactly_the_documented_taxonomy() -> None:
     assert isinstance(ALL_ERROR_TYPES, tuple)
     assert len(ALL_ERROR_TYPES) == len(set(ALL_ERROR_TYPES)) == 18
     assert set(ALL_ERROR_TYPES) == set(DOCUMENTED)
-    assert all(type(error_type) is type and issubclass(error_type, GieError) for error_type in ALL_ERROR_TYPES)
+    for error_type in ALL_ERROR_TYPES:
+        assert type(error_type) is type
+        assert issubclass(error_type, GieError)
     assert ALL_ERROR_TYPES[0] is GieError
 
 
@@ -402,6 +405,14 @@ PROPERTY = settings(
 )
 
 
+def _raw_canonical_text(value: Any) -> str | None:
+    """Canonical JSON of ``{"value": value}``, or ``None`` when canonical JSON refuses the value."""
+    try:
+        return canonical_dumps({"value": value})
+    except CanonicalEncodingError:
+        return None
+
+
 def _assert_journalable(error: GieError) -> dict[str, Any]:
     """The journal form is canonical GIE JSON and survives strict parsing unchanged."""
     journal_form = error.to_dict()
@@ -559,11 +570,10 @@ _NON_SCALARS: list[tuple[str, Any, tuple[str, ...]]] = [
     ("value", "fragments"), [(case[1], case[2]) for case in _NON_SCALARS], ids=[c[0] for c in _NON_SCALARS]
 )
 def test_values_that_are_not_json_scalars_are_carried_as_text(value: Any, fragments: tuple[str, ...]) -> None:
-    with pytest.raises((CanonicalEncodingError, AssertionError)):
-        # positive control: as a raw value this is either refused or would be written as a
-        # JSON container, which is not a scalar
-        text = canonical_dumps({"value": value})
-        assert not text.startswith('{"value":[') and not text.startswith('{"value":{')
+    # positive control: as a raw value this is either refused by canonical JSON or would be
+    # written as a JSON container, which is not a scalar
+    raw = _raw_canonical_text(value)
+    assert raw is None or raw.startswith(('{"value":[', '{"value":{'))
     error = IllegalTransitionError("synthetic", value=value, order_seq=4)
     detail = error.details["value"]
     assert type(detail) is str
@@ -614,6 +624,83 @@ def test_an_error_whose_message_is_not_valid_unicode_is_still_journalable() -> N
     journal_form = error.to_dict()
     assert journal_form["code"] == "GIE.TIME.STALE"
     assert strict_loads(canonical_dumps(journal_form)) == journal_form
+
+
+@pytest.mark.requirement("S00-ASG-24")
+def test_an_error_whose_detail_name_is_not_valid_unicode_is_still_journalable() -> None:
+    """The names of the details are part of the journal form as much as their values."""
+    error = ContractValidationError("synthetic", **{"field \udc00": 1})
+    journal_form = error.to_dict()
+    assert journal_form["code"] == "GIE.CONTRACT.INVALID"
+    assert len(journal_form["details"]) == 1
+    assert strict_loads(canonical_dumps(journal_form)) == journal_form
+
+
+class _ReprRaises:
+    """Synthetic value whose text form cannot be built (for example a half-initialised object)."""
+
+    def __repr__(self) -> str:
+        raise RuntimeError("synthetic: repr failed")
+
+
+class _ReprIsNotUnicode:
+    """Synthetic value whose text form contains a lone surrogate."""
+
+    def __repr__(self) -> str:
+        return "<synthetic \udfff>"
+
+
+@pytest.mark.requirement("S00-ASG-24")
+@pytest.mark.parametrize(
+    "value", [_ReprRaises(), _ReprIsNotUnicode()], ids=["repr-raises", "repr-not-unicode"]
+)
+def test_a_value_without_a_usable_text_form_is_still_a_journalable_detail(value: Any) -> None:
+    """ "Values of any other type are carried as text": also when their own text form is unusable.
+
+    The error being raised is the information that must survive; a detail must never replace it
+    with another exception (here ``RuntimeError``) or make the journal line unwritable.
+    """
+    error = OutOfOrderError("synthetic", offender=value, seq=5)
+    assert type(error.details["offender"]) is str
+    assert error.details["seq"] == 5
+    _assert_journalable(error)
+    assert "GIE.SEQ.OUT_OF_ORDER" in str(error)
+
+
+@pytest.mark.requirement("S00-ASG-24")
+def test_subclasses_of_the_scalar_types_are_journaled_as_their_scalar() -> None:
+    """Enum members that are ``int`` or ``str`` (for example ``ClockMode``) are ordinary scalars."""
+
+    class _Level(enum.IntEnum):
+        HIGH = 7
+
+    class _Mode(str, enum.Enum):
+        REPLAY = "REPLAY"
+
+    error = GieError("synthetic", level=_Level.HIGH, mode=_Mode.REPLAY)
+    assert error.details["level"] == 7
+    assert error.details["mode"] == "REPLAY"
+    journal_form = error.to_dict()
+    assert strict_loads(canonical_dumps(journal_form)) == {
+        "code": "GIE.ERROR",
+        "message": "synthetic",
+        "details": {"level": 7, "mode": "REPLAY"},
+    }
+
+
+@pytest.mark.requirement("S00-ASG-24")
+def test_a_very_long_text_detail_is_carried_as_a_prefix_of_itself() -> None:
+    """Details are "(truncated) text": never megabytes in one journal line, never altered text."""
+    text = "synthetic " * 100_000
+    error = GieError("synthetic", value=text)
+    detail = error.details["value"]
+    assert type(detail) is str
+    assert 0 < len(detail) <= len(text)
+    assert text.startswith(detail)
+    assert len(canonical_dumps(error.to_dict())) < len(text)
+    _assert_journalable(error)
+    # an ordinary message-sized text is carried unchanged
+    assert GieError("synthetic", value="x" * 200).details["value"] == "x" * 200
 
 
 @pytest.mark.requirement("S00-ASG-24")
@@ -670,6 +757,8 @@ def test_the_instance_details_and_the_journal_form_agree() -> None:
     assert error.to_dict()["details"] is not error.details
 
 
+#: Detail names are keyword arguments; ``message`` is the positional parameter of the constructor.
+_DETAIL_NAMES = st.from_regex(r"[a-z_]{1,8}", fullmatch=True).filter(lambda name: name != "message")
 _DETAIL_VALUES = st.recursive(
     st.one_of(
         st.none(),
@@ -693,7 +782,7 @@ _DETAIL_VALUES = st.recursive(
 @PROPERTY
 @example(details={"a": 2**63, "b": -(2**63) - 1, "c": float("nan"), "d": "\ud800", "e": [float("inf")]})
 @example(details={"a": INT64_MAX, "b": INT64_MIN, "c": -0.0, "d": 1e308, "e": 5e-324})
-@given(details=st.dictionaries(st.from_regex(r"[a-z_]{1,8}", fullmatch=True), _DETAIL_VALUES, max_size=5))
+@given(details=st.dictionaries(_DETAIL_NAMES, _DETAIL_VALUES, max_size=5))
 def test_any_details_can_be_journaled(details: dict[str, Any]) -> None:
     error = GieError("synthetic", **details)
     assert set(error.details) == set(details)
@@ -704,12 +793,15 @@ def test_any_details_can_be_journaled(details: dict[str, Any]) -> None:
             assert carried is value
         elif isinstance(value, int):
             if INT64_MIN <= value <= INT64_MAX:
-                assert type(carried) is int and carried == value
+                assert type(carried) is int
+                assert carried == value
             else:
-                assert type(carried) is str and str(value).startswith(carried)
+                assert type(carried) is str
+                assert str(value).startswith(carried)
         elif isinstance(value, float):
             if math.isfinite(value):
-                assert type(carried) is float and carried == value
+                assert type(carried) is float
+                assert carried == value
             else:
                 assert type(carried) is str
         else:

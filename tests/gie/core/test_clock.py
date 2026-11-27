@@ -3,15 +3,23 @@
 Covers requirement S00-ASG-19 ("Clock") and acceptance test S00-ACC-03 ("Replay clock").
 
 The expected behaviour is taken from the docstrings of ``gie/core/clock.py`` and from
-``specifications/SHARED_CONTRACTS.md`` section 3.2, not from the implementation:
+``specifications/SHARED_CONTRACTS.md`` section 3.2 (revision 2), not from the implementation:
 
+* a ``Clock`` has ``mode``, ``now_ns``, ``monotonic_ns`` and the read-only property
+  ``regressions_observed``; a ``Scheduler`` has ``call_at``, ``call_after`` and ``cancel``;
 * a ``ReplayClock`` starts at ``start_ns`` and moves only through ``advance_to`` /
-  ``advance_by``; it never moves backwards (``ClockRegressionError``);
-* timers fire in ``(due time, registration order)``; while a timer runs ``now_ns()``
+  ``advance_by``; it never moves backwards (``ClockRegressionError``); it is the clock and
+  the scheduler of a replay;
+* timers fire in ``(due time, registration order)``; while a replay timer runs ``now_ns()``
   equals that timer's due time; a callback may schedule further timers but may not
   advance the clock;
-* a ``SystemClock`` reads injected sources, never returns a smaller value than before
-  and counts observed backward steps of the wall source.
+* a ``SystemClock`` reads injected sources, never decreases **and never stands still**:
+  while the wall source is behind the last reading, time continues from the last reading at
+  the pace of the monotonic source, and each backward step is counted once in
+  ``regressions_observed``;
+* a ``PollingScheduler`` is the scheduler of a paper run: timers fire only when ``run_due``
+  is called, in ``(due time, registration order)``, never early; a due time in the past is not
+  an error; the same schedule gives the same callback order as on a ``ReplayClock``.
 
 SYNTHETIC FIXTURE: every instant, schedule and clock reading in this file is invented for
 testing.  Nothing here is market data, broker data or a measurement.
@@ -33,7 +41,7 @@ import pytest
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
-from gie.core.clock import Clock, ClockMode, ReplayClock, SystemClock
+from gie.core.clock import Clock, ClockMode, PollingScheduler, ReplayClock, Scheduler, SystemClock
 from gie.core.errors import ClockRegressionError, ContractValidationError, GieError
 from gie.core.timeutil import MAX_TIME_NS, NS_PER_MS, NS_PER_SECOND
 
@@ -58,7 +66,7 @@ class _Boom(Exception):
 class _Trace:
     """Records what timer callbacks of one clock observe: ``(label, due argument, now_ns())``."""
 
-    def __init__(self, clock: ReplayClock) -> None:
+    def __init__(self, clock: Clock) -> None:
         self.clock = clock
         self.events: list[tuple[str, int, int]] = []
 
@@ -1114,268 +1122,3 @@ def test_observed_replay_time_never_decreases_and_callbacks_see_their_due_time(
         previous = now_ns
 
 
-# =========================================================================== SystemClock
-
-
-class _Readings:
-    """SYNTHETIC FIXTURE time source: returns the scripted readings one after another."""
-
-    def __init__(self, readings: Sequence[int]) -> None:
-        self._readings = list(readings)
-        self.calls = 0
-
-    def __call__(self) -> int:
-        value = self._readings[self.calls]
-        self.calls += 1
-        return value
-
-
-def _system_clock(wall: Sequence[int] = (), monotonic: Sequence[int] = ()) -> SystemClock:
-    return SystemClock(wall_source=_Readings(wall), monotonic_source=_Readings(monotonic))
-
-
-@pytest.mark.requirement("S00-ASG-19")
-def test_system_clock_mode_is_system() -> None:
-    clock = _system_clock()
-    assert clock.mode is ClockMode.SYSTEM
-    assert clock.mode.value == "SYSTEM"
-    assert SystemClock().mode is ClockMode.SYSTEM
-
-
-@pytest.mark.requirement("S00-ASG-19")
-def test_system_clock_satisfies_the_runtime_checkable_clock_protocol() -> None:
-    assert isinstance(_system_clock(), Clock)
-    assert isinstance(SystemClock(), Clock)
-
-
-@pytest.mark.requirement("S00-ASG-19")
-def test_system_clock_reads_the_injected_sources() -> None:
-    wall = _Readings([START, START + 5, START + 5 + NS_PER_SECOND])
-    monotonic = _Readings([1_000, 1_001, 5_000])
-    clock = SystemClock(wall_source=wall, monotonic_source=monotonic)
-    assert (wall.calls, monotonic.calls) == (0, 0)  # constructing reads nothing
-
-    assert [clock.now_ns() for _ in range(3)] == [START, START + 5, START + 5 + NS_PER_SECOND]
-    assert (wall.calls, monotonic.calls) == (3, 0)
-    assert [clock.monotonic_ns() for _ in range(3)] == [1_000, 1_001, 5_000]
-    assert (wall.calls, monotonic.calls) == (3, 3)
-    assert clock.regressions_observed == 0
-
-
-@pytest.mark.requirement("S00-ASG-19")
-def test_system_clock_defaults_to_the_operating_system_utc_and_monotonic_clocks() -> None:
-    parameters = inspect.signature(SystemClock).parameters
-    assert parameters["wall_source"].default is time.time_ns
-    assert parameters["monotonic_source"].default is time.monotonic_ns
-
-    clock = SystemClock()
-    first, second = clock.now_ns(), clock.now_ns()
-    assert type(first) is int
-    assert 0 < first <= second <= MAX_TIME_NS
-    elapsed_first, elapsed_second = clock.monotonic_ns(), clock.monotonic_ns()
-    assert type(elapsed_first) is int
-    assert 0 <= elapsed_first <= elapsed_second
-
-
-@pytest.mark.requirement("S00-ASG-19", "G08-06")
-def test_system_clock_never_decreases_when_the_wall_source_steps_backwards() -> None:
-    readings = [START, START - NS_PER_SECOND, START + 10, START + 5, START + 20]
-    clock = _system_clock(wall=readings)
-    assert [clock.now_ns() for _ in readings] == [START, START, START + 10, START + 10, START + 20]
-    # Two backward steps were observed: START -> START - 1 s and START + 10 -> START + 5.
-    assert clock.regressions_observed == 2
-
-
-@pytest.mark.requirement("S00-ASG-19", "G08-06")
-def test_regressions_observed_counts_each_backward_step() -> None:
-    clock = _system_clock(wall=[1_000, 900, 800, 700, 2_000, 1_999, 3_000])
-    expected_values = [1_000, 1_000, 1_000, 1_000, 2_000, 2_000, 3_000]
-    expected_counts = [0, 1, 2, 3, 3, 4, 4]
-    for expected_value, expected_count in zip(expected_values, expected_counts, strict=True):
-        assert clock.now_ns() == expected_value
-        assert clock.regressions_observed == expected_count
-
-
-@pytest.mark.requirement("S00-ASG-19", "G08-06")
-def test_system_clock_resumes_as_soon_as_the_source_has_caught_up() -> None:
-    clock = _system_clock(wall=[1_000, 400, 1_000, 1_001, 1_500])
-    assert clock.now_ns() == 1_000
-    assert clock.now_ns() == 1_000  # clamped: the source stepped back
-    assert clock.regressions_observed == 1
-    assert clock.now_ns() == 1_000  # caught up exactly: this is the source's own reading again
-    assert clock.now_ns() == 1_001
-    assert clock.now_ns() == 1_500
-    assert clock.regressions_observed == 1  # catching up is not a regression
-
-
-@pytest.mark.requirement("S00-ASG-19", "G08-06")
-def test_forward_and_repeated_readings_are_not_regressions() -> None:
-    clock = _system_clock(wall=[START, START, START, START + 1, START + 1, START + NS_PER_SECOND])
-    assert clock.regressions_observed == 0
-    values = [clock.now_ns() for _ in range(6)]
-    assert values == [START, START, START, START + 1, START + 1, START + NS_PER_SECOND]
-    assert clock.regressions_observed == 0
-
-
-@pytest.mark.requirement("S00-ASG-19", "G08-06")
-def test_a_backward_step_with_slow_recovery_stays_clamped_and_is_reported() -> None:
-    # One backward step (1000 -> 900) followed by three readings that are still behind.  Whether
-    # the counter counts the step once or once per clamped reading is not defined precisely by
-    # the documentation (reported as a finding), so only the common ground is asserted here.
-    clock = _system_clock(wall=[1_000, 900, 950, 990, 1_000, 1_100])
-    assert [clock.now_ns() for _ in range(6)] == [1_000, 1_000, 1_000, 1_000, 1_000, 1_100]
-    assert 1 <= clock.regressions_observed <= 3
-
-
-@pytest.mark.requirement("S00-ASG-19")
-def test_monotonic_ns_never_decreases_even_if_its_source_misbehaves() -> None:
-    clock = _system_clock(monotonic=[500, 100, 300, 500, 501, 0, 600])
-    assert [clock.monotonic_ns() for _ in range(7)] == [500, 500, 500, 500, 501, 501, 600]
-
-
-@pytest.mark.requirement("S00-ASG-19")
-def test_wall_and_monotonic_scales_are_clamped_independently() -> None:
-    clock = _system_clock(wall=[START, START - 50, START + 1], monotonic=[10, 20, 5, 30])
-    assert clock.now_ns() == START
-    assert clock.monotonic_ns() == 10
-    assert clock.now_ns() == START  # wall source stepped back ...
-    assert clock.monotonic_ns() == 20  # ... the monotonic scale keeps running
-    assert clock.monotonic_ns() == 20  # monotonic source stepped back ...
-    assert clock.now_ns() == START + 1  # ... the wall scale keeps running
-    assert clock.monotonic_ns() == 30
-
-
-@pytest.mark.requirement("S00-ASG-19", "G08-06")
-@_PROPERTY
-@given(readings=st.lists(st.integers(0, MAX_TIME_NS), min_size=1, max_size=60))
-@example(readings=[5, 5, 4, 5, 6, 0, 7])
-def test_system_clock_returns_the_running_maximum_of_the_wall_readings(readings: list[int]) -> None:
-    clock = _system_clock(wall=readings)
-    values = [clock.now_ns() for _ in readings]
-    assert values == list(itertools.accumulate(readings, max))
-    backward_steps = sum(1 for earlier, later in itertools.pairwise(readings) if later < earlier)
-    clamped_readings = sum(1 for value, reading in zip(values, readings, strict=True) if reading < value)
-    assert (clock.regressions_observed == 0) == (backward_steps == 0)
-    assert backward_steps <= clock.regressions_observed <= clamped_readings
-
-
-@pytest.mark.requirement("S00-ASG-19")
-@_PROPERTY
-@given(readings=st.lists(st.integers(0, MAX_TIME_NS), min_size=1, max_size=60))
-def test_system_clock_monotonic_scale_is_the_running_maximum_of_its_readings(readings: list[int]) -> None:
-    clock = _system_clock(monotonic=readings)
-    assert [clock.monotonic_ns() for _ in readings] == list(itertools.accumulate(readings, max))
-
-
-class _YieldingInt(int):
-    """SYNTHETIC FIXTURE reading that gives other threads a chance to run whenever it is compared.
-
-    A clock has to compare a new reading with the last value it handed out before it stores the
-    reading.  Yielding inside that comparison puts a thread switch exactly between "check" and
-    "store", which is where an unsynchronised clock goes wrong; a clock that serialises its
-    readers is unaffected.  The value itself is an ordinary ``int``.
-    """
-
-    __hash__ = int.__hash__
-
-    def __lt__(self, other: int) -> bool:
-        result = int.__lt__(self, other)
-        time.sleep(0)
-        return result
-
-    def __le__(self, other: int) -> bool:
-        result = int.__le__(self, other)
-        time.sleep(0)
-        return result
-
-    def __gt__(self, other: int) -> bool:
-        result = int.__gt__(self, other)
-        time.sleep(0)
-        return result
-
-    def __ge__(self, other: int) -> bool:
-        result = int.__ge__(self, other)
-        time.sleep(0)
-        return result
-
-
-class _SawtoothSource:
-    """SYNTHETIC FIXTURE time source for the thread tests (thread-safe, deterministic by call index).
-
-    The n-th reading is ``base + 10 * n - 25 * (7919 * n % 13)``: it rises on average but steps
-    backwards by up to 300 ns again and again, like an unstable operating-system clock.  Readings
-    are handed out as :class:`_YieldingInt` so that threads interleave at the critical point.
-    """
-
-    def __init__(self, base: int) -> None:
-        self._base = base
-        self._lock = threading.Lock()
-        self.calls = 0
-
-    def reading(self, index: int) -> int:
-        return self._base + 10 * index - 25 * (7919 * index % 13)
-
-    def __call__(self) -> int:
-        with self._lock:
-            index = self.calls
-            self.calls += 1
-        return _YieldingInt(self.reading(index))
-
-
-def _hammer(read: Callable[[], int], threads: int = 8, reads: int = 300) -> list[list[int]]:
-    """Call *read* from several threads at once; return what each thread saw, in its own order."""
-    barrier = threading.Barrier(threads)
-    seen: list[list[int]] = [[] for _ in range(threads)]
-    errors: list[Exception] = []
-
-    def worker(slot: int) -> None:
-        try:
-            barrier.wait(timeout=30)
-            mine = seen[slot]
-            for _ in range(reads):
-                mine.append(read())
-        except Exception as exc:
-            errors.append(exc)
-
-    workers = [threading.Thread(target=worker, args=(slot,), daemon=True) for slot in range(threads)]
-    previous_interval = sys.getswitchinterval()
-    sys.setswitchinterval(1e-5)  # force frequent thread switches
-    try:
-        for thread in workers:
-            thread.start()
-        for thread in workers:
-            thread.join(timeout=60)
-    finally:
-        sys.setswitchinterval(previous_interval)
-    assert not any(thread.is_alive() for thread in workers), "a reader thread did not finish"
-    assert errors == []
-    assert [len(values) for values in seen] == [reads] * threads
-    return seen
-
-
-@pytest.mark.requirement("S00-ASG-19", "G08-06")
-def test_system_clock_now_ns_is_non_decreasing_for_every_thread() -> None:
-    source = _SawtoothSource(START)
-    clock = SystemClock(wall_source=source, monotonic_source=_Readings([]))
-    seen = _hammer(clock.now_ns)
-    for slot, values in enumerate(seen):
-        decreases = [(a, b) for a, b in itertools.pairwise(values) if b < a]
-        assert decreases == [], f"thread {slot} saw time go backwards"
-    # Every value handed out is a reading of the injected source, never an invented one.
-    produced = {source.reading(index) for index in range(source.calls)}
-    assert {value for values in seen for value in values} <= produced
-    assert max(max(values) for values in seen) == max(produced)
-    # The unstable source was noticed.
-    assert clock.regressions_observed > 0
-
-
-@pytest.mark.requirement("S00-ASG-19")
-def test_system_clock_monotonic_ns_is_non_decreasing_for_every_thread() -> None:
-    source = _SawtoothSource(1_000_000)
-    clock = SystemClock(wall_source=_Readings([]), monotonic_source=source)
-    seen = _hammer(clock.monotonic_ns)
-    for slot, values in enumerate(seen):
-        decreases = [(a, b) for a, b in itertools.pairwise(values) if b < a]
-        assert decreases == [], f"thread {slot} saw the monotonic scale go backwards"
-    produced = {source.reading(index) for index in range(source.calls)}
-    assert {value for values in seen for value in values} <= produced

@@ -1710,6 +1710,17 @@ def test_tool_located_inside_the_root_is_refused(
         code, _stdout, stderr = run_audit(tree, tmp_path / "out")
     assert code == 2
     assert "loaded from inside --root" in stderr
+    # the same holds for the interpreter itself, e.g. the virtual environment of the audited system
+    for attribute, location in (("executable", tree / "venv" / "bin" / "python"), ("prefix", tree / "venv")):
+        with monkeypatch.context() as patch:
+            patch.setattr(sys, attribute, str(location))
+            code, _stdout, stderr = run_audit(tree, tmp_path / "out")
+            manifest_code, _stdout, _stderr = run_main(
+                "manifest", "--root", str(tree), "--out", str(tmp_path / "m.jsonl")
+            )
+        assert code == 2
+        assert manifest_code == 2
+        assert "running this tool is inside --root" in stderr
     assert snapshot(tmp_path) == before
 
 

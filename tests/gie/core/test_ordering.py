@@ -290,15 +290,16 @@ def test_stream_rank_has_exactly_the_documented_members_in_data_flow_order() -> 
 def test_stream_rank_values_are_the_ranks_of_the_specification_table() -> None:
     assert {name: int(StreamRank[name]) for name in DOCUMENTED_RANK_VALUES} == DOCUMENTED_RANK_VALUES
     # OTHER has no row in the table; it sorts after every rank that has one.
-    assert all(StreamRank.OTHER > StreamRank[name] for name in DOCUMENTED_RANK_VALUES)
+    assert all(StreamRank[name] < StreamRank.OTHER for name in DOCUMENTED_RANK_VALUES)
 
 
 @pytest.mark.requirement("S00-ASG-25")
 def test_inputs_rank_before_the_records_gie_derives_at_the_same_instant() -> None:
-    assert INPUT_RANKS + DECISION_CHAIN_RANKS == DOCUMENTED_RANK_ORDER[:10]
+    assert DOCUMENTED_RANK_ORDER[:10] == INPUT_RANKS + DECISION_CHAIN_RANKS
     for input_name, derived_name in itertools.product(INPUT_RANKS, DECISION_CHAIN_RANKS):
         # Stream names and sequence numbers point the other way; the rank decides.
-        assert EventKey(T0, StreamRank[input_name], "zzz", 99) < EventKey(T0, StreamRank[derived_name], "a", 0)
+        input_key = EventKey(T0, StreamRank[input_name], "zzz", 99)
+        assert input_key < EventKey(T0, StreamRank[derived_name], "a", 0)
     for rank in StreamRank:
         if rank is not StreamRank.RUN_MANIFEST:
             assert rank > StreamRank.RUN_MANIFEST  # the run manifest is the first record of a run
@@ -830,6 +831,428 @@ def test_the_window_must_hold_at_least_one_arrival(window: int) -> None:
         SequenceTracker(window=window)
 
 
+# =========================================================================== SequenceTracker: arguments
+
+
+@pytest.mark.requirement("S00-ASG-25", "G08-06")
+@pytest.mark.parametrize("window", [True, False, 1.0, 2.5, "8", None, [4], (4,)])
+def test_the_window_must_be_an_int(window: Any) -> None:
+    with pytest.raises(ContractValidationError) as caught:
+        SequenceTracker(window=window)
+    assert caught.value.code == "GIE.CONTRACT.INVALID"
+
+
+@pytest.mark.requirement("S00-ASG-25", "G08-06")
+@pytest.mark.parametrize("first_seq", [-1, -(10**9), True, False, 0.0, 1.5, "0", [0], (0,)])
+def test_first_seq_must_be_none_or_a_non_negative_int(first_seq: Any) -> None:
+    with pytest.raises(ContractValidationError):
+        SequenceTracker(first_seq=first_seq)
+
+
+@pytest.mark.requirement("S00-ASG-25", "G08-06")
+@pytest.mark.parametrize("allow_gaps", [0, 1, "yes", "", None, [], [True]])
+def test_allow_gaps_must_be_a_bool(allow_gaps: Any) -> None:
+    # A truthy non-bool would silently turn a gap-free stream into one that tolerates gaps.
+    with pytest.raises(ContractValidationError):
+        SequenceTracker(allow_gaps=allow_gaps)
+
+
+@pytest.mark.requirement("S00-ASG-25")
+def test_valid_constructor_arguments_are_accepted() -> None:
+    for arguments in (
+        {},
+        {"allow_gaps": True},
+        {"allow_gaps": False, "first_seq": None, "window": 1},
+        {"first_seq": 0},
+        {"first_seq": 2**63 - 1, "window": 10**6},
+    ):
+        tracker = SequenceTracker(**arguments)  # type: ignore[arg-type]
+        assert tracker.last_seq("s") is None
+
+
+@pytest.mark.requirement("S00-ASG-25", "G08-06")
+@pytest.mark.parametrize("seq", [1, 2, 7, 10**12])
+def test_a_stream_starts_at_zero_by_default(seq: int) -> None:
+    # "first event of a stream: accepted if it equals first_seq (default 0)".  A stream that does
+    # not start at 0 has skipped positions 0 .. seq - 1: a gap, refused even on a tracker that
+    # tolerates later gaps - only ``first_seq=None`` joins a stream in the middle.
+    for allow_gaps in (False, True):
+        tracker = SequenceTracker(allow_gaps=allow_gaps)
+        with pytest.raises(SequenceGapError) as caught:
+            tracker.observe("s", seq, FP_A)
+        assert caught.value.code == "GIE.SEQ.GAP"
+        assert tracker.last_seq("s") is None
+        first = tracker.observe("s", 0, FP_B)
+        assert (first.outcome, first.missing) == (SeqOutcome.ACCEPTED, 0)
+        assert tracker.last_seq("s") == 0
+    assert SequenceTracker(first_seq=None).observe("s", seq, FP_A).outcome is SeqOutcome.ACCEPTED
+
+
+@pytest.mark.requirement("S00-ASG-25", "G08-06")
+@pytest.mark.parametrize("stream", ["", None, 1, 0, b"s", ["s"], ("s",), True])
+def test_observe_rejects_a_stream_that_is_not_a_non_empty_string(stream: Any) -> None:
+    tracker = SequenceTracker()
+    tracker.observe("s", 0, FP_A)
+    with pytest.raises(ContractValidationError):
+        tracker.observe(stream, 0, FP_A)
+    with pytest.raises(ContractValidationError):
+        tracker.observe(stream, 1, FP_A)
+    assert tracker.last_seq("s") == 0
+    assert tracker.observe("s", 1, FP_B).outcome is SeqOutcome.ACCEPTED
+
+
+@pytest.mark.requirement("S00-ASG-25", "G08-06")
+@pytest.mark.parametrize("fingerprint", ["", None, 1, 0.5, b"a" * 64, ["a"], ("a",), True])
+def test_observe_rejects_a_fingerprint_that_is_not_a_non_empty_string(fingerprint: Any) -> None:
+    # Without a fingerprint an arrival can never be proven to be a duplicate, and an empty or
+    # non-string one would make different records compare alike.
+    tracker = SequenceTracker()
+    with pytest.raises(ContractValidationError):
+        tracker.observe("s", 0, fingerprint)
+    assert tracker.last_seq("s") is None
+    tracker.observe("s", 0, FP_A)
+    for seq in (0, 1):  # as a duplicate candidate and as the next arrival
+        with pytest.raises(ContractValidationError):
+            tracker.observe("s", seq, fingerprint)
+    assert tracker.last_seq("s") == 0
+    # The refused content was not remembered for position 1.
+    assert tracker.observe("s", 1, FP_B).outcome is SeqOutcome.ACCEPTED
+    assert tracker.observe("s", 0, FP_A).outcome is SeqOutcome.DUPLICATE
+
+
+@pytest.mark.requirement("S00-ASG-25", "S00-ASG-21", "G08-06")
+@pytest.mark.parametrize("time_ns", [-1, -(10**18), True, False, 1.0, 0.5, "1", [1], (1,)])
+def test_observe_rejects_an_ordering_time_that_is_not_a_non_negative_int(time_ns: Any) -> None:
+    tracker = SequenceTracker()
+    with pytest.raises(ContractValidationError):
+        tracker.observe("s", 0, FP_A, time_ns)
+    assert tracker.last_seq("s") is None
+    tracker.observe("s", 0, FP_A, T0)
+    with pytest.raises(ContractValidationError):
+        tracker.observe("s", 1, FP_B, time_ns=time_ns)
+    assert tracker.last_seq("s") == 0
+    assert tracker.observe("s", 1, FP_B, T0).outcome is SeqOutcome.ACCEPTED
+
+
+# =========================================================================== SequenceTracker: ordering time
+
+
+@pytest.mark.requirement("S00-ASG-25", "S00-ASG-21")
+def test_a_non_decreasing_ordering_time_is_accepted() -> None:
+    tracker = SequenceTracker()
+    for seq, time_ns in enumerate((0, 0, T0, T0, T0 + 1, MAX_TIME_NS, MAX_TIME_NS)):
+        result = tracker.observe("s", seq, f"fp-{seq}", time_ns)
+        assert (result.outcome, result.missing) == (SeqOutcome.ACCEPTED, 0)
+    assert tracker.last_seq("s") == 6
+
+
+@pytest.mark.requirement("S00-ASG-25", "S00-ASG-21", "G08-06")
+@pytest.mark.parametrize("back_by", [1, 1_000, NS_PER_SECOND, T0])
+def test_a_decreasing_ordering_time_is_refused_without_changing_state(back_by: int) -> None:
+    tracker = SequenceTracker()
+    tracker.observe("s", 0, FP_A, T0)
+    for _ in range(2):
+        with pytest.raises(OutOfOrderError) as caught:
+            tracker.observe("s", 1, FP_B, T0 - back_by)
+        assert caught.value.code == "GIE.SEQ.OUT_OF_ORDER"
+        assert tracker.last_seq("s") == 0
+    # The refused arrival was not remembered as the content of position 1 ...
+    assert tracker.observe("s", 0, FP_A, T0).outcome is SeqOutcome.DUPLICATE
+    accepted = tracker.observe("s", 1, FP_C, T0)
+    assert (accepted.outcome, accepted.missing) == (SeqOutcome.ACCEPTED, 0)
+    with pytest.raises(SequenceConflictError):
+        tracker.observe("s", 1, FP_B, T0)
+    assert tracker.last_seq("s") == 1
+
+
+@pytest.mark.requirement("S00-ASG-25", "S00-ASG-21", "G08-06")
+def test_a_refused_ordering_time_does_not_lower_the_bar_for_later_arrivals() -> None:
+    tracker = SequenceTracker()
+    tracker.observe("s", 0, FP_A, 100)
+    with pytest.raises(OutOfOrderError):
+        tracker.observe("s", 1, FP_B, 50)
+    # 60 lies after the refused 50 but still before the last accepted 100.
+    with pytest.raises(OutOfOrderError):
+        tracker.observe("s", 1, FP_B, 60)
+    with pytest.raises(OutOfOrderError):
+        tracker.observe("s", 1, FP_B, 99)
+    assert tracker.observe("s", 1, FP_B, 100).outcome is SeqOutcome.ACCEPTED
+    with pytest.raises(OutOfOrderError):
+        tracker.observe("s", 2, FP_C, 99)
+    assert tracker.last_seq("s") == 1
+
+
+@pytest.mark.requirement("S00-ASG-25", "S00-ASG-21")
+def test_the_ordering_time_is_tracked_per_stream() -> None:
+    tracker = SequenceTracker()
+    tracker.observe("late", 0, FP_A, T0 + 500)
+    # Another stream may carry earlier times; only a stream's own time may not decrease.
+    assert tracker.observe("early", 0, FP_A, T0).outcome is SeqOutcome.ACCEPTED
+    assert tracker.observe("early", 1, FP_B, T0 + 1).outcome is SeqOutcome.ACCEPTED
+    with pytest.raises(OutOfOrderError):
+        tracker.observe("late", 1, FP_B, T0 + 499)
+    with pytest.raises(OutOfOrderError):
+        tracker.observe("early", 2, FP_C, T0)
+    assert tracker.observe("late", 1, FP_B, T0 + 500).outcome is SeqOutcome.ACCEPTED
+
+
+@pytest.mark.requirement("S00-ASG-25", "S00-ASG-21")
+def test_a_duplicate_keeps_its_original_ordering_time() -> None:
+    # A re-sent record carries the time it always had, which is older than the newest accepted
+    # one.  It is an idempotent duplicate, not a decreasing ordering time.
+    tracker = SequenceTracker()
+    tracker.observe("s", 0, FP_A, 100)
+    tracker.observe("s", 1, FP_B, 200)
+    tracker.observe("s", 2, FP_C, 300)
+    assert tracker.observe("s", 0, FP_A, 100).outcome is SeqOutcome.DUPLICATE
+    assert tracker.observe("s", 1, FP_B, 200).outcome is SeqOutcome.DUPLICATE
+    with pytest.raises(SequenceConflictError):
+        tracker.observe("s", 1, FP_A, 200)
+    # Verifying duplicates did not move the bar in either direction.
+    with pytest.raises(OutOfOrderError):
+        tracker.observe("s", 3, FP_A, 299)
+    assert tracker.observe("s", 3, FP_A, 300).outcome is SeqOutcome.ACCEPTED
+
+
+@pytest.mark.requirement("S00-ASG-25", "S00-ASG-21")
+def test_arrivals_without_an_ordering_time_do_not_reset_the_check() -> None:
+    tracker = SequenceTracker()
+    assert tracker.observe("s", 0, FP_A).outcome is SeqOutcome.ACCEPTED  # the caller has no time yet
+    assert tracker.observe("s", 1, FP_B, 100).outcome is SeqOutcome.ACCEPTED
+    assert tracker.observe("s", 2, FP_C).outcome is SeqOutcome.ACCEPTED  # no time: nothing to compare
+    with pytest.raises(OutOfOrderError):
+        tracker.observe("s", 3, FP_A, 99)  # still compared with the last time that was given
+    assert tracker.last_seq("s") == 2
+    assert tracker.observe("s", 3, FP_A, 100).outcome is SeqOutcome.ACCEPTED
+
+
+@pytest.mark.requirement("S00-ASG-25", "S00-ASG-21", "G08-06")
+def test_a_decreasing_ordering_time_is_refused_also_after_a_tolerated_gap() -> None:
+    tracker = SequenceTracker(allow_gaps=True)
+    tracker.observe("tick/fixture/XAUUSD", 0, FP_A, T0)
+    with pytest.raises(OutOfOrderError):
+        tracker.observe("tick/fixture/XAUUSD", 5, FP_B, T0 - 1)
+    assert tracker.last_seq("tick/fixture/XAUUSD") == 0
+    result = tracker.observe("tick/fixture/XAUUSD", 5, FP_B, T0 + 1)
+    assert (result.outcome, result.missing) == (SeqOutcome.ACCEPTED_AFTER_GAP, 4)
+    with pytest.raises(OutOfOrderError):
+        tracker.observe("tick/fixture/XAUUSD", 9, FP_C, T0)
+    assert tracker.last_seq("tick/fixture/XAUUSD") == 5
+
+
+# =========================================================================== SequenceTracker: restore
+
+
+def _restored(*, last_seq: int = 41, **arguments: Any) -> SequenceTracker:
+    """SYNTHETIC FIXTURE: a tracker after a restart whose journal ends at *last_seq* of stream ``s``."""
+    tracker = SequenceTracker(**arguments)
+    tracker.restore("s", last_seq, {last_seq - 2: FP_A, last_seq - 1: FP_B, last_seq: FP_C})
+    return tracker
+
+
+@pytest.mark.requirement("S00-ASG-25")
+def test_restore_re_establishes_the_position_of_a_stream() -> None:
+    tracker = SequenceTracker()
+    assert tracker.last_seq("s") is None
+    tracker.restore("s", 41, {39: FP_A, 40: FP_B, 41: FP_C})
+    assert tracker.last_seq("s") == 41
+    assert tracker.last_seq("other") is None
+    # The stream continues where the journal ended, although a new stream would have to start at 0.
+    result = tracker.observe("s", 42, FP_A)
+    assert (result.outcome, result.missing) == (SeqOutcome.ACCEPTED, 0)
+    assert tracker.last_seq("s") == 42
+
+
+@pytest.mark.requirement("S00-ASG-25")
+def test_records_re_sent_after_a_restart_are_duplicates() -> None:
+    tracker = _restored()
+    for _ in range(2):
+        for seq, fingerprint in ((39, FP_A), (40, FP_B), (41, FP_C)):
+            result = tracker.observe("s", seq, fingerprint)
+            assert (result.outcome, result.missing) == (SeqOutcome.DUPLICATE, 0)
+            assert tracker.last_seq("s") == 41
+    assert tracker.observe("s", 42, FP_A).outcome is SeqOutcome.ACCEPTED
+
+
+@pytest.mark.requirement("S00-ASG-25", "G08-06")
+def test_a_re_sent_record_with_other_content_is_a_conflict_after_a_restart() -> None:
+    tracker = _restored()
+    for seq, original in ((39, FP_A), (40, FP_B), (41, FP_C)):
+        with pytest.raises(SequenceConflictError):
+            tracker.observe("s", seq, "f" * 64)
+        assert tracker.observe("s", seq, original).outcome is SeqOutcome.DUPLICATE
+    assert tracker.last_seq("s") == 41
+
+
+@pytest.mark.requirement("S00-ASG-25", "G08-06")
+def test_records_older_than_the_restored_fingerprints_are_out_of_order() -> None:
+    tracker = _restored()
+    for seq in (38, 20, 0):
+        for fingerprint in (FP_A, FP_B, FP_C):
+            with pytest.raises(OutOfOrderError):
+                tracker.observe("s", seq, fingerprint)
+    assert tracker.last_seq("s") == 41
+    assert tracker.observe("s", 41, FP_C).outcome is SeqOutcome.DUPLICATE
+
+
+@pytest.mark.requirement("S00-ASG-25", "G08-06")
+@pytest.mark.parametrize("recent", [None, {}])
+def test_without_restored_fingerprints_no_re_sent_record_can_be_verified(recent: Any) -> None:
+    tracker = SequenceTracker()
+    if recent is None:
+        tracker.restore("s", 41)
+    else:
+        tracker.restore("s", 41, recent)
+    assert tracker.last_seq("s") == 41
+    for seq in (41, 40, 0):
+        with pytest.raises(OutOfOrderError):
+            tracker.observe("s", seq, FP_A)
+    assert tracker.observe("s", 42, FP_A).outcome is SeqOutcome.ACCEPTED
+
+
+@pytest.mark.requirement("S00-ASG-25", "G08-06")
+def test_a_gap_after_a_restart_follows_the_gap_rule_of_the_tracker() -> None:
+    strict = _restored()
+    with pytest.raises(SequenceGapError) as caught:
+        strict.observe("s", 44, FP_A)
+    assert caught.value.details["missing"] == 2
+    assert strict.last_seq("s") == 41
+    assert strict.observe("s", 42, FP_A).outcome is SeqOutcome.ACCEPTED
+
+    tolerant = _restored(allow_gaps=True)
+    result = tolerant.observe("s", 44, FP_A)
+    assert (result.outcome, result.missing) == (SeqOutcome.ACCEPTED_AFTER_GAP, 2)
+    assert tolerant.last_seq("s") == 44
+
+
+@pytest.mark.requirement("S00-ASG-25")
+def test_restore_keeps_only_the_most_recent_window_fingerprints_and_the_window_keeps_sliding() -> None:
+    tracker = SequenceTracker(window=2)
+    tracker.restore("s", 13, {10: FP_A, 11: FP_B, 12: FP_C, 13: FP_A})
+    for seq, fingerprint in ((10, FP_A), (11, FP_B)):
+        with pytest.raises(OutOfOrderError):
+            tracker.observe("s", seq, fingerprint)
+    assert tracker.observe("s", 12, FP_C).outcome is SeqOutcome.DUPLICATE
+    assert tracker.observe("s", 13, FP_A).outcome is SeqOutcome.DUPLICATE
+    # The next accepted arrival pushes the oldest restored fingerprint out.
+    assert tracker.observe("s", 14, FP_B).outcome is SeqOutcome.ACCEPTED
+    with pytest.raises(OutOfOrderError):
+        tracker.observe("s", 12, FP_C)
+    assert tracker.observe("s", 13, FP_A).outcome is SeqOutcome.DUPLICATE
+    assert tracker.observe("s", 14, FP_B).outcome is SeqOutcome.DUPLICATE
+
+
+@pytest.mark.requirement("S00-ASG-25")
+def test_restored_fingerprints_need_not_be_contiguous_or_include_the_last_position() -> None:
+    tracker = SequenceTracker(allow_gaps=True)
+    tracker.restore("tick/fixture/XAUUSD", 20, {3: FP_A, 17: FP_B})  # a tick stream with gaps
+    assert tracker.observe("tick/fixture/XAUUSD", 3, FP_A).outcome is SeqOutcome.DUPLICATE
+    assert tracker.observe("tick/fixture/XAUUSD", 17, FP_B).outcome is SeqOutcome.DUPLICATE
+    for seq in (20, 18, 4):
+        with pytest.raises(OutOfOrderError):
+            tracker.observe("tick/fixture/XAUUSD", seq, FP_C)
+    assert tracker.observe("tick/fixture/XAUUSD", 21, FP_C).outcome is SeqOutcome.ACCEPTED
+
+
+@pytest.mark.requirement("S00-ASG-25")
+def test_restore_applies_to_one_stream_only() -> None:
+    tracker = SequenceTracker()
+    tracker.restore("order_event/execution.sim", 9, {9: FP_A})
+    # A stream that was not restored is new and starts at first_seq.
+    with pytest.raises(SequenceGapError):
+        tracker.observe("risk_decision/risk.gate", 10, FP_A)
+    assert tracker.observe("risk_decision/risk.gate", 0, FP_A).outcome is SeqOutcome.ACCEPTED
+    tracker.restore("trade_plan/decision", 4, {4: FP_B})
+    assert tracker.last_seq("order_event/execution.sim") == 9
+    assert tracker.last_seq("trade_plan/decision") == 4
+    assert tracker.last_seq("risk_decision/risk.gate") == 0
+    assert tracker.observe("trade_plan/decision", 5, FP_C).outcome is SeqOutcome.ACCEPTED
+    assert tracker.observe("order_event/execution.sim", 9, FP_A).outcome is SeqOutcome.DUPLICATE
+
+
+@pytest.mark.requirement("S00-ASG-25")
+def test_restore_copies_the_fingerprints_it_is_given() -> None:
+    recent = {40: FP_B, 41: FP_C}
+    tracker = SequenceTracker()
+    tracker.restore("s", 41, recent)
+    assert recent == {40: FP_B, 41: FP_C}  # the caller's dictionary is not modified ...
+    recent[41] = FP_A  # ... and changing it afterwards does not change what was journaled
+    recent[42] = FP_A
+    del recent[40]
+    assert tracker.last_seq("s") == 41
+    assert tracker.observe("s", 41, FP_C).outcome is SeqOutcome.DUPLICATE
+    assert tracker.observe("s", 40, FP_B).outcome is SeqOutcome.DUPLICATE
+    assert tracker.observe("s", 42, FP_B).outcome is SeqOutcome.ACCEPTED
+
+
+@pytest.mark.requirement("S00-ASG-25", "G08-06")
+def test_a_stream_that_is_already_tracked_cannot_be_restored() -> None:
+    # Restoring over a live position would let a caller rewind a stream and replace accepted content.
+    observed = SequenceTracker()
+    observed.observe("s", 0, FP_A)
+    observed.observe("s", 1, FP_B)
+    restored = _restored()
+    for tracker, last, known in ((observed, 1, FP_B), (restored, 41, FP_C)):
+        for arguments in ((0, {0: FP_C}), (last, {last: "f" * 64}), (last + 5, None)):
+            with pytest.raises(SequenceConflictError) as caught:
+                tracker.restore("s", *arguments)
+            assert caught.value.code == "GIE.SEQ.CONFLICT"
+        assert tracker.last_seq("s") == last
+        assert tracker.observe("s", last, known).outcome is SeqOutcome.DUPLICATE
+        assert tracker.observe("s", last + 1, FP_A).outcome is SeqOutcome.ACCEPTED
+
+
+@pytest.mark.requirement("S00-ASG-25", "G08-06")
+@pytest.mark.parametrize(
+    ("stream", "last_seq", "recent"),
+    [
+        ("", 5, {5: FP_A}),
+        (None, 5, {5: FP_A}),
+        (7, 5, {5: FP_A}),
+        ("s", -1, None),
+        ("s", True, None),
+        ("s", 5.0, None),
+        ("s", "5", None),
+        ("s", None, None),
+        ("s", 5, {6: FP_A}),  # a fingerprint beyond the last journaled position
+        ("s", 5, {4: FP_A, 5: FP_B, 10**9: FP_C}),
+        ("s", 5, {-1: FP_A}),
+        ("s", 5, {True: FP_A}),
+        ("s", 5, {4.0: FP_A}),
+        ("s", 5, {"4": FP_A}),
+        ("s", 5, {4: ""}),
+        ("s", 5, {4: None}),
+        ("s", 5, {4: b"a" * 64}),
+        ("s", 5, {3: FP_A, 4: 17}),
+    ],
+)
+def test_restore_rejects_invalid_arguments_without_changing_state(
+    stream: Any, last_seq: Any, recent: Any
+) -> None:
+    tracker = SequenceTracker()
+    with pytest.raises(ContractValidationError) as caught:
+        tracker.restore(stream, last_seq, recent)
+    assert caught.value.code == "GIE.CONTRACT.INVALID"
+    # Nothing was established: the stream is still unknown and can be restored correctly.
+    assert tracker.last_seq("s") is None
+    with pytest.raises(SequenceGapError):
+        tracker.observe("s", 6, FP_A)
+    tracker.restore("s", 5, {5: FP_B})
+    assert tracker.observe("s", 5, FP_B).outcome is SeqOutcome.DUPLICATE
+    assert tracker.observe("s", 6, FP_A).outcome is SeqOutcome.ACCEPTED
+
+
+@pytest.mark.requirement("S00-ASG-25", "G08-06")
+def test_restore_rejects_fingerprint_keys_of_mixed_types_with_a_contract_error() -> None:
+    # SHARED_CONTRACTS.md section 5: invalid input is rejected with ContractValidationError; all
+    # errors derive from GieError.  A ``recent`` mapping with one valid and one invalid key is
+    # invalid input like any other.
+    tracker = SequenceTracker()
+    with pytest.raises(ContractValidationError):
+        tracker.restore("s", 5, {4: FP_A, "5": FP_B})
+    assert tracker.last_seq("s") is None
+
+
 # =========================================================================== SequenceTracker: state
 
 
@@ -938,47 +1361,60 @@ class _ModelTracker:
         self.first_seq = first_seq
         self.window = window
         self.last: dict[str, int] = {}
+        self.last_time: dict[str, int] = {}
         self.kept: dict[str, list[tuple[int, str]]] = {}
 
-    def _accept(self, stream: str, seq: int, fingerprint: str, outcome: str, missing: int) -> tuple[Any, ...]:
+    def _accept(self, stream: str, seq: int, fingerprint: str, time_ns: int | None) -> None:
         self.last[stream] = seq
+        if time_ns is not None:
+            self.last_time[stream] = time_ns
         arrivals = self.kept.setdefault(stream, [])
         arrivals.append((seq, fingerprint))
         del arrivals[: -self.window]
-        return ("result", outcome, missing)
 
-    def expect(self, stream: str, seq: int, fingerprint: str) -> tuple[Any, ...]:
+    def expect(self, stream: str, seq: int, fingerprint: str, time_ns: int | None) -> tuple[Any, ...]:
         last = self.last.get(stream)
+        if last is not None and seq <= last:  # an old position: its time is the time it always had
+            kept = dict(self.kept[stream])
+            if seq not in kept:
+                return ("error", OutOfOrderError)
+            if kept[seq] != fingerprint:
+                return ("error", SequenceConflictError)
+            return ("result", "DUPLICATE", 0)
+        goes_back = time_ns is not None and stream in self.last_time and time_ns < self.last_time[stream]
         if last is None:
             if self.first_seq is not None and seq != self.first_seq:
                 return ("error", SequenceError)
-            return self._accept(stream, seq, fingerprint, "ACCEPTED", 0)
+            self._accept(stream, seq, fingerprint, time_ns)
+            return ("result", "ACCEPTED", 0)
         if seq == last + 1:
-            return self._accept(stream, seq, fingerprint, "ACCEPTED", 0)
-        if seq > last + 1:
-            missing = seq - last - 1
-            if not self.allow_gaps:
-                return ("error", SequenceGapError)
-            return self._accept(stream, seq, fingerprint, "ACCEPTED_AFTER_GAP", missing)
-        kept = dict(self.kept[stream])
-        if seq not in kept:
+            if goes_back:
+                return ("error", OutOfOrderError)
+            self._accept(stream, seq, fingerprint, time_ns)
+            return ("result", "ACCEPTED", 0)
+        missing = seq - last - 1
+        if not self.allow_gaps:
+            # Two rules are violated when the time goes back as well; either refusal is correct.
+            return ("error", (SequenceGapError, OutOfOrderError) if goes_back else SequenceGapError)
+        if goes_back:
             return ("error", OutOfOrderError)
-        if kept[seq] != fingerprint:
-            return ("error", SequenceConflictError)
-        return ("result", "DUPLICATE", 0)
+        self._accept(stream, seq, fingerprint, time_ns)
+        return ("result", "ACCEPTED_AFTER_GAP", missing)
 
 
-# One arrival: (stream, how the sequence number is chosen, amount, fingerprint).
+# One arrival: (stream, how the sequence number is chosen, amount, fingerprint, ordering time).
 #   "next"  the position after the last accepted one (the required start for a new stream)
 #   "back"  amount positions before the last accepted one (duplicates, conflicts, late arrivals)
 #   "ahead" amount + 2 positions after the last accepted one (gaps)
 #   "abs"   the sequence number amount itself
+# The ordering time is ``None`` (the caller has none) or a small instant, so that it often goes back.
 _ARRIVALS = st.lists(
     st.tuples(
         st.sampled_from(["a", "b"]),
         st.sampled_from(["next", "next", "next", "back", "back", "ahead", "abs"]),
         st.integers(0, 6),
         st.sampled_from(["x", "y"]),
+        st.sampled_from([None, None, 0, 1, 2, 2, 3, 4]),
     ),
     max_size=60,
 )
@@ -997,23 +1433,28 @@ _ARRIVALS = st.lists(
     first_seq=0,
     window=2,
     arrivals=[
-        ("a", "abs", 3, "x"),  # refused: stream must start at 0
-        ("a", "next", 0, "x"),  # 0 accepted
-        ("a", "ahead", 1, "y"),  # 3 accepted after a gap of 2
-        ("a", "back", 0, "y"),  # 3 again: duplicate
-        ("a", "back", 0, "x"),  # 3 with other content: conflict
-        ("a", "back", 2, "x"),  # 1 was skipped: out of order
-        ("a", "next", 0, "x"),  # 4 accepted; 0 leaves the window
-        ("a", "abs", 0, "x"),  # 0 no longer kept: out of order
-        ("b", "next", 0, "y"),  # other stream starts at 0
+        ("a", "abs", 3, "x", 9),  # refused: stream must start at 0 (and its time is not remembered)
+        ("a", "next", 0, "x", 2),  # 0 accepted at time 2
+        ("a", "ahead", 1, "y", 1),  # 3 after a gap, but its time goes back: out of order
+        ("a", "ahead", 1, "y", 2),  # 3 accepted after a gap of 2
+        ("a", "back", 0, "y", 0),  # 3 again: duplicate, whatever time it carries
+        ("a", "back", 0, "x", None),  # 3 with other content: conflict
+        ("a", "back", 2, "x", None),  # 1 was skipped: out of order
+        ("a", "next", 0, "x", None),  # 4 accepted without a time; 0 leaves the window
+        ("a", "next", 0, "y", 1),  # 5 at time 1: still compared with time 2 - out of order
+        ("a", "abs", 0, "x", 4),  # 0 no longer kept: out of order
+        ("b", "next", 0, "y", 0),  # other stream starts at 0, at an earlier time
     ],
 )
 def test_sequence_tracker_follows_the_documented_table_for_any_arrival_sequence(
-    allow_gaps: bool, first_seq: int | None, window: int, arrivals: list[tuple[str, str, int, str]]
+    allow_gaps: bool,
+    first_seq: int | None,
+    window: int,
+    arrivals: list[tuple[str, str, int, str, int | None]],
 ) -> None:
     tracker = SequenceTracker(allow_gaps=allow_gaps, first_seq=first_seq, window=window)
     model = _ModelTracker(allow_gaps=allow_gaps, first_seq=first_seq, window=window)
-    for stream, choice, amount, fingerprint in arrivals:
+    for stream, choice, amount, fingerprint, time_ns in arrivals:
         last = model.last.get(stream)
         if choice == "abs":
             seq = amount
@@ -1025,12 +1466,12 @@ def test_sequence_tracker_follows_the_documented_table_for_any_arrival_sequence(
             seq = max(last - amount, 0)
         else:
             seq = last + 2 + amount
-        expected = model.expect(stream, seq, fingerprint)
+        expected = model.expect(stream, seq, fingerprint, time_ns)
         if expected[0] == "error":
             with pytest.raises(expected[1]):
-                tracker.observe(stream, seq, fingerprint)
+                tracker.observe(stream, seq, fingerprint, time_ns)
         else:
-            result = tracker.observe(stream, seq, fingerprint)
+            result = tracker.observe(stream, seq, fingerprint, time_ns)
             assert (result.outcome.value, result.missing) == (expected[1], expected[2])
         for name in ("a", "b"):
             assert tracker.last_seq(name) == model.last.get(name)

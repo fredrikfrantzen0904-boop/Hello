@@ -27,6 +27,7 @@ are injected constants.
 
 from __future__ import annotations
 
+import inspect
 from collections.abc import Callable
 from decimal import Decimal
 from typing import Any
@@ -522,7 +523,11 @@ def test_tolerance_beyond_one_second_is_rejected(tolerance: int) -> None:
             now_ns=NOW, reference_ns=NOW + SECOND + 1, max_age_ns=8, future_tolerance_ns=tolerance
         ),
         lambda: require_fresh(
-            now_ns=NOW, reference_ns=NOW + SECOND + 1, max_age_ns=8, what="tick", future_tolerance_ns=tolerance
+            now_ns=NOW,
+            reference_ns=NOW + SECOND + 1,
+            max_age_ns=8,
+            what="tick",
+            future_tolerance_ns=tolerance,
         ),
     ]
     for call in calls:
@@ -653,6 +658,7 @@ def _paper(now_ns: int = NOW) -> SystemClock:
 
 _CLOCK_FACTORIES: dict[str, Callable[[int], Clock]] = {"replay": _replay, "paper": _paper}
 _CLOCKS = pytest.mark.parametrize("make_clock", list(_CLOCK_FACTORIES.values()), ids=list(_CLOCK_FACTORIES))
+_MODES = pytest.mark.parametrize("mode", [ClockMode.REPLAY, ClockMode.SYSTEM], ids=["replay", "paper"])
 
 
 @pytest.mark.requirement("S00-ASG-23")
@@ -899,7 +905,9 @@ def test_a_timer_callback_sees_freshness_at_its_due_instant() -> None:
     clock = ReplayClock(NOW)
     seen: list[tuple[int, bool]] = []
     for due in (valid_until - 1, valid_until):
-        clock.call_at(due, lambda due_ns: seen.append((due_ns, is_expired_now(clock, valid_until_ns=valid_until))))
+        clock.call_at(
+            due, lambda due_ns: seen.append((due_ns, is_expired_now(clock, valid_until_ns=valid_until)))
+        )
     clock.advance_to(NOW + 10**9)
     assert seen == [(valid_until - 1, False), (valid_until, True)]
 
@@ -913,33 +921,45 @@ def test_paper_clock_helpers_use_the_injected_time_source() -> None:
     assert verdicts == [True, True, False, False]
 
 
-class _ModeAsPlainText:
-    """Synthetic clock double whose ``mode`` is the wire text ``"REPLAY"`` instead of the enum member.
-
-    ``ClockMode`` is a ``str`` enum, so this value compares equal to ``ClockMode.REPLAY``.
-    """
+class _ClockDouble:
+    """Synthetic clock double with a freely chosen ``mode`` and a constant reading."""
 
     regressions_observed = 0
 
-    def __init__(self, now_ns: int) -> None:
+    def __init__(self, now_ns: Any, mode: Any = ClockMode.SYSTEM) -> None:
         self._now_ns = now_ns
-        self.mode = "REPLAY"
+        self.mode = mode
 
-    def now_ns(self) -> int:
+    def now_ns(self) -> Any:
         return self._now_ns
 
     def monotonic_ns(self) -> int:
         return 0
 
 
+@pytest.mark.requirement("S00-ASG-23", "G03-12")
+def test_the_clock_double_behaves_like_a_paper_clock_when_it_says_so() -> None:
+    """Positive control for the tests below that use the double."""
+    clock: Any = _ClockDouble(NOW, ClockMode.SYSTEM)
+    assert isinstance(clock, Clock)
+    assert is_fresh_now(clock, reference_ns=NOW + 5, max_age_ns=10, future_tolerance_ns=5) is True
+    assert require_fresh_now(clock, reference_ns=NOW - 3, max_age_ns=10, what="tick") == 3
+    assert is_expired_now(clock, valid_until_ns=NOW + 1) is False
+    assert require_not_expired_now(clock, valid_until_ns=NOW + 1, what="plan") == 1
+    replay: Any = _ClockDouble(NOW, ClockMode.REPLAY)
+    with pytest.raises(ContractValidationError):
+        is_fresh_now(replay, reference_ns=NOW + 5, max_age_ns=10, future_tolerance_ns=5)
+
+
 @pytest.mark.requirement("S00-ASG-23", "G03-12", "S00-ASG-24")
 def test_a_clock_that_reports_replay_as_text_gets_no_future_tolerance() -> None:
     """Fail closed: the tolerance "exists for paper mode only".
 
-    A clock whose mode equals ``ClockMode.REPLAY`` is a replay clock; granting it a tolerance lets
-    data from the future through as "fresh, age 0", which is exactly the look-ahead the rule forbids.
+    ``ClockMode`` is a ``str`` enum, so a clock whose mode is the wire text ``"REPLAY"`` compares
+    equal to ``ClockMode.REPLAY``: it is a replay clock.  Granting it a tolerance lets data from the
+    future through as "fresh, age 0", which is exactly the look-ahead the rule forbids.
     """
-    clock: Any = _ModeAsPlainText(NOW)
+    clock: Any = _ClockDouble(NOW, "REPLAY")
     assert clock.mode == ClockMode.REPLAY
     assert isinstance(clock, Clock)
     assert is_fresh_now(clock, reference_ns=NOW - 1, max_age_ns=10) is True  # usable without a tolerance
@@ -947,6 +967,131 @@ def test_a_clock_that_reports_replay_as_text_gets_no_future_tolerance() -> None:
         is_fresh_now(clock, reference_ns=NOW + 5, max_age_ns=10, future_tolerance_ns=5)
     with pytest.raises(ContractValidationError):
         require_fresh_now(clock, reference_ns=NOW + 5, max_age_ns=10, what="tick", future_tolerance_ns=5)
+
+
+@pytest.mark.requirement("S00-ASG-23", "G03-12", "S00-ASG-24")
+@pytest.mark.parametrize("mode", ["PAPER", "LIVE", "", None], ids=repr)
+def test_a_clock_of_unknown_mode_gets_no_future_tolerance(mode: Any) -> None:
+    """The tolerance exists for paper mode only, and unknown vocabulary is refused (section 5).
+
+    A clock that is not known to be the paper (``SYSTEM``) clock must not be granted a tolerance
+    just because it is not the ``REPLAY`` member either.
+    """
+    clock: Any = _ClockDouble(NOW, mode)
+    assert clock.mode != ClockMode.SYSTEM
+    with pytest.raises(GieError):
+        is_fresh_now(clock, reference_ns=NOW + 5, max_age_ns=10, future_tolerance_ns=5)
+    with pytest.raises(GieError):
+        require_fresh_now(clock, reference_ns=NOW + 5, max_age_ns=10, what="tick", future_tolerance_ns=5)
+
+
+@pytest.mark.requirement("S00-ASG-23", "S00-ASG-20", "S00-ASG-24")
+@_MODES
+@pytest.mark.parametrize(
+    "reading",
+    [-1, -NOW, 2**63, 2**64, 10**30, True, False, 1.5, float(NOW), float("nan"), "0", None, Decimal(NOW)],
+    ids=repr,
+)
+def test_a_clock_reading_that_is_not_an_instant_is_refused(mode: ClockMode, reading: Any) -> None:
+    """An instant is an ``int`` in ``0 .. 2**63-1``; a broken clock yields no verdict, in any mode."""
+    clock: Any = _ClockDouble(reading, mode)
+    calls: list[Callable[[], Any]] = [
+        lambda: is_fresh_now(clock, reference_ns=0, max_age_ns=10),
+        lambda: require_fresh_now(clock, reference_ns=0, max_age_ns=10, what="tick"),
+        lambda: is_expired_now(clock, valid_until_ns=NOW),
+        lambda: require_not_expired_now(clock, valid_until_ns=NOW, what="plan"),
+    ]
+    for call in calls:
+        with pytest.raises(ContractValidationError) as excinfo:
+            call()
+        error = excinfo.value
+        assert error.code == "GIE.CONTRACT.INVALID"
+        assert not isinstance(error, TimeError)  # neither "stale" nor "future": no verdict at all
+        assert "now_ns" in error.message
+        assert strict_loads(canonical_dumps(error.to_dict()))["code"] == "GIE.CONTRACT.INVALID"
+
+
+@pytest.mark.requirement("S00-ASG-23", "G03-12")
+def test_freshness_keeps_failing_closed_when_the_paper_clock_is_stepped_back() -> None:
+    """Section 3.2: after a backward step of the system clock time continues at the monotonic pace.
+
+    Data must therefore neither turn into "future data" nor stay fresh for ever while the wall clock
+    is behind: 300 ms after the reference a 250 ms limit is exceeded, whatever the wall clock says.
+    """
+    wall = iter([NOW, NOW - 10 * SECOND, NOW - 10 * SECOND, NOW - 10 * SECOND])
+    monotonic = iter([0, 100 * MS, 300 * MS, 600 * MS])
+    clock = SystemClock(wall_source=lambda: next(wall), monotonic_source=lambda: next(monotonic))
+    limit = 250 * MS
+    assert require_fresh_now(clock, reference_ns=NOW, max_age_ns=limit, what="tick") == 0
+    # the operating system steps the wall clock back by ten seconds
+    assert require_fresh_now(clock, reference_ns=NOW, max_age_ns=limit, what="tick") == 100 * MS
+    assert is_fresh_now(clock, reference_ns=NOW, max_age_ns=limit) is False  # 300 ms: stale
+    with pytest.raises(StaleDataError) as excinfo:
+        require_fresh_now(clock, reference_ns=NOW, max_age_ns=limit, what="tick")
+    assert excinfo.value.details["age_ns"] == 600 * MS
+    assert clock.regressions_observed == 1
+
+
+@pytest.mark.requirement("S00-ASG-23", "G03-12")
+def test_expiry_keeps_failing_closed_when_the_paper_clock_is_stepped_back() -> None:
+    wall = iter([NOW, NOW - 10 * SECOND, NOW - 10 * SECOND])
+    monotonic = iter([0, 4, 5])
+    clock = SystemClock(wall_source=lambda: next(wall), monotonic_source=lambda: next(monotonic))
+    valid_until = NOW + 5
+    assert require_not_expired_now(clock, valid_until_ns=valid_until, what="plan") == 5
+    assert require_not_expired_now(clock, valid_until_ns=valid_until, what="plan") == 1
+    assert is_expired_now(clock, valid_until_ns=valid_until) is True  # at the expiry instant: expired
+
+
+# =========================================================================== call signatures
+_PLAIN_SIGNATURES: dict[Callable[..., Any], set[str]] = {
+    age_ns: {"now_ns", "reference_ns", "future_tolerance_ns"},
+    is_fresh: {"now_ns", "reference_ns", "max_age_ns", "future_tolerance_ns"},
+    require_fresh: {"now_ns", "reference_ns", "max_age_ns", "what", "future_tolerance_ns"},
+    is_expired: {"now_ns", "valid_until_ns"},
+    require_not_expired: {"now_ns", "valid_until_ns", "what"},
+}
+_CLOCK_SIGNATURES: dict[Callable[..., Any], set[str]] = {
+    is_fresh_now: {"reference_ns", "max_age_ns", "future_tolerance_ns"},
+    require_fresh_now: {"reference_ns", "max_age_ns", "what", "future_tolerance_ns"},
+    is_expired_now: {"valid_until_ns"},
+    require_not_expired_now: {"valid_until_ns", "what"},
+}
+
+
+@pytest.mark.requirement("S00-ASG-23")
+def test_instants_and_limits_can_only_be_passed_by_name() -> None:
+    """``now`` and ``reference`` are both instants: swapped positional arguments would be a silent error."""
+    for function, names in _PLAIN_SIGNATURES.items():
+        parameters = inspect.signature(function).parameters
+        assert set(parameters) == names, function.__name__
+        assert all(p.kind is inspect.Parameter.KEYWORD_ONLY for p in parameters.values()), function.__name__
+    for function, names in _CLOCK_SIGNATURES.items():
+        parameters = dict(inspect.signature(function).parameters)
+        clock_parameter = parameters.pop("clock")
+        assert clock_parameter.kind is inspect.Parameter.POSITIONAL_OR_KEYWORD
+        assert next(iter(inspect.signature(function).parameters)) == "clock"
+        assert set(parameters) == names, function.__name__
+        assert all(p.kind is inspect.Parameter.KEYWORD_ONLY for p in parameters.values()), function.__name__
+    with pytest.raises(TypeError):
+        age_ns(NOW, NOW - 1)  # type: ignore[misc]
+    with pytest.raises(TypeError):
+        is_expired(NOW, NOW + 1)  # type: ignore[misc]
+    with pytest.raises(TypeError):
+        is_fresh_now(ReplayClock(NOW), NOW - 1, 10)  # type: ignore[misc]
+
+
+@pytest.mark.requirement("S00-ASG-23", "G03-12")
+def test_the_future_tolerance_is_never_on_by_default_and_expiry_has_none() -> None:
+    for function in (age_ns, is_fresh, require_fresh, is_fresh_now, require_fresh_now):
+        assert inspect.signature(function).parameters["future_tolerance_ns"].default == 0
+    # expiry is decided on the clock reading alone: there is no tolerance to pass
+    for function in (is_expired, require_not_expired, is_expired_now, require_not_expired_now):
+        assert "future_tolerance_ns" not in inspect.signature(function).parameters
+    with pytest.raises(TypeError):
+        is_expired_now(ReplayClock(NOW), valid_until_ns=NOW + 1, future_tolerance_ns=1)  # type: ignore[call-arg]
+    with pytest.raises(TypeError):
+        is_expired(now_ns=NOW, valid_until_ns=NOW + 1, future_tolerance_ns=1)  # type: ignore[call-arg]
 
 
 @pytest.mark.requirement("S00-ASG-23", "G03-12")

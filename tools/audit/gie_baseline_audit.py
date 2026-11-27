@@ -30,6 +30,9 @@ Safety model (every point is enforced in code, not only promised):
   ``--hash-sensitive`` is given.  The host name is reported only as a SHA-256 hash.
 * No ``git`` process is started (git may refresh its index); ``.git/HEAD``, refs and
   ``packed-refs`` are read as plain files.
+* The tool refuses to run when it, its Python interpreter or any loaded module is located inside
+  ``--root`` (running the audited system's own virtual environment would execute its code).
+* Cloud placeholder files (OneDrive "online-only") are listed but not read, so nothing is downloaded.
 
 Sub-commands::
 
@@ -1723,7 +1726,7 @@ class _Collector:
         if read is None:
             return
         if plan.rules:
-            self._scan(entry, lowered, read, plan)
+            self._scan(entry, read, plan)
         if plan.dependency_kind is not None:
             self._add_dependencies(entry, plan.dependency_kind, read)
         if plan.version_kind is not None:
@@ -1820,7 +1823,7 @@ class _Collector:
         item["truncated"] = entry.st.st_size > _MANIFEST_PARSE_BYTES
         self.manifests.append(item)
 
-    def _scan(self, entry: _FileEntry, lowered: str, read: _ReadResult, plan: _Plan) -> None:
+    def _scan(self, entry: _FileEntry, read: _ReadResult, plan: _Plan) -> None:
         text = _decode_text(read.head[: plan.scan_limit])
         if text is None:
             self.scan_binary.append(entry.rel)
@@ -2776,16 +2779,24 @@ def _json_bytes(document: Any) -> bytes:
 
 
 def _refuse_if_tool_inside(root_real: str) -> None:
-    """Nothing of this tool (or of the modules it loaded) may live inside the audited tree."""
-    for name, module in list(sys.modules.items()):
-        location = getattr(module, "__file__", None)
-        if isinstance(location, str) and _is_within(_real(location), root_real):
+    """Nothing of this tool, of its interpreter or of the modules it loaded may live inside the audited tree.
+
+    Otherwise code of the audited tree would already have been executed (and Python may have
+    written ``__pycache__`` files there) before the tool could prevent it.
+    """
+    advice = "; use a copy of the tool and a Python installation outside the audited tree"
+    for what, location in (("interpreter", sys.executable), ("environment", sys.prefix)):
+        if location and _is_within(_real(location), root_real):
             raise AuditRefused(
-                "Python module '" + name + "' was loaded from inside --root; copy the audit tool outside "
-                "the audited tree and run it from there"
+                "the Python " + what + " running this tool is inside --root (for example the virtual "
+                "environment of the audited system)" + advice
             )
+    for name, module in list(sys.modules.items()):
+        origin = getattr(module, "__file__", None)
+        if isinstance(origin, str) and _is_within(_real(origin), root_real):
+            raise AuditRefused("Python module '" + name + "' was loaded from inside --root" + advice)
     if _is_within(_real(__file__), root_real):
-        raise AuditRefused("the audit tool must not be located inside --root")
+        raise AuditRefused("the audit tool must not be located inside --root" + advice)
 
 
 def _check_separate(root_real: str, target_real: str, what: str) -> None:
